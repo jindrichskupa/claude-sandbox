@@ -31,6 +31,7 @@ export function toScenarioDef(content: ScenarioContent): ScenarioDef {
     tariffPerMwh: content.tariffPerMwh,
     heatTariffPerMwh: content.heatTariffPerMwh,
     carbonPricePerTonne: content.carbonPricePerTonne,
+    initialRegimeId: content.initialRegimeId,
     objectives: content.objectives,
     feedInTariffs: content.feedInTariffs ?? {},
   }
@@ -137,6 +138,26 @@ export function buildWorld(content: ScenarioContent): World {
     // Start on the ageing curve rather than pristine — these units have a history.
     plant.conditionPct = expectedCondition(plant, 0)
     world.addPlant(plant)
+  }
+
+  // Support the inherited fleet already enjoys. Written as contracts rather than as a
+  // per-technology setting, so a later government can tear them up like any other — which is
+  // the whole point of modelling them as promises to individual machines.
+  let contractSerial = 0
+  for (const spec of content.plants) {
+    const price = content.feedInTariffs?.[spec.typeId]
+    if (!price) continue
+    const commissionedTick = -Math.round(spec.ageYears * TICKS_PER_YEAR)
+    world.state.contracts.push({
+      id: `c_inherited_${++contractSerial}`,
+      plantId: spec.id,
+      typeId: spec.typeId,
+      pricePerMwh: price,
+      grantedTick: commissionedTick,
+      startsTick: commissionedTick,
+      expiresTick: commissionedTick + Math.round(20 * TICKS_PER_YEAR),
+      grantedByRegimeId: content.initialRegimeId,
+    })
   }
 
   // An inherited utility arrives with a trading history, and its bank knows it. Without

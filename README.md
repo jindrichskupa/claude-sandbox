@@ -37,8 +37,23 @@ with no network at all. All the artwork is generated at runtime, so there is not
 carry. `scripts/smokeSingle.mjs` opens it with every outbound request blocked and fails if
 the document tries to fetch anything.
 
-## What exists today (milestones 1-5)
+## What exists today (milestones 1-6)
 
+- **Politics you provoke rather than receive.** Six governments spanning what governments
+  actually do — market liberalisation, a renewables push, clean-and-firm, energy security,
+  consumer prices first, fiscal consolidation — each with its own carbon price, support offers,
+  taxes, permitting speed and bans. Which one forms a government follows the salience of four
+  things the player is responsible for: what electricity cost, whether the lights stayed on,
+  what was emitted, and how much of the fuel had to be imported. No regime wins for being right.
+- **Support that can be withdrawn.** A feed-in tariff is a promise made to one machine on one
+  date for a fixed term, granted at the investment decision and running from the day the plant
+  enters service — so a player commits capital under one government and the station arrives
+  under another. Three of the six governments do not honour their predecessors' contracts, for
+  three entirely recognisable reasons. What they pay for it is the cost of capital: a country
+  that has torn up one contract borrows more expensively for everything afterwards.
+- **Fuel prices are political, per fuel.** Each fuel has its own index, mean-reverting with a
+  volatility taken from its supply risk, so a shock moves imported pipeline gas and mine-mouth
+  lignite by very different amounts — and a government that invests in diversification damps it.
 - **District heating, and cogeneration that means it.** Heat is a second commodity with its
   own network, solved *before* electricity. Three things make it a different problem rather
   than the same one in different units. A buried main loses heat through its insulation
@@ -131,6 +146,13 @@ things enforce that rather than merely promising it:
 4. `tests/events.test.ts` checks the same guarantee for adversity: every severe event has a
    response that actually reduces it, every event leaves accepting the consequences available
    and free, and nothing that is not physics arrives without warning.
+5. `tests/policy.test.ts` checks it for politics, which is where a thumb on the scale would be
+   easiest to apply and hardest to see. A regime's stance toward a technology is *computed* from
+   the levers it pulls rather than declared, so it cannot be mislabelled into looking even-handed;
+   every technology must have a government that favours it and one that does not; the best case
+   politics can offer clean and emitting plant must be comparable; and every regime must be
+   electable under some outcome the player could produce, because a government that can never
+   form is a table entry pretending to be a possibility.
 
 Policy bias exists in the game only as a modelled external force the player navigates, never
 as a silent simulation bonus.
@@ -151,6 +173,7 @@ src/
     dispatch/   min-cost flow solver, hourly dispatch, forecast, storage policy
     build/      construction, refurbishment, retirement, siting rules
     heat/       district heating, cogeneration coupling, heat accumulators
+    policy/     regimes, elections, support contracts, fuel geopolitics
     events/     the event director: risk, forewarning, severity budget, outages
     weather/    seeded weather and its parameter effects
     assets/     lifecycle and ageing
@@ -210,17 +233,24 @@ models and what it actually models:
 - **Cogeneration heat is priced against last hour's electricity price.** Using this hour's
   would be circular, and the approximation is good because the price moves slowly — but it
   does mean the heat merit order is always one hour behind a sudden price move.
-- **The test suite takes about three minutes.** Almost all of it is the multi-year scenario
-  tests stepping tens of thousands of hours at roughly 0.75 ms each. The simulation itself has
-  sixty times the headroom it needs at the fastest game speed, so this is a CI cost rather
-  than a gameplay one; warm-starting the loss iteration from the previous hour would likely
-  halve it, and belongs in its own change where it can be measured properly.
+- **Corporation tax has no loss carry-forward.** A real utility offsets a bad year against a
+  good one, so the model overstates the tax burden of a volatile strategy relative to a steady
+  one.
+- **The regulated tariff is reset against the market once a year.** That is enough for a carbon
+  price to be passed through rather than being a pure loss, but a real regulator's review is
+  slower, lumpier and negotiated, and a player cannot see the reset coming.
+- **The test suite takes about five minutes.** Almost all of it is the multi-year scenario tests
+  stepping tens of thousands of hours at roughly 0.8 ms each. The simulation has sixty times the
+  headroom it needs at the fastest game speed, so this is a CI cost rather than a gameplay one.
+  Warm-starting the loss iteration from the previous hour and loosening its convergence tolerance
+  from 0.5% to 2% of the losses — which is far below any observable accuracy — cut the solves per
+  tick from about four to under three; the remaining cost is spread across the heat solve, the
+  forecast and the parameter chain rather than concentrated anywhere worth attacking.
 
 ## Roadmap
 
 | Milestone | Content |
 |---|---|
-| M6 | Subsidies and their withdrawal, taxes, carbon pricing, elections, fuel geopolitics |
 | M7 | Learning curves and standardisation |
 | M8 | Campaign: scenarios, objectives, unlocks, saved games; publish to GitHub Pages |
 | M9+ | Cross-border interconnectors and transit; then market prices and rival utilities |

@@ -284,9 +284,11 @@ async function main(): Promise<void> {
     }
     if (e.key === 'Escape') {
       if (map.buildMode) cancelBuild()
+      else if (hud.politicsPanel.isOpen()) hud.politicsPanel.setOpen(false)
       else hud.selectNode(null)
     }
     if (e.key.toLowerCase() === 'b') hud.buildPanel.setOpen(!hud.buildPanel.isOpen())
+    if (e.key.toLowerCase() === 'p') hud.politicsPanel.setOpen(!hud.politicsPanel.isOpen())
   })
 
   window.addEventListener('resize', () => {

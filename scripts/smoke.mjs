@@ -271,6 +271,29 @@ try {
   console.log('event choice recorded:', chosen)
   if (chosen !== 'alternativeSupply') throw new Error('Choosing an event response did not stick')
 
+  // --- Politics ---------------------------------------------------------
+  const politics = await page.evaluate(() => {
+    const g = window.game
+    g.hud.politicsPanel.setOpen(true)
+    const panel = document.getElementById('politics-panel')
+    return {
+      visible: panel.classList.contains('visible'),
+      regime: g.world.state.policyRegimeId,
+      carbon: Math.round(g.world.state.carbonPricePerTonne),
+      confidence: +g.world.state.investorConfidence.toFixed(2),
+      blocks: panel.querySelectorAll('.pol-block').length,
+      fuelIndices: Object.keys(g.world.state.fuelPriceIndex).length,
+      tariff: Math.round(g.world.state.regulatedTariffPerMwh),
+    }
+  })
+  console.log('politics:', politics)
+  if (!politics.visible) throw new Error('The politics panel did not open')
+  if (politics.blocks < 4) throw new Error('The politics panel did not populate')
+  if (!politics.regime) throw new Error('No government is in office')
+
+  await page.screenshot({ path: join(OUT, '12-politics.png') })
+  await page.evaluate(() => window.game.hud.politicsPanel.setOpen(false))
+
   const finalState = await page.evaluate(() => {
     const plants = window.game.world.plants
     return {

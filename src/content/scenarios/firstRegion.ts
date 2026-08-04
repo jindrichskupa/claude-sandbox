@@ -76,6 +76,8 @@ export interface ScenarioContent {
   tariffPerMwh: number
   heatTariffPerMwh: number
   carbonPricePerTonne: number
+  /** The government in office when the scenario opens. */
+  initialRegimeId: string
   climate: typeof TEMPERATE_CLIMATE
   nodes: NodeSpec[]
   cities: CitySpec[]
@@ -108,6 +110,9 @@ export const FIRST_REGION: ScenarioContent = {
   tariffPerMwh: 85,
   heatTariffPerMwh: 45,
   carbonPricePerTonne: 0,
+  // 1995: liberalisation is the mood of the decade, and nothing is subsidised. Everything
+  // political that follows is something the player's own system provokes.
+  initialRegimeId: 'market_liberal',
   climate: TEMPERATE_CLIMATE,
 
   nodes: [

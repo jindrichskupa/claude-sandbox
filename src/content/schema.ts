@@ -34,6 +34,7 @@ export type Unit =
   | 'EUR/kWth/yr'
   | 'EUR/MWh'
   | 'EUR/MWh_th'
+  | 'EUR/t'
   | 't/MWh_th'
   | 'fraction'
   | 'fraction/h'
@@ -66,6 +67,7 @@ export const SOURCES = {
   'entsoe-factsheet': 'ENTSO-E, statistical factsheets and transmission data',
   'irena-costs': 'IRENA, Renewable Power Generation Costs',
   'euro-chp-practice': 'Euroheat & Power / IEA DHC, district heating and CHP practice',
+  'eu-energy-policy': 'European energy policy practice: EU ETS settlement prices, national support schemes, 2022 windfall levies',
   'engineering-standard': 'Standard power engineering reference values (textbook level)',
   'game-design': 'Game design choice — not a physical or economic measurement',
 } as const

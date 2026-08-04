@@ -22,6 +22,8 @@ import { judgeSite } from './siting'
 import { routeLine, simplifyRoute } from '../grid/routing'
 import { Param } from '../params/types'
 import { canAfford } from '../economy/economy'
+import { REGIMES_BY_ID } from '@content/policies'
+import { offerContract } from '../policy/contracts'
 import type { World } from '../world'
 
 const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
@@ -72,6 +74,11 @@ export function quotePlant(world: World, typeId: PlantTypeId, x: number, y: numb
   if (year < type.availableFromYear.value) {
     return refuse('build.notYetAvailable', { year: type.availableFromYear.value })
   }
+  // A ban is a state of the world, not a price: it refuses outright. The reason names the
+  // government rather than the technology, because "this one will not permit it" is what tells
+  // the player the next one might.
+  const regime = REGIMES_BY_ID.get(world.state.policyRegimeId)
+  if (regime?.levers.bans.includes(typeId)) return refuse('build.bannedByPolicy')
   // What this particular technology needs from the ground, which is not the same for a solar
   // farm, a nuclear station and a run-of-river turbine. Checked before the spacing rule so
   // that the physical reason is the one reported when both apply.
@@ -157,6 +164,19 @@ export function beginPlantConstruction(
   }
   world.addPlant(plant)
   world.scheduleSpending(plantId, quote.totalCost, quote.buildTicks, 'capex')
+
+  // The promise is made now, at the investment decision, and runs from the day the plant enters
+  // service. That gap — one construction time and possibly one election — is the whole risk
+  // profile of building anything in this industry.
+  const contract = offerContract(
+    world.state.policyRegimeId,
+    plantId,
+    typeId,
+    world.tick,
+    world.tick + quote.buildTicks,
+    world.nextSerial(),
+  )
+  if (contract) world.state.contracts.push(contract)
 
   return { ok: true, plantId, quote }
 }

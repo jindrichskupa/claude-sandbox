@@ -13,6 +13,7 @@ import { PLANT_TYPES } from '@content/plantTypes'
 import { LINE_TYPES } from '@content/lineTypes'
 import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
 import { EVENTS_BY_ID } from '@content/events'
+import { REGIMES_BY_ID } from '@content/policies'
 import type { World } from '@sim/world'
 import { LIFECYCLE_KEYS, LifecyclePhase, isDispatchable } from '@sim/assets/types'
 import { ageYears } from '@sim/assets/aging'
@@ -21,6 +22,7 @@ import { drawLoadCurve, drawMix, drawPrice } from './charts'
 import { nodeLabel } from '@render/mapView'
 import { quoteRefurbishment, refurbishmentGains } from '@sim/build/commands'
 import { BuildPanel, type BuildSelection } from './buildPanel'
+import { PoliticsPanel } from './politicsPanel'
 import { cycleLifeUsed, energyCapacityMwh, isStorage, ratedEnergyMwh } from '@sim/dispatch/storage'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 
@@ -50,8 +52,8 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node
 }
 
-function stat(label: string): { root: HTMLDivElement; value: HTMLDivElement } {
-  const root = el('div', 'stat')
+function stat(label: string, wide = false): { root: HTMLDivElement; value: HTMLDivElement } {
+  const root = el('div', wide ? 'stat wide' : 'stat')
   root.appendChild(el('div', 'stat-label', label))
   const value = el('div', 'stat-value', '—')
   root.appendChild(value)
@@ -69,6 +71,7 @@ export class Hud {
   private readonly mixCanvas: HTMLCanvasElement
   private readonly priceCanvas: HTMLCanvasElement
   readonly buildPanel: BuildPanel
+  readonly politicsPanel: PoliticsPanel
 
   private selectedNodeId: string | null = null
   private readonly hint: HTMLDivElement
@@ -86,14 +89,15 @@ export class Hud {
       ['cash', 'ui.cash'],
       ['demand', 'ui.demand'],
       ['generation', 'ui.generation'],
-      ['losses', 'ui.losses'],
       ['price', 'ui.price'],
       ['heat', 'ui.heat'],
       ['temperature', 'ui.temperature'],
       ['monthProfit', 'ui.monthProfit'],
-      ['opinion', 'ui.opinion'],
+      ['government', 'ui.government'],
     ] as const) {
-      const s = stat(t(label))
+      // The government's name and the heat figure are words, not numbers, and need more room
+      // than a stat of the same width would give them.
+      const s = stat(t(label), key === 'government' || key === 'heat')
       this.stats[key] = s.value
       topbar.appendChild(s.root)
     }
@@ -188,6 +192,15 @@ export class Hud {
       onSelect: (s) => this.callbacks.onSelectBuild(s),
       onOpen: () => {
         this.selectedNodeId = null
+        this.politicsPanel.setOpen(false)
+        this.renderInspector()
+      },
+    })
+
+    this.politicsPanel = new PoliticsPanel(root, world, {
+      onOpen: () => {
+        this.selectedNodeId = null
+        this.buildPanel.setOpen(false)
         this.renderInspector()
       },
     })
@@ -231,9 +244,6 @@ export class Hud {
     if (snap && dispatch) {
       this.stats.demand!.textContent = formatMw(snap.demandMw)
       this.stats.generation!.textContent = formatMw(snap.generationMw)
-      this.stats.losses!.textContent = `${formatMw(snap.lossMw)} (${formatPct(
-        snap.demandMw > 0 ? snap.lossMw / snap.demandMw : 0,
-      )})`
       this.stats.price!.textContent = `€${snap.pricePerMwh.toFixed(0)}`
       this.stats.price!.className = `stat-value ${snap.pricePerMwh > 200 ? 'warn' : ''}`
       this.stats.temperature!.textContent = `${snap.weather.tempC.toFixed(1)}°C`
@@ -266,11 +276,15 @@ export class Hud {
     this.stats.monthProfit!.textContent = formatMoney(profit)
     this.stats.monthProfit!.className = `stat-value ${profit >= 0 ? 'good' : 'bad'}`
 
-    const opinion = world.state.publicOpinion
-    this.stats.opinion!.textContent = formatPct(opinion)
-    this.stats.opinion!.className = `stat-value ${opinion < 0.3 ? 'bad' : opinion > 0.6 ? 'good' : 'warn'}`
+    const regime = REGIMES_BY_ID.get(world.state.policyRegimeId)
+    this.stats.government!.textContent = regime ? t(regime.nameKey) : '—'
+    // Red while a government that will not honour contracts is in office: the player is
+    // carrying a real risk on every subsidised asset they own, and should be able to see it
+    // without opening a panel.
+    this.stats.government!.className = `stat-value ${regime && !regime.levers.honoursContracts ? 'bad' : ''}`
 
     this.buildPanel.render()
+    this.politicsPanel.render()
 
     const history = world.recentHistory(240)
     if (history.length > 1) {

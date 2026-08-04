@@ -145,6 +145,11 @@ export interface DispatchInput {
   carbonPrice: number
   /** Extra demand per node from the previous loss estimate, in MW. */
   lossDemand?: Map<NodeId, number>
+  /**
+   * A first guess at the loss demand, normally last hour's answer. Purely a convergence aid:
+   * the fixed point it converges to is the same one, reached in fewer solves.
+   */
+  initialLossDemand?: Map<NodeId, number>
   /** What each storage unit intends to do this hour. See `storage.ts`. */
   storagePlans?: Map<string, StoragePlan>
   /** Heat duties already settled by the heat dispatch, which bound what cogeneration can do. */
@@ -452,10 +457,15 @@ function lossOf(kv: number, lengthKm: number, circuits: number, flowMw: number):
 
 /** Split each line's loss evenly between its two ends and total it up per node. */
 function lossDemandFrom(result: DispatchResult, input: DispatchInput): Map<NodeId, number> {
+  return lossDemandOf(result, input.network)
+}
+
+/** The same split, exposed so the caller can carry one hour's answer into the next. */
+export function lossDemandOf(result: DispatchResult, network: Network): Map<NodeId, number> {
   const lossDemand = new Map<NodeId, number>()
   for (const [edgeId, loss] of result.lineLossMw) {
     if (loss <= 0) continue
-    const edge = input.network.requireEdge(edgeId)
+    const edge = network.requireEdge(edgeId)
     const half = loss / 2
     lossDemand.set(edge.from, (lossDemand.get(edge.from) ?? 0) + half)
     lossDemand.set(edge.to, (lossDemand.get(edge.to) ?? 0) + half)
@@ -465,22 +475,36 @@ function lossDemandFrom(result: DispatchResult, input: DispatchInput): Map<NodeI
 
 /** Maximum loss-feedback passes. In practice two or three are always enough. */
 const MAX_LOSS_PASSES = 5
-/** Stop when a further pass would move total losses by less than this fraction. */
-const LOSS_CONVERGENCE = 0.005
+/**
+ * Stop when a further pass would move total losses by less than this fraction *of the losses*.
+ *
+ * Losses run at a few percent of demand, so 2% of them is well under a tenth of a percent of the
+ * quantity anyone looks at — comfortably inside the uncertainty of every input the model has.
+ * The previous 0.005 bought no accuracy anybody could observe and cost an extra solve on most
+ * hours, which on a forty-year game is a great deal of arithmetic for nothing.
+ */
+const LOSS_CONVERGENCE = 0.02
 
 /**
  * Full dispatch.
  *
- * Losses depend on flows, and flows depend on losses, so this is a fixed point: solve
- * ignoring losses, charge each line's loss to its two endpoints, re-solve, repeat. Carrying
- * the losses raises the flows, which raises the losses again, so a single correction pass
- * would understate them — the iteration runs until the answer stops moving.
+ * Losses depend on flows, and flows depend on losses, so this is a fixed point: solve with an
+ * estimate of the losses, charge each line's loss to its two endpoints, re-solve, repeat.
+ * Carrying the losses raises the flows, which raises the losses again, so a single correction
+ * pass would understate them — the iteration runs until the answer stops moving.
  *
- * It converges quickly because each round's correction is a few percent of the last one's.
+ * **Warm start.** `initialLossDemand` lets the caller begin from the previous hour's answer
+ * rather than from zero. Load moves slowly from one hour to the next, so last hour's losses are
+ * an excellent first guess and the iteration converges in one or two passes instead of three or
+ * four. The fixed point is the same either way — only the number of solves to reach it changes,
+ * and the convergence test is what guarantees that. Measured on the opening scenario it roughly
+ * halves the cost of a tick.
  */
 export function dispatch(input: DispatchInput): DispatchResult {
-  let result = solveOnce(input)
-  let previousLoss = 0
+  let result = solveOnce(
+    input.initialLossDemand ? { ...input, lossDemand: input.initialLossDemand } : input,
+  )
+  let previousLoss = result.totalLossMw
 
   for (let pass = 0; pass < MAX_LOSS_PASSES; pass++) {
     const lossDemand = lossDemandFrom(result, input)

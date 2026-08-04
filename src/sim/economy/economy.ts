@@ -32,6 +32,12 @@ export interface PeriodLedger {
   /** What the player spent responding to events. */
   eventCost: number
   insurancePremium: number
+  /** Tax on profit, charged when the year closes. */
+  tax: number
+  /** A levy on revenue earned above a political price threshold. */
+  windfallLevy: number
+  /** Payment for keeping firm capacity available, where a capacity market exists. */
+  capacityIncome: number
   /** Energy sold, MWh. */
   energySoldMwh: number
   /** Energy not delivered, MWh. */
@@ -59,6 +65,9 @@ export function emptyLedger(): PeriodLedger {
     recyclingIncome: 0,
     eventCost: 0,
     insurancePremium: 0,
+    tax: 0,
+    windfallLevy: 0,
+    capacityIncome: 0,
     energySoldMwh: 0,
     energyUnservedMwh: 0,
     heatSoldMwh: 0,
@@ -71,7 +80,8 @@ export function ledgerProfit(l: PeriodLedger): number {
   return (
     l.revenue +
     l.heatRevenue +
-    l.recyclingIncome -
+    l.recyclingIncome +
+    l.capacityIncome -
     l.fuelCost -
     l.carbonCost -
     l.varOpex -
@@ -81,7 +91,9 @@ export function ledgerProfit(l: PeriodLedger): number {
     l.capex -
     l.decommissioningCost -
     l.eventCost -
-    l.insurancePremium
+    l.insurancePremium -
+    l.tax -
+    l.windfallLevy
   )
 }
 
@@ -99,6 +111,9 @@ export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.recyclingIncome += from.recyclingIncome
   into.eventCost += from.eventCost
   into.insurancePremium += from.insurancePremium
+  into.tax += from.tax
+  into.windfallLevy += from.windfallLevy
+  into.capacityIncome += from.capacityIncome
   into.energySoldMwh += from.energySoldMwh
   into.energyUnservedMwh += from.energyUnservedMwh
   into.heatSoldMwh += from.heatSoldMwh
@@ -265,10 +280,78 @@ export function chargeInsurance(
     insuredValue * ECONOMICS.insurancePremiumRate.value * (ticksInPeriod / TICKS_PER_YEAR)
 }
 
-/** Interest on outstanding debt for a period. */
-export function chargeInterest(ledger: PeriodLedger, finances: Finances, ticksInPeriod: number): void {
+/**
+ * Interest on outstanding debt for a period.
+ *
+ * `investorConfidence` is what makes tearing up a support contract cost something. A country
+ * that has repudiated its promises borrows more expensively for everything afterwards, including
+ * projects that had nothing to do with the contract that was broken — which is precisely why the
+ * decision is a hard one for a real government rather than free money.
+ */
+export function chargeInterest(
+  ledger: PeriodLedger,
+  finances: Finances,
+  ticksInPeriod: number,
+  investorConfidence = 1,
+): void {
   if (finances.debt <= 0) return
-  ledger.interest += finances.debt * ECONOMICS.loanInterestRate.value * (ticksInPeriod / TICKS_PER_YEAR)
+  ledger.interest += finances.debt * effectiveInterestRate(investorConfidence) * (ticksInPeriod / TICKS_PER_YEAR)
+}
+
+/** The rate the utility actually pays, after the country's record with investors. */
+export function effectiveInterestRate(investorConfidence: number): number {
+  const confidence = Math.max(0.01, Math.min(1, investorConfidence))
+  return ECONOMICS.loanInterestRate.value * (1 + (1 - confidence) * ECONOMICS.confidenceRatePenalty.value)
+}
+
+/**
+ * Tax on the year's profit.
+ *
+ * Charged only on a positive result and with no carry-forward of losses, which is a
+ * simplification worth naming: a real utility offsets a bad year against a good one, so this
+ * overstates the tax burden of a volatile strategy relative to a steady one.
+ */
+export function chargeCorporateTax(ledger: PeriodLedger, profitBeforeTax: number, rate: number): void {
+  if (profitBeforeTax <= 0 || rate <= 0) return
+  ledger.tax += profitBeforeTax * rate
+}
+
+/**
+ * A levy on revenue earned above a threshold price.
+ *
+ * Europe imposed several of these in 2022 and they are the classic political response to a
+ * utility doing well out of a crisis. Note what it taxes: not profit but *revenue above a price*,
+ * so it lands hardest on exactly the plant that was most valuable during the scarcity — which is
+ * both what the real levies did and the reason they were argued about.
+ */
+export function chargeWindfallLevy(
+  ledger: PeriodLedger,
+  energySoldMwh: number,
+  averagePricePerMwh: number,
+  thresholdPerMwh: number,
+  rate: number,
+): void {
+  if (rate <= 0 || energySoldMwh <= 0) return
+  const excess = averagePricePerMwh - thresholdPerMwh
+  if (excess <= 0) return
+  ledger.windfallLevy += excess * energySoldMwh * rate
+}
+
+/**
+ * Payment for keeping firm capacity available.
+ *
+ * Paid on dispatchable capacity only. A capacity market exists precisely because an
+ * energy-only market pays nothing for being available in the hour it is needed, and a plant that
+ * cannot be relied on in that hour is not what is being bought.
+ */
+export function creditCapacityPayment(
+  ledger: PeriodLedger,
+  firmCapacityMw: number,
+  perKwYear: number,
+  ticksInPeriod: number,
+): void {
+  if (perKwYear <= 0 || firmCapacityMw <= 0) return
+  ledger.capacityIncome += firmCapacityMw * 1000 * perKwYear * (ticksInPeriod / TICKS_PER_YEAR)
 }
 
 /** How much more the utility could borrow. */

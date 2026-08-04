@@ -63,9 +63,13 @@ export enum Param {
   PipeCapacityMwth,
   /** Price the utility receives per MWh of heat sold. */
   HeatTariffPerMwh,
+  /** Tax on profit, set by the government of the day. */
+  CorporateTaxRate,
+  /** Annual payment per kW of firm capacity, where a capacity market exists. */
+  CapacityPaymentPerKwYear,
 }
 
-export const PARAM_COUNT = 18
+export const PARAM_COUNT = 20
 
 /** Stable display keys, used by the inspector and by tests. */
 export const PARAM_KEYS: Record<Param, string> = {
@@ -87,6 +91,8 @@ export const PARAM_KEYS: Record<Param, string> = {
   [Param.HeatCapacityMwth]: 'param.heatCapacity',
   [Param.PipeCapacityMwth]: 'param.pipeCapacity',
   [Param.HeatTariffPerMwh]: 'param.heatTariff',
+  [Param.CorporateTaxRate]: 'param.corporateTax',
+  [Param.CapacityPaymentPerKwYear]: 'param.capacityPayment',
 }
 
 /**
@@ -113,6 +119,8 @@ export const PARAM_BOUNDS: Record<Param, { min: number; max: number }> = {
   [Param.HeatCapacityMwth]: { min: 0, max: Infinity },
   [Param.PipeCapacityMwth]: { min: 0, max: Infinity },
   [Param.HeatTariffPerMwh]: { min: 0, max: Infinity },
+  [Param.CorporateTaxRate]: { min: 0, max: 0.9 },
+  [Param.CapacityPaymentPerKwYear]: { min: 0, max: Infinity },
 }
 
 /**

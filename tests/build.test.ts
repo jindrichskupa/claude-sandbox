@@ -14,6 +14,7 @@ import {
   quoteLine,
   quotePlant,
   quoteRefurbishment,
+  quoteTargetFor,
   reactivatePlant,
   refurbishPlant,
   retirePlant,
@@ -287,7 +288,12 @@ describe('a built plant actually helps', () => {
     const site = freeSite(world)
     const result = beginPlantConstruction(world, 'ccgt', site.x, site.y)
     const months = result.quote.buildTicks / TICKS_PER_MONTH
-    expect(months).toBeCloseTo(PLANT_TYPES.ccgt.buildTimeMonths.value, 0)
+    // Against the *parameter*, not the datasheet. Permitting speed is a policy lever, so the
+    // government of the day shortens or lengthens every build — and a test that asserted the
+    // raw content number would be asserting that policy has no effect.
+    const expected = world.params.get(quoteTargetFor('ccgt'), Param.BuildTimeMonths)
+    expect(months).toBeCloseTo(expected, 0)
+    expect(expected).not.toBeCloseTo(PLANT_TYPES.ccgt.buildTimeMonths.value, 0)
   })
 })
 

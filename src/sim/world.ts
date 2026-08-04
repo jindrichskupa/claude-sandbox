@@ -8,7 +8,7 @@
  */
 
 import { ECONOMICS } from '@content/economics'
-import { FUELS } from '@content/fuels'
+import { FUELS, type FuelId } from '@content/fuels'
 import { LINE_TYPES } from '@content/lineTypes'
 import { heatCapacityOf, PLANT_TYPES } from '@content/plantTypes'
 import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
@@ -21,12 +21,23 @@ import { isDispatchable, LifecyclePhase, type CityAsset, type PlantAsset } from 
 import { ModifierRegistry } from './params/ModifierRegistry'
 import { Params } from './params/Params'
 import { Param } from './params/types'
-import { dispatch, type DispatchResult } from './dispatch/dispatch'
+import { dispatch, lossDemandOf, type DispatchResult } from './dispatch/dispatch'
 import { WeatherModel, type ClimateDef, type Weather } from './weather/weather'
 import { weatherModifiers, WEATHER_SOURCE } from './weather/effects'
 import { generateTerrain, windSiteFactor, type TerrainMap } from './map/terrain'
 import { planStorage, settleStorage, isStorage, FORECAST_WINDOW_HOURS, type StoragePlan } from './dispatch/storage'
 import { dispatchHeat, isHeatStore, settleHeatStore, type HeatResult } from './heat/heat'
+import { ELECTION_TERM_YEARS, REGIMES_BY_ID } from '@content/policies'
+import { initialFuelIndices, policyModifiers, POLICY_SOURCE, stepFuelPrices, importExposure } from './policy/regime'
+import {
+  confidenceAfterBreach,
+  contractedPriceFor,
+  CONFIDENCE_RECOVERY_PER_YEAR,
+  remainingValue,
+  revokeAll,
+  type SupportContract,
+} from './policy/contracts'
+import { runElection, salienceFrom } from './policy/elections'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
 import { EventDirector } from './events/director'
 import {
@@ -35,6 +46,9 @@ import {
   chargeEventCost,
   chargeInsurance,
   chargeUnservedHeat,
+  chargeCorporateTax,
+  chargeWindfallLevy,
+  creditCapacityPayment,
   creditHeatSales,
   chargeDecommissioning,
   creditRecycling,
@@ -58,9 +72,42 @@ export interface WorldState {
   policyRegimeId: string
   /** How the public feels about the utility, 0..1. Reacts to price, reliability and emissions. */
   publicOpinion: number
+  /**
+   * The carbon price now in force. A *mirror* of `params.get('world', CarbonPricePerTonne)`,
+   * refreshed monthly so the hot dispatch loop can read a number instead of walking the chain.
+   * Never the parameter's base value — see the note in `baseValue`.
+   */
   carbonPricePerTonne: number
-  /** Multiplier on all fuel prices. Moved later by markets and geopolitics. */
-  fuelPriceIndex: number
+  /**
+   * Price index per fuel, 1 being the reference price in `fuels.ts`.
+   *
+   * Per fuel rather than one global scalar, because a political shock does not move mine-mouth
+   * lignite and imported pipeline gas by the same amount — and a model that said it did would
+   * remove the main reason to care what you burn.
+   */
+  fuelPriceIndex: Record<string, number>
+  /** Support contracts, live, expired and torn up. See `policy/contracts.ts`. */
+  contracts: SupportContract[]
+  /**
+   * How far the country's promises are believed, 0..1. Falls when a government repudiates a
+   * support contract and raises the cost of debt for everything afterwards.
+   */
+  investorConfidence: number
+  /** When the government next has to face the voters. */
+  nextElectionTick: number
+  /** Vote share per regime at the last election, for the polling display. */
+  polls: Record<string, number>
+  /**
+   * The regulated tariff now in force, reset each year against what the market actually cleared
+   * at over the past twelve months.
+   *
+   * Without this the utility sells at a fixed price forever, so every cost the government adds
+   * — a carbon price above all — is a pure loss with no pass-through. That is not a hard policy
+   * environment, it is a broken market, and it would make every decarbonisation regime lethal
+   * regardless of what the player did. A price-capping government can still hold it down, which
+   * is exactly what `tariffFactor` is for and why that regime bites.
+   */
+  regulatedTariffPerMwh: number
   /** Technology level per plant type, 1 = as at scenario start. */
   techLevel: Record<string, number>
   /** Cumulative MW of each technology deployed, which is what drives learning curves. */
@@ -116,6 +163,8 @@ export interface ScenarioDef {
   /** Price the utility is paid per MWh of district heat. */
   heatTariffPerMwh: number
   carbonPricePerTonne: number
+  /** The government in office when the scenario begins. */
+  initialRegimeId: string
   objectives: ScenarioObjective[]
   /** Guaranteed price per MWh by technology, paid outside the market. */
   feedInTariffs: Partial<Record<string, number>>
@@ -189,6 +238,14 @@ export class World {
   private readonly spending: ScheduledSpend[] = []
   private readonly energiseAt = new Map<string, number>()
   private recentBlackoutTicks = 0
+  /** Previous hour's loss estimate, used to warm-start the next hour's iteration. */
+  private lastLossDemand: Map<NodeId, number> | null = null
+  /** Accumulated over the electoral term, because that is the period voters judge. */
+  private termPriceSum = 0
+  private termPriceTicks = 0
+  private termGenerationByFuel = new Map<FuelId, number>()
+  /** Set for one tick after an election, so the UI can announce it. */
+  lastElection: { year: number; fromId: string; toId: string; contractsRevoked: number } | null = null
 
   constructor(readonly scenario: ScenarioDef) {
     this.rng = new RandomSource(scenario.seed)
@@ -198,10 +255,15 @@ export class World {
     this.heatIslands = new IslandCache(this.network, 'heat')
 
     this.state = {
-      policyRegimeId: 'baseline',
+      policyRegimeId: scenario.initialRegimeId,
       publicOpinion: 0.5,
       carbonPricePerTonne: scenario.carbonPricePerTonne,
-      fuelPriceIndex: 1,
+      fuelPriceIndex: initialFuelIndices(),
+      contracts: [],
+      investorConfidence: 1,
+      nextElectionTick: Math.round(ELECTION_TERM_YEARS.value * TICKS_PER_YEAR),
+      polls: {},
+      regulatedTariffPerMwh: scenario.tariffPerMwh,
       techLevel: {},
       cumulativeDeployedMw: {},
       maintenanceLevel: 1,
@@ -217,6 +279,7 @@ export class World {
 
     this.params = new Params(this.registry, (targetId, param) => this.baseValue(targetId, param))
     this.weather = this.weatherModel.generate(0, 0)
+    this.applyRegime()
   }
 
   /**
@@ -269,9 +332,11 @@ export class World {
         case Param.RampRatePerHour:
           return type.rampRatePerHour.value
         case Param.FuelPricePerMwhThermal:
-          return FUELS[type.fuel].pricePerMwhThermal.value * this.state.fuelPriceIndex
+          return FUELS[type.fuel].pricePerMwhThermal.value * (this.state.fuelPriceIndex[type.fuel] ?? 1)
         case Param.FeedInTariffPerMwh:
-          return this.scenario.feedInTariffs[plant.typeId] ?? 0
+          // What was promised to *this machine*, not what its technology is currently in
+          // favour with. A contract outlives the government that signed it, or is torn up.
+          return contractedPriceFor(this.state.contracts, plant.id, this.tick)
         case Param.HeatCapacityMwth:
           return heatCapacityOf(plant.typeId)
         default:
@@ -298,9 +363,21 @@ export class World {
     }
 
     if (targetId === 'world') {
-      if (param === Param.CarbonPricePerTonne) return this.state.carbonPricePerTonne
-      if (param === Param.TariffPerMwh) return this.scenario.tariffPerMwh
+      // The scenario's figure, never the current one. Reading the mutable state here would
+      // make the parameter its own input: the policy layer adds its delta, the result is
+      // written back to the state, and next month the same delta is added to that. The price
+      // compounded to €11,000 a tonne in twenty years before this was caught, which is the
+      // sort of thing a feedback loop does quietly while every individual step looks right.
+      if (param === Param.CarbonPricePerTonne) return this.scenario.carbonPricePerTonne
+      // The regulated tariff, not the scenario's opening figure: it is reset against the market
+      // every year so that costs the government adds can be passed through, and the policy layer
+      // then multiplies it by whatever cap is in force.
+      if (param === Param.TariffPerMwh) return this.state.regulatedTariffPerMwh
       if (param === Param.HeatTariffPerMwh) return this.scenario.heatTariffPerMwh
+      // Both start at nothing and are set entirely by the government of the day, so the
+      // explanation chain reads "base 0, policy +19%" rather than hiding the source.
+      if (param === Param.CorporateTaxRate) return 0
+      if (param === Param.CapacityPaymentPerKwYear) return 0
     }
 
     return undefined
@@ -405,6 +482,18 @@ export class World {
     // 2. Ageing, monthly — nothing here changes meaningfully within a day.
     if (isMonthBoundary(this.tick) || this.tick === 1) {
       this.registry.setSource(AGE_SOURCE, agingModifiers(this.plants, this.tick))
+      // Fuel markets move on a monthly timescale here. Each fuel has its own index, so a
+      // political shock moves imported gas and mine-mouth lignite by very different amounts.
+      // Re-register the government's modifiers every month rather than only when one takes
+      // office. It costs a handful of objects and it means `state.policyRegimeId` is the single
+      // source of truth: setting it is enough, and nothing can drift out of step with it.
+      this.applyRegime()
+      stepFuelPrices(this.state.fuelPriceIndex, this.state.policyRegimeId, this.rng.streamFor('fuel'), this.tick)
+      this.state.carbonPricePerTonne = this.params.getOr(
+        'world',
+        Param.CarbonPricePerTonne,
+        this.scenario.carbonPricePerTonne,
+      )
     }
 
     // 3. Forced outages. A state transition, not a modifier: the unit is out, not derated.
@@ -487,8 +576,12 @@ export class World {
       storagePlans,
       chpCommitments: heat.commitments,
       auxDemand: heat.pumpingDemandMw,
+      // Last hour's losses are an excellent first guess at this hour's, because load moves
+      // slowly. Same fixed point, roughly half the solves to reach it.
+      ...(this.lastLossDemand ? { initialLossDemand: this.lastLossDemand } : {}),
     })
     this.lastDispatch = result
+    this.lastLossDemand = lossDemandOf(result, this.network)
 
     // 8. Money and wear from what actually ran.
     const tariff = this.params.getOr('world', Param.TariffPerMwh, this.scenario.tariffPerMwh)
@@ -551,6 +644,15 @@ export class World {
 
     const snapshot = this.makeSnapshot(date, result, heat)
     this.lastSystemPrice = snapshot.pricePerMwh
+    // What the voters will be judging at the end of the term.
+    this.termPriceSum += snapshot.pricePerMwh
+    this.termPriceTicks++
+    for (const plant of this.plants) {
+      const mw = result.generationMw.get(plant.id) ?? 0
+      if (mw <= 0) continue
+      const fuel = PLANT_TYPES[plant.typeId].fuel
+      this.termGenerationByFuel.set(fuel, (this.termGenerationByFuel.get(fuel) ?? 0) + mw)
+    }
     this.priceWindow.push(snapshot.pricePerMwh)
     if (this.priceWindow.length > PRICE_WINDOW_TICKS) this.priceWindow.shift()
     this.history[this.historyCount % HISTORY_LENGTH] = snapshot
@@ -637,7 +739,21 @@ export class World {
     const ticks = this.tick - this.periodStartTick
     chargeFixedCosts(this.openLedger, this.plants, this.params, ticks, this.state.maintenanceLevel)
     if (this.state.insured) chargeInsurance(this.openLedger, this.plants, ticks)
-    chargeInterest(this.openLedger, this.finances, ticks)
+    chargeInterest(this.openLedger, this.finances, ticks, this.state.investorConfidence)
+
+    // The windfall levy is monthly because it is charged on a price, and a price averaged over a
+    // year would never exceed a crisis threshold that a single hard winter month does.
+    const regime = REGIMES_BY_ID.get(this.state.policyRegimeId)
+    if (regime && this.openLedger.energySoldMwh > 0) {
+      const averagePrice = this.termPriceTicks > 0 ? this.termPriceSum / this.termPriceTicks : 0
+      chargeWindfallLevy(
+        this.openLedger,
+        this.openLedger.energySoldMwh,
+        averagePrice,
+        regime.levers.windfallThresholdPerMwh.value,
+        regime.levers.windfallRate.value,
+      )
+    }
     settlePeriod(this.finances, this.openLedger)
 
     this.finances.trailingRevenue = this.finances.trailingRevenue * (11 / 12) + this.openLedger.revenue
@@ -645,6 +761,77 @@ export class World {
     this.lastMonthLedger = this.openLedger
     this.openLedger = emptyLedger()
     this.periodStartTick = this.tick
+  }
+
+  /**
+   * Register everything the government of the day is doing.
+   *
+   * One call, one source id, so taking office simply replaces the previous government's entire
+   * contribution — the same pattern weather and ageing use, and the reason a change of
+   * government cannot leave anything of its predecessor behind by accident.
+   */
+  private applyRegime(): void {
+    this.registry.setSource(POLICY_SOURCE, policyModifiers(this.state.policyRegimeId, this.scenario.carbonPricePerTonne))
+  }
+
+  /**
+   * Hold an election, and let the winner take office.
+   *
+   * The salience it runs on is measured over the whole term rather than the last year, because
+   * that is the period voters actually judge — and because a government that presided over three
+   * good years and one bad one should not be treated as though only the bad one happened.
+   */
+  private holdElection(year: number): void {
+    const averagePrice = this.termPriceTicks > 0 ? this.termPriceSum / this.termPriceTicks : 0
+    const sold = this.yearLedger.energySoldMwh + this.yearLedger.heatSoldMwh
+    const unserved = this.yearLedger.energyUnservedMwh + this.yearLedger.heatUnservedMwh
+    const inputs = {
+      averagePricePerMwh: averagePrice,
+      unservedShare: sold + unserved > 0 ? unserved / (sold + unserved) : 0,
+      carbonIntensity: sold > 0 ? this.yearLedger.co2Tonnes / sold : 0,
+      importExposure: importExposure(this.termGenerationByFuel),
+      publicOpinion: this.state.publicOpinion,
+    }
+
+    const result = runElection(
+      salienceFrom(inputs),
+      this.state.policyRegimeId,
+      inputs,
+      year,
+      this.rng.streamFor('election'),
+      this.tick,
+    )
+    this.state.polls = result.shares
+
+    const previousId = this.state.policyRegimeId
+    this.state.policyRegimeId = result.winnerId
+    this.state.nextElectionTick = this.tick + Math.round(ELECTION_TERM_YEARS.value * TICKS_PER_YEAR)
+    this.termPriceSum = 0
+    this.termPriceTicks = 0
+    this.termGenerationByFuel = new Map()
+
+    let revoked = 0
+    const incoming = REGIMES_BY_ID.get(result.winnerId)
+    if (incoming && !incoming.levers.honoursContracts) {
+      // The moment that makes support policy worth simulating. Everything promised by every
+      // previous government stops, and the country pays for it in the cost of capital.
+      const torn = revokeAll(this.state.contracts, this.tick)
+      revoked = torn.length
+      let destroyed = 0
+      for (const contract of torn) {
+        const plant = this.plantsById.get(contract.plantId)
+        const capacity = plant ? this.params.get(plant.id, Param.CapacityMw) : 0
+        destroyed += remainingValue(contract, this.tick) * capacity
+      }
+      this.state.investorConfidence = confidenceAfterBreach(
+        this.state.investorConfidence,
+        destroyed,
+        this.finances.trailingRevenue,
+      )
+    }
+
+    this.applyRegime()
+    this.lastElection = { year, fromId: previousId, toId: result.winnerId, contractsRevoked: revoked }
   }
 
   private closeYear(): void {
@@ -658,6 +845,42 @@ export class World {
       this.yearLedger.energySoldMwh > 0 ? this.yearLedger.co2Tonnes / this.yearLedger.energySoldMwh : 0
     const target = Math.max(0, Math.min(1, 0.75 - unservedShare * 12 - intensity * 0.35))
     this.state.publicOpinion += (target - this.state.publicOpinion) * 0.4
+
+    // Reset the regulated tariff against what the market actually cleared at. Sticky downwards,
+    // as real regulated tariffs are, so a mild year does not wipe out the ability to recover a
+    // hard one.
+    const averagePrice = this.termPriceTicks > 0 ? this.termPriceSum / this.termPriceTicks : 0
+    const reset = averagePrice * (1 + ECONOMICS.retailMarginOverWholesale.value)
+    this.state.regulatedTariffPerMwh = Math.max(
+      ECONOMICS.tariffFloorPerMwh.value,
+      // Move most of the way, not all: a regulator reviews rather than tracks.
+      this.state.regulatedTariffPerMwh + (reset - this.state.regulatedTariffPerMwh) * 0.6,
+    )
+
+    // Capacity payments and tax both land on the year, in that order: the payment is income and
+    // the tax is charged on what is left of it.
+    const capacityPayment = this.params.getOr('world', Param.CapacityPaymentPerKwYear, 0)
+    if (capacityPayment > 0) {
+      let firmMw = 0
+      for (const plant of this.plants) {
+        if (!isDispatchable(plant)) continue
+        if (PLANT_TYPES[plant.typeId].weatherDependence !== 'none') continue
+        firmMw += this.params.get(plant.id, Param.CapacityMw)
+      }
+      creditCapacityPayment(this.openLedger, firmMw, capacityPayment, TICKS_PER_YEAR)
+    }
+    chargeCorporateTax(
+      this.openLedger,
+      ledgerProfit(this.yearLedger),
+      this.params.getOr('world', Param.CorporateTaxRate, 0),
+    )
+
+    // Trust rebuilds slowly and automatically. It is cheap to lose and expensive to regain,
+    // which is the asymmetry that makes repudiation a lasting decision rather than a one-off cost.
+    this.state.investorConfidence = Math.min(1, this.state.investorConfidence + CONFIDENCE_RECOVERY_PER_YEAR)
+
+    if (this.tick >= this.state.nextElectionTick) this.holdElection(this.date.year)
+
     this.yearLedger = emptyLedger()
     this.director.startYear()
   }

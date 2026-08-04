@@ -76,18 +76,32 @@ body {
   align-items: center;
   gap: 18px;
   padding: 10px 16px;
-  flex-wrap: wrap;
+  /* Deliberately no wrapping. A second row of stats pushes the clock and the speed controls
+   * down onto the Build and Politics toggles, which sit just below it — so the bar shrinks its
+   * widest entries instead. */
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .stat {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 74px;
+  min-width: 0;
+  /* Numbers keep their width; only the name-shaped stats below are allowed to shrink. A bar
+   * where every figure is half an ellipsis is worse than a bar with fewer figures on it. */
+  flex: 0 0 auto;
+}
+
+/* A name rather than a number: it needs room, but not unlimited room. */
+.stat.wide {
+  flex: 0 1 150px;
+  min-width: 84px;
 }
 
 .stat-label {
   font-size: 10px;
+  white-space: nowrap;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-dim);
@@ -97,6 +111,9 @@ body {
   font-family: var(--mono);
   font-size: 14px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stat-value.good {
@@ -661,4 +678,143 @@ button.danger:hover {
 
 .event-choices button.disabled:hover {
   border-color: var(--panel-border);
+}
+
+/* --- Politics -----------------------------------------------------------
+ *
+ * Shares the left corner with the build panel and the inspector: all three
+ * are things you open, read and close, and only one of them at a time.
+ */
+#politics-toggle {
+  position: absolute;
+  left: 92px;
+  top: 74px;
+  z-index: 2;
+  font-weight: 600;
+  padding: 7px 16px;
+}
+
+#politics-panel {
+  left: 12px;
+  top: 112px;
+  width: 320px;
+  max-height: calc(100vh - 232px);
+  overflow-y: auto;
+  padding: 12px;
+  display: none;
+}
+
+#politics-panel.visible {
+  display: block;
+}
+
+.pol-block {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.pol-block:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.pol-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pol-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin: 3px 0 6px;
+}
+
+.pol-heading {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+}
+
+.pol-warning {
+  font-size: 11px;
+  color: var(--bad);
+  margin-top: 5px;
+}
+
+.pol-poll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+.pol-poll-name {
+  flex: 0 0 108px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pol-poll-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pol-poll-bar div {
+  height: 100%;
+  background: var(--text-dim);
+}
+
+.pol-poll-bar div.winner {
+  background: var(--accent);
+}
+
+.pol-poll-share {
+  flex: 0 0 34px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.pol-contract {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.pol-contract-name {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pol-contract-status {
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.pol-contract.revoked .pol-contract-status {
+  color: var(--bad);
+}
+
+.kv.good .v {
+  color: var(--good);
+}
+
+.kv.bad .v {
+  color: var(--bad);
 }
