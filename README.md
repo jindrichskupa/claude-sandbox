@@ -13,14 +13,23 @@ npm run build      # production build into dist/
 npm test           # unit and scenario tests
 npm run smoke      # launch the built game in a browser and screenshot it
 npm run bundle     # fold everything into one self-contained HTML file
+npm run verify:pages  # serve the build under the Pages sub-path and load it in a browser
 ```
 
 ## Playing it
 
-Pushing to `main` publishes the game to GitHub Pages via `.github/workflows/pages.yml`,
-which lints and tests before it deploys. The workflow needs Pages switched on once, under
-**Settings → Pages → Source: GitHub Actions**; until that is done the deploy step fails with
-a permissions error and nothing else breaks.
+**https://jindrichskupa.github.io/claude-sandbox/**
+
+Pushing to the default branch publishes the game to GitHub Pages via
+`.github/workflows/pages.yml`, which lints, tests and builds before it deploys. The trigger
+asks the repository what its default branch is rather than naming one, so it cannot go stale
+when a branch is renamed or merged.
+
+One failure mode is worth naming because every other signal misses it: a project Pages site
+is served under `/<repo>/`, so a build with absolute asset paths compiles cleanly, deploys
+cleanly, reports success, and shows a blank page. `npm run check:pages` runs on every deploy
+and fails on any absolute reference; `npm run verify:pages` is the thorough local version,
+which serves the build under the real prefix and loads it in a browser.
 
 `npm run bundle` produces `dist-single/powergrid-tycoon.html`: the whole game — simulation,
 renderer and artwork — in a single document of about 0.6 MB that runs from a `file://` URL

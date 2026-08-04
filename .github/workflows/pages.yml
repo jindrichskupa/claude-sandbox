@@ -40,6 +40,11 @@ jobs:
 
       - run: npm run build
 
+      # A project Pages site is served under /<repo>/, so an absolute asset path builds
+      # cleanly, deploys cleanly, and produces a blank page. Cheap to check, invisible to
+      # every other signal.
+      - run: npm run check:pages
+
       # Also publish the standalone single file, so the game can be downloaded and run
       # offline from one document.
       - run: npm run bundle

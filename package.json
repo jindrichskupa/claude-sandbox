@@ -15,7 +15,9 @@
     "smoke": "node scripts/smoke.mjs",
     "build:single": "vite build --config vite.single.config.ts",
     "bundle": "npm run build:single && node scripts/bundleSingleFile.mjs",
-    "bundle:artifact": "npm run bundle && node scripts/bundleArtifact.mjs dist-single/powergrid-tycoon.fragment.html"
+    "bundle:artifact": "npm run bundle && node scripts/bundleArtifact.mjs dist-single/powergrid-tycoon.fragment.html",
+    "check:pages": "node scripts/checkPagesPaths.mjs",
+    "verify:pages": "node scripts/verifySubpath.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.6.6"
