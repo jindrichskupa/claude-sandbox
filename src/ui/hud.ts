@@ -29,7 +29,7 @@ import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 
 const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 
-export type Speed = 0 | 1 | 3 | 10
+export type Speed = 0 | 1 | 3 | 10 | 50
 
 export interface HudCallbacks {
   onSetSpeed: (speed: Speed) => void
@@ -43,6 +43,7 @@ export interface HudCallbacks {
   onSave: () => void
   onLoad: () => void
   onUpgradeLine: (edgeId: string) => void
+  onSkip: () => void
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -85,7 +86,7 @@ export class Hud {
   constructor(
     private readonly root: HTMLElement,
     private readonly world: World,
-    private readonly callbacks: HudCallbacks,
+    readonly callbacks: HudCallbacks,
   ) {
     // --- Top bar ---
     const topbar = el('div', 'panel')
@@ -114,12 +115,19 @@ export class Hud {
     topbar.appendChild(this.clock)
 
     const speeds = el('div', 'speed-controls')
-    for (const speed of [0, 1, 3, 10] as Speed[]) {
+    for (const speed of [0, 1, 3, 10, 50] as Speed[]) {
       const button = el('button', undefined, speed === 0 ? t('ui.pause') : `${speed}×`)
       button.addEventListener('click', () => this.callbacks.onSetSpeed(speed))
       speeds.appendChild(button)
       this.speedButtons.set(speed, button)
     }
+    // Even at fifty times, a quiet game year is nearly three minutes of watching a load curve
+    // breathe. This is the control for the stretches where nothing is meant to happen.
+    const skip = el('button', undefined, '⏭')
+    skip.id = 'skip-button'
+    skip.title = t('ui.skipToNext')
+    skip.addEventListener('click', () => this.callbacks.onSkip())
+    speeds.appendChild(skip)
     topbar.appendChild(speeds)
     root.appendChild(topbar)
 

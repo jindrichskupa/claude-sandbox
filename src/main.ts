@@ -20,6 +20,13 @@ import type { BuildSelection } from '@ui/buildPanel'
 import { formatMoney, setLocale, t } from '@i18n/index'
 import { makeSaveFile, readLocalSave, writeLocalSave } from '@sim/scenario/save'
 import {
+  notableChange,
+  notableState,
+  SKIP_LIMIT_TICKS,
+  type NotableReason,
+  type NotableState,
+} from '@sim/scenario/notable'
+import {
   beginHeatPipeConstruction,
   beginLineConstruction,
   beginPlantConstruction,
@@ -38,8 +45,25 @@ const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 
 /** Simulation ticks per real second at 1x. One in-game day takes 12 seconds. */
 const TICKS_PER_SECOND_AT_1X = 2
-/** Never simulate more than this many ticks in one frame, or a stall becomes a freeze. */
-const MAX_TICKS_PER_FRAME = 40
+
+/**
+ * How long one frame may spend inside the simulation.
+ *
+ * A budget in milliseconds rather than a fixed tick count, which the loop used to use. A tick
+ * costs whatever it costs on the machine in front of the player — a fixed cap of forty either
+ * wasted a fast machine's headroom or froze a slow one — and this way the fastest speed and the
+ * skip both run as fast as the hardware allows while leaving the frame enough time to draw.
+ */
+const SIM_BUDGET_MS = 12
+
+/**
+ * The same, while running on to the next event.
+ *
+ * Larger, because the trade is different: the player has explicitly asked to be somewhere else in
+ * time and is waiting for it. Thirty milliseconds a frame still leaves the page answering the
+ * mouse — the stop button has to work — while spending most of the machine on getting there.
+ */
+const SKIP_BUDGET_MS = 30
 
 async function main(): Promise<void> {
   setLocale('en')
@@ -67,6 +91,8 @@ async function main(): Promise<void> {
   let attached = false
 
   let speed: Speed = 1
+  /** A run-until-something-happens in progress, with where it started from and how far it has got. */
+  let skip: { from: NotableState; ticksRun: number } | null = null
 
   /** Set the placement mode and the instruction that goes with it. */
   const applySelection = (selection: BuildSelection): void => {
@@ -189,6 +215,16 @@ async function main(): Promise<void> {
       },
       onSave: save,
       onLoad: load,
+      onSkip: () => {
+        // Pressing it again while it is running means "stop here", which is the only sensible
+        // second meaning and saves a separate control.
+        if (skip) {
+          skip = null
+          hud.setHint(null)
+          return
+        }
+        skip = { from: notableState(world), ticksRun: 0 }
+      },
       onUpgradeLine: (edgeId) => {
         const result = upgradeLine(world, edgeId)
         hud.setHint(result.ok ? t('build.upgrading') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
@@ -403,6 +439,12 @@ async function main(): Promise<void> {
       speed = 10
       hud.setSpeed(speed)
     }
+    if (e.key === '4') {
+      speed = 50
+      hud.setSpeed(speed)
+    }
+    // The one that skips the quiet stretches, on the key next to the speeds it replaces.
+    if (e.key.toLowerCase() === 'f') hud.callbacks.onSkip()
     if (e.key === 'Escape') {
       if (map.buildMode) cancelBuild()
       else if (hud.politicsPanel.isOpen()) hud.politicsPanel.setOpen(false)
@@ -430,16 +472,46 @@ async function main(): Promise<void> {
     // A finished scenario stops the clock. Once the objectives have been judged there is nothing
     // left for another hour to change, and letting it run on would quietly overwrite the result
     // the player is still reading.
-    if (speed > 0 && !world.finances.bankrupt && world.outcome === 'playing') {
+    const playable = !world.finances.bankrupt && world.outcome === 'playing'
+    if (!playable) skip = null
+
+    if (skip) {
+      // Run as hard as this frame's budget allows, checking after every hour whether the world
+      // has done something worth stopping for. The budget is what keeps the page answering the
+      // mouse: without it a skip over a quiet year would lock the tab for fourteen seconds.
+      const until = performance.now() + SKIP_BUDGET_MS
+      let found: NotableReason | null = null
+      while (performance.now() < until && skip.ticksRun < SKIP_LIMIT_TICKS) {
+        world.step()
+        skip.ticksRun++
+        found = notableChange(skip.from, notableState(world))
+        if (found) break
+      }
+      if (found || skip.ticksRun >= SKIP_LIMIT_TICKS) {
+        // The map is only resynchronised at the end. Nobody is reading flow arrows during a
+        // fast-forward, and redrawing them every frame was costing more than the simulation.
+        map.syncToWorld()
+        hud.setHint(t(found ?? 'notable.timeLimit'))
+        skip = null
+        speed = 0
+        hud.setSpeed(0)
+      } else {
+        // Days rather than hours: at these rates the hour figure is a blur, and what the player
+        // wants to know is how much of the year they have spent looking for something.
+        hud.setHint(t('ui.skipping', { days: Math.floor(skip.ticksRun / 24) }))
+      }
+      hud.update()
+    } else if (speed > 0 && playable) {
       accumulator += dt * TICKS_PER_SECOND_AT_1X * speed
+      const until = performance.now() + SIM_BUDGET_MS
       let stepped = 0
-      while (accumulator >= 1 && stepped < MAX_TICKS_PER_FRAME) {
+      while (accumulator >= 1 && performance.now() < until) {
         world.step()
         accumulator -= 1
         stepped++
       }
       // Drop the backlog rather than trying to catch up forever on a slow machine.
-      if (stepped >= MAX_TICKS_PER_FRAME) accumulator = 0
+      if (accumulator > 1) accumulator = 0
       if (stepped > 0) map.syncToWorld()
     }
 

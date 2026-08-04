@@ -317,5 +317,16 @@
   "line.use.110": "Short local links",
   "line.use.220": "Regional transfer",
   "line.use.400": "Long-distance bulk power",
-  "ui.lossPer100km": "{mw} MW lost per 100 km at half load"
+  "ui.lossPer100km": "{mw} MW lost per 100 km at half load",
+  "ui.skipToNext": "Run on until something happens",
+  "ui.skipping": "Running on — {days} days so far. Press again to stop.",
+  "notable.construction": "Something in the fleet has changed",
+  "notable.grid": "A line has come into service",
+  "notable.event": "Something is happening",
+  "notable.government": "A new government has taken office",
+  "notable.contracts": "Support contracts have changed",
+  "notable.blackout": "Demand is going unserved",
+  "notable.objectives": "An objective has changed",
+  "notable.bankrupt": "The utility is out of money",
+  "notable.timeLimit": "A quiet year — nothing happened"
 }

@@ -465,6 +465,27 @@ try {
   await page.evaluate(() => window.game.hud.selectEdge(null))
   await page.keyboard.press('Space')
 
+  // --- Running on to the next thing that matters -------------------------
+  // At ten times speed a quiet game year is seven minutes of watching a load curve breathe.
+  const before = await page.evaluate(() => window.game.world.tick)
+  const t0 = Date.now()
+  await page.click('#skip-button')
+  await page.waitForFunction(
+    (t) => window.game.world.tick > t + 24 || !document.getElementById('hint')?.textContent?.includes('Running on'),
+    before,
+    { timeout: 30_000 },
+  )
+  await page.waitForTimeout(1500)
+  const skipped = await page.evaluate(() => ({
+    tick: window.game.world.tick,
+    hint: document.getElementById('hint')?.textContent,
+  }))
+  const elapsed = (Date.now() - t0) / 1000
+  const hours = skipped.tick - before
+  console.log(`skip ran ${hours} game hours in ${elapsed.toFixed(1)}s (${Math.round(hours / elapsed)} ticks/s):`, skipped.hint)
+  if (hours <= 0) throw new Error('The skip did not advance the clock')
+  if (!skipped.hint) throw new Error('The skip did not say why it stopped')
+
   // --- Objectives -------------------------------------------------------
   const objectives = await page.evaluate(() => {
     const g = window.game

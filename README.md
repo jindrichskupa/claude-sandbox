@@ -66,6 +66,15 @@ the document tries to fetch anything.
   loading and losses as a share of what is flowing; and a corridor that is short of capacity can
   take a **second circuit** on the towers already standing, at 45% of a new line's conductor cost,
   rather than a parallel line drawn on top of the first.
+- **A fast-forward that knows what you are waiting for.** Most hours in a working system are
+  uneventful by design, and the interesting parts are months apart — so besides the speed tiers
+  there is a control that runs the clock on until the world does something: a station enters
+  service, a government falls, an event is forewarned, demand starts going unserved. It stops on
+  the *hour* the thing happened rather than overshooting it, and says which thing it was. It works
+  by taking a signature of everything a player could care about and stopping when that changes,
+  rather than asking every system to announce itself — so a system added later cannot forget to
+  join in, because nothing announces itself at all. Measured in a browser: 340–430 hours a second,
+  against 100 at 50× and 20 at 10×.
 - **A brief you can lose, and a run you can put down.** The scenario states six objectives
   drawn from a closed set of measurable conditions, and the panel shows each one's live reading
   beside its last verdict. The verdict is annual — a continuous objective must not fail on one
