@@ -12,7 +12,21 @@ npm run dev        # development server
 npm run build      # production build into dist/
 npm test           # unit and scenario tests
 npm run smoke      # launch the built game in a browser and screenshot it
+npm run bundle     # fold everything into one self-contained HTML file
 ```
+
+## Playing it
+
+Pushing to `main` publishes the game to GitHub Pages via `.github/workflows/pages.yml`,
+which lints and tests before it deploys. The workflow needs Pages switched on once, under
+**Settings → Pages → Source: GitHub Actions**; until that is done the deploy step fails with
+a permissions error and nothing else breaks.
+
+`npm run bundle` produces `dist-single/powergrid-tycoon.html`: the whole game — simulation,
+renderer and artwork — in a single document of about 0.6 MB that runs from a `file://` URL
+with no network at all. All the artwork is generated at runtime, so there is nothing else to
+carry. `scripts/smokeSingle.mjs` opens it with every outbound request blocked and fails if
+the document tries to fetch anything.
 
 ## What exists today (milestones 1-4)
 

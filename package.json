@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests --ext .ts",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "build:single": "vite build --config vite.single.config.ts",
+    "bundle": "npm run build:single && node scripts/bundleSingleFile.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.6.6"
