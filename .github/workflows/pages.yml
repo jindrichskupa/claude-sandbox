@@ -2,7 +2,6 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
   # So a branch can be published before it is merged.
   workflow_dispatch:
 
@@ -19,6 +18,11 @@ concurrency:
 
 jobs:
   build:
+    # Publish whatever the default branch happens to be, rather than a branch named here.
+    # Naming one would be wrong twice over: it is wrong today, because this repository's
+    # default branch is not called main, and it would go stale again the moment the branch is
+    # renamed or merged. Asking the repository what its default branch is cannot drift.
+    if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
