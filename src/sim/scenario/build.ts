@@ -15,6 +15,7 @@ import { routeLine, simplifyRoute } from '../grid/routing'
 import { LifecyclePhase, type CityAsset, type PlantAsset } from '../assets/types'
 import { expectedCondition } from '../assets/aging'
 import { World, type ScenarioDef } from '../world'
+import type { SaveData } from './save'
 
 export function toScenarioDef(content: ScenarioContent): ScenarioDef {
   return {
@@ -33,6 +34,7 @@ export function toScenarioDef(content: ScenarioContent): ScenarioDef {
     carbonPricePerTonne: content.carbonPricePerTonne,
     initialRegimeId: content.initialRegimeId,
     objectives: content.objectives,
+    endYear: content.endYear,
     feedInTariffs: content.feedInTariffs ?? {},
   }
 }
@@ -170,6 +172,24 @@ export function buildWorld(content: ScenarioContent): World {
 
   // Prime the modifier layers and the first weather sample so tick 0 is already coherent.
   world.params.setTick(0)
+  // And judge the objectives once, so the panel opens on a list rather than on nothing. Without
+  // this the player would see an empty brief until the first year closed, which is the one point
+  // in the game where they most need to know what they have been asked to do.
+  world.judgeObjectives()
+  return world
+}
+
+/**
+ * Rebuild a world from a save.
+ *
+ * Constructs the scenario's world *empty* — no plants, no cities, no lines — and then applies
+ * the save over it. That ordering is what makes the map, the weather model and the island
+ * caches come out right without being saved: they are built from the scenario's seed, which has
+ * not changed, and only the things that genuinely vary are restored on top.
+ */
+export function loadWorld(content: ScenarioContent, data: SaveData): World {
+  const world = new World(toScenarioDef(content))
+  world.applySaveData(data)
   return world
 }
 

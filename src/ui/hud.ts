@@ -23,6 +23,7 @@ import { nodeLabel } from '@render/mapView'
 import { quoteRefurbishment, refurbishmentGains } from '@sim/build/commands'
 import { BuildPanel, type BuildSelection } from './buildPanel'
 import { PoliticsPanel } from './politicsPanel'
+import { ObjectivesPanel } from './objectivesPanel'
 import { cycleLifeUsed, energyCapacityMwh, isStorage, ratedEnergyMwh } from '@sim/dispatch/storage'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 
@@ -39,6 +40,8 @@ export interface HudCallbacks {
   onChooseEvent: (uid: string, choiceId: string) => void
   onSetMaintenance: (level: number) => void
   onSetInsured: (insured: boolean) => void
+  onSave: () => void
+  onLoad: () => void
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -72,6 +75,7 @@ export class Hud {
   private readonly priceCanvas: HTMLCanvasElement
   readonly buildPanel: BuildPanel
   readonly politicsPanel: PoliticsPanel
+  readonly objectivesPanel: ObjectivesPanel
 
   private selectedNodeId: string | null = null
   private readonly hint: HTMLDivElement
@@ -193,6 +197,7 @@ export class Hud {
       onOpen: () => {
         this.selectedNodeId = null
         this.politicsPanel.setOpen(false)
+        this.objectivesPanel.setOpen(false)
         this.renderInspector()
       },
     })
@@ -201,8 +206,20 @@ export class Hud {
       onOpen: () => {
         this.selectedNodeId = null
         this.buildPanel.setOpen(false)
+        this.objectivesPanel.setOpen(false)
         this.renderInspector()
       },
+    })
+
+    this.objectivesPanel = new ObjectivesPanel(root, world, {
+      onOpen: () => {
+        this.selectedNodeId = null
+        this.buildPanel.setOpen(false)
+        this.politicsPanel.setOpen(false)
+        this.renderInspector()
+      },
+      onSave: () => this.callbacks.onSave(),
+      onLoad: () => this.callbacks.onLoad(),
     })
 
     this.hint = el('div', 'panel')
@@ -225,7 +242,10 @@ export class Hud {
   selectNode(nodeId: string | null): void {
     // The inspector and the build panel occupy the same corner, so they take turns rather
     // than stacking on top of one another.
-    if (nodeId) this.buildPanel.setOpen(false)
+    if (nodeId) {
+      this.buildPanel.setOpen(false)
+      this.objectivesPanel.setOpen(false)
+    }
     this.selectedNodeId = nodeId
     this.renderInspector()
   }
@@ -285,6 +305,7 @@ export class Hud {
 
     this.buildPanel.render()
     this.politicsPanel.render()
+    this.objectivesPanel.render()
 
     const history = world.recentHistory(240)
     if (history.length > 1) {

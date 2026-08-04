@@ -39,8 +39,17 @@ with no network at all. All the artwork is generated at runtime, so there is not
 carry. `scripts/smokeSingle.mjs` opens it with every outbound request blocked and fails if
 the document tries to fetch anything.
 
-## What exists today (milestones 1-6)
+## What exists today (milestones 1-8)
 
+- **A brief you can lose, and a run you can put down.** The scenario states six objectives
+  drawn from a closed set of measurable conditions, and the panel shows each one's live reading
+  beside its last verdict. The verdict is annual — a continuous objective must not fail on one
+  bad hour — but the measurement is current, so the two can disagree, and the moment they do is
+  the warning. Objectives judged at the end stay *pending* even when currently satisfied,
+  because a capacity target you are about to demolish half of has not been banked. Saving keeps
+  what is authoritative and rebuilds what is derived; a reloaded game continues bit-identically,
+  which is testable only because every random draw is a pure function of
+  `(seed, stream, tick, key)` rather than a generator position that could be one draw out.
 - **Politics you provoke rather than receive.** Six governments spanning what governments
   actually do — market liberalisation, a renewables push, clean-and-firm, energy security,
   consumer prices first, fiscal consolidation — each with its own carbon price, support offers,
@@ -193,8 +202,10 @@ scripts/        probe.ts and storageCompare.ts (diagnostics), smoke.mjs (browser
 ## Controls
 
 Drag to pan, scroll to zoom, click a node to inspect it. `B` opens the build panel: pick a
-technology, then click a site; for a line, click the two substations in turn. Right-click or
-`Esc` abandons a placement. Space pauses; `1` `2` `3` set speed.
+technology, then click a site; for a line, click the two substations in turn. `P` opens
+politics, `O` the objectives — which is also where Save and Load live, since they belong to the
+run rather than to the grid. Right-click or `Esc` abandons a placement. Space pauses; `1` `2`
+`3` set speed.
 
 ## Measuring this simulation
 
@@ -253,13 +264,58 @@ models and what it actually models:
 
 | Milestone | Content |
 |---|---|
-| M7 | Learning curves and standardisation |
-| M8 | Campaign: scenarios, objectives, unlocks, saved games; publish to GitHub Pages |
-| M9+ | Cross-border interconnectors and transit; then market prices and rival utilities |
+| M7 | Prices that move with time: inflation, learning curves, standardisation, and technology that gets better *and* dearer |
+| M9 | More scenarios and unlocks. The objective conditions, the scenario registry and the save envelope are all in place; what is missing is written content |
+| M10+ | Cross-border interconnectors and transit; then market prices and rival utilities |
 
 The data model already carries the hooks these need — `ownerId` on every asset, a
 `commodity` tag on every edge, the full weather struct, and lifecycle fields — so they are
 additions rather than rewrites.
+
+### A note on how M7 has to work
+
+Costs currently do not move at all: a station built in 2035 costs what its source publication
+said it cost in 2023. Every price in the game has to move with time, and the reason that is a
+milestone rather than a multiplier is that the forces move in **opposite directions** and land
+on **different technologies by different amounts**. A single "things get cheaper" dial would
+teach the player something false.
+
+1. **Inflation** moves every price nominally and nothing really. Its natural home is already in
+   the content: `Sourced<T>` carries the year each figure refers to, so a 2020 IEA capital cost
+   and a 2023 NREL one are not the same money, and inflating each from its own `sourceYear` to
+   the game year is well defined. That the provenance system turns out to be exactly the
+   machinery an inflation model needs is a happy accident of having insisted on it from the
+   first commit.
+
+2. **Capital cost is not one thing.** Split each technology's capex into equipment, labour, and
+   civil works and land. Those three then move differently, and that is the whole point:
+
+   - **Equipment falls** in real terms with cumulative deployment. This is the learning curve
+     proper, driven by megawatts built rather than years elapsed, which is why
+     `cumulativeDeployedMw` has been on `WorldState` since M1.
+   - **Labour rises** faster than general inflation, as skilled construction labour does
+     everywhere.
+   - **Land and civil works rise** too, and neither has a learning curve worth the name: a
+     cubic metre of concrete poured on a difficult site in 2040 is not cheaper than one poured
+     in 2000.
+
+   The consequence is the thing the game currently cannot produce, and it is not a balance
+   choice: an equipment-dominated technology deployed at enormous scale gets radically cheaper,
+   while a civil-and-labour-dominated one built a handful of times gets *more expensive in real
+   terms*. That is the actual divergence between photovoltaics and new nuclear over the last
+   twenty years, and it falls out of the cost structure rather than being asserted.
+
+3. **Technological progress makes a machine better and dearer.** A turbine built ten years
+   later is more efficient, cleaner and longer-lived, and it costs more per kilowatt for
+   exactly those reasons. This is the one most often left out, and leaving it out produces the
+   fantasy where everything improves and nothing costs anything.
+
+4. **Standardisation** cuts capex and build time for repeated builds of the same type, which
+   rewards a coherent strategy over a zoo of one-offs.
+
+Operating costs, fuel, decommissioning and the tariff all have to move too, and for the same
+reasons — a decommissioning bill quoted in 2020 money is not what it costs to dismantle
+something in 2045.
 
 **Storage variety** beyond lithium and pumped hydro — flow batteries, compressed air,
 hydrogen, thermal — is now mostly a content question, since duration, round-trip efficiency

@@ -21,7 +21,7 @@ import { Layer, Op, type Modifier, type Param } from './types'
  */
 export const ALL_TARGETS = '*'
 
-interface Entry {
+export interface Entry {
   targetId: string
   mod: Modifier
 }
@@ -113,6 +113,26 @@ export class ModifierRegistry {
     if (!global) return own ?? []
     if (!own) return global
     return [...own, ...global]
+  }
+
+  /**
+   * Everything registered, as plain data.
+   *
+   * Only exists for saving a game. Most sources re-register themselves within a tick or a month
+   * — weather every hour, ageing and policy every month — but an event's effects carry an expiry
+   * and belong to an event that is already in force, so they cannot be recomputed from anything
+   * cheaper than the save itself.
+   */
+  toJSON(): Array<{ sourceId: string; entries: Entry[] }> {
+    return [...this.bySource].map(([sourceId, entries]) => ({ sourceId, entries }))
+  }
+
+  /** Replace everything with a saved snapshot. */
+  loadJSON(data: Array<{ sourceId: string; entries: Entry[] }>): void {
+    this.bySource.clear()
+    for (const { sourceId, entries } of data) this.bySource.set(sourceId, entries)
+    this.indexDirty = true
+    this._epoch++
   }
 
   /** Total number of registered modifiers. Diagnostics only. */

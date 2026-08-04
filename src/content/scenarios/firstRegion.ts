@@ -13,6 +13,7 @@ import { TEMPERATE_CLIMATE } from '../../sim/weather/weather'
 import type { PlantTypeId } from '../plantTypes'
 import type { VoltageLevel } from '../lineTypes'
 import type { PipeSize } from '../heatPipeTypes'
+import type { ObjectiveDef } from '../../sim/scenario/objectives'
 
 export interface NodeSpec {
   id: string
@@ -84,7 +85,9 @@ export interface ScenarioContent {
   plants: PlantSpec[]
   lines: LineSpec[]
   heatPipes: HeatPipeSpec[]
-  objectives: Array<{ id: string; descriptionKey: string }>
+  objectives: ObjectiveDef[]
+  /** The year the scenario is judged. */
+  endYear: number
   /**
    * Guaranteed price per MWh paid to a technology regardless of the market, by type.
    *
@@ -237,10 +240,62 @@ export const FIRST_REGION: ScenarioContent = {
 
   feedInTariffs: {},
 
+  // Thirty years: long enough that the inherited fleet must be replaced rather than nursed,
+  // and long enough for seven or eight governments to have their turn at the player.
+  endYear: 2025,
+
   objectives: [
-    { id: 'keep-lights-on', descriptionKey: 'objective.keepLightsOn' },
-    { id: 'stay-solvent', descriptionKey: 'objective.staySolvent' },
-    { id: 'replace-old-harbour', descriptionKey: 'objective.replaceOldHarbour' },
-    { id: 'keep-the-heat-on', descriptionKey: 'objective.keepTheHeatOn' },
+    {
+      id: 'keep-lights-on',
+      descriptionKey: 'objective.keepLightsOn',
+      condition: { kind: 'unservedShareBelow', threshold: 0.001 },
+      timing: 'continuous',
+      required: true,
+    },
+    {
+      id: 'keep-the-heat-on',
+      descriptionKey: 'objective.keepTheHeatOn',
+      // Not required, and deliberately so. The inherited heat system has a real weakness — a
+      // cogeneration unit tripping during a hard frost leaves a gap the boilers cannot quite
+      // cover — so demanding perfection would make the scenario turn on a coincidence rather
+      // than on a decision. It is the objective that separates a good run from a clean one.
+      condition: { kind: 'noUnservedHeat' },
+      timing: 'continuous',
+      required: false,
+    },
+    {
+      id: 'stay-solvent',
+      descriptionKey: 'objective.staySolvent',
+      condition: { kind: 'neverBankrupt' },
+      timing: 'continuous',
+      required: true,
+    },
+    {
+      id: 'replace-old-harbour',
+      descriptionKey: 'objective.replaceOldHarbour',
+      // Forty-one years into a forty-five-year life when the scenario opens. Retiring it is the
+      // one decision the whole starting position is built around.
+      condition: { kind: 'plantRetired', plantId: 'p_oldharbour' },
+      timing: 'atEnd',
+      required: true,
+    },
+    {
+      id: 'keep-the-capacity',
+      descriptionKey: 'objective.keepTheCapacity',
+      // Retiring Old Harbour without replacing it would satisfy the objective above and leave
+      // the region short. This is what stops that being a strategy.
+      condition: { kind: 'capacityAtLeast', mw: 2200 },
+      timing: 'atEnd',
+      required: true,
+    },
+    {
+      id: 'cleaner-than-inherited',
+      descriptionKey: 'objective.cleanerThanInherited',
+      // The inherited fleet runs at roughly 0.9 t/MWh. This asks for a real improvement without
+      // naming a technology that must deliver it — any route to the number counts.
+      condition: { kind: 'carbonIntensityBelow', tPerMwh: 0.6 },
+      timing: 'atEnd',
+      required: false,
+    },
   ],
 }

@@ -307,6 +307,17 @@ export class MapView {
     return this.sprites.substation
   }
 
+  /**
+   * Detach everything this view put on the stage.
+   *
+   * Needed because loading a save replaces the `World`, and a view still holding the old one
+   * would go on drawing plants that no longer exist. Textures are left alone — they belong to
+   * the tileset, which is a function of the scenario seed and survives the swap.
+   */
+  destroy(): void {
+    this.root.destroy({ children: true })
+  }
+
   /** Redraw everything that depends on the latest dispatch. Called once per simulation tick. */
   syncToWorld(): void {
     if (this.world.network.topologyEpoch !== this.lastTopologyEpoch) {

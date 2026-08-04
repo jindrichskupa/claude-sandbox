@@ -294,6 +294,105 @@ try {
   await page.screenshot({ path: join(OUT, '12-politics.png') })
   await page.evaluate(() => window.game.hud.politicsPanel.setOpen(false))
 
+  // --- Objectives -------------------------------------------------------
+  const objectives = await page.evaluate(() => {
+    const g = window.game
+    g.hud.objectivesPanel.setOpen(true)
+    const panel = document.getElementById('objectives-panel')
+    return {
+      visible: panel.classList.contains('visible'),
+      rows: panel.querySelectorAll('.obj').length,
+      chips: [...panel.querySelectorAll('.obj-chip')].map((n) => n.textContent),
+      numbers: [...panel.querySelectorAll('.obj-numbers')].map((n) => n.textContent),
+      outcome: g.world.outcome,
+      declared: g.world.scenario.objectives.length,
+    }
+  })
+  console.log('objectives:', objectives)
+  if (!objectives.visible) throw new Error('The objectives panel did not open')
+  if (objectives.rows !== objectives.declared) throw new Error('Not every objective was listed')
+  if (objectives.numbers.length === 0) throw new Error('No objective showed a measured value')
+  if (objectives.outcome !== 'playing') throw new Error('The scenario ended in the first few years')
+
+  await page.screenshot({ path: join(OUT, '13-objectives.png') })
+
+  // --- Save and load ----------------------------------------------------
+  // The property that matters is the one the unit tests prove: a loaded game continues
+  // identically. What only a browser can show is that the load survives the *renderer* — that
+  // the map is rebuilt against the new world rather than left pointing at the old one.
+  const saved = await page.evaluate(() => {
+    const g = window.game
+    g.world.finances.cash = 123_456_789
+    g.save()
+    g.world.finances.cash = 1
+    return {
+      hint: document.getElementById('hint').textContent,
+      stored: !!localStorage.getItem('powergrid-tycoon.save.v1'),
+      tick: g.world.tick,
+    }
+  })
+  console.log('saved:', saved)
+  if (!saved.stored) throw new Error('Saving wrote nothing to storage')
+
+  const loaded = await page.evaluate(() => {
+    const g = window.game
+    const before = g.world
+    g.load()
+    return {
+      hint: document.getElementById('hint').textContent,
+      swapped: g.world !== before,
+      cash: Math.round(g.world.finances.cash),
+      tick: g.world.tick,
+      plants: g.world.plants.length,
+      mapWorldIsCurrent: g.map.world === g.world,
+      hudWorldIsCurrent: g.hud.world === g.world,
+    }
+  })
+  console.log('loaded:', loaded)
+  if (!loaded.swapped) throw new Error('Loading did not replace the world')
+  if (loaded.cash !== 123_456_789) throw new Error(`Loaded the wrong state: cash ${loaded.cash}`)
+  if (loaded.tick !== saved.tick) throw new Error('The loaded game is at a different hour')
+  if (!loaded.mapWorldIsCurrent) throw new Error('The map is still drawing the old world')
+  if (!loaded.hudWorldIsCurrent) throw new Error('The overlay is still reading the old world')
+
+  // And it must go on running: a load that leaves a frozen game is not a load.
+  await page.evaluate(() => window.game.hud.setSpeed(3))
+  await page.keyboard.press('2')
+  await page.waitForTimeout(2000)
+  const resumed = await page.evaluate(() => window.game.world.tick)
+  console.log('resumed at tick:', resumed)
+  if (resumed <= loaded.tick) throw new Error('The loaded game did not resume')
+
+  await page.screenshot({ path: join(OUT, '14-after-load.png') })
+
+  // --- The end of a run -------------------------------------------------
+  // Forced rather than played out: reaching 2025 honestly is thirty simulated years, and the
+  // question here is only whether the screen renders and the clock stops.
+  const ending = await page.evaluate(async () => {
+    const g = window.game
+    g.world.outcome = 'won'
+    g.hud.update()
+    const panel = document.getElementById('game-over')
+    const tickAtEnd = g.world.tick
+    await new Promise((r) => setTimeout(r, 800))
+    return {
+      visible: panel.classList.contains('visible'),
+      heading: panel.querySelector('h2')?.textContent,
+      summarised: panel.querySelectorAll('.obj-summary').length,
+      clockStopped: g.world.tick === tickAtEnd,
+    }
+  })
+  console.log('end of run:', ending)
+  if (!ending.visible) throw new Error('The end-of-scenario screen did not appear')
+  if (ending.summarised === 0) throw new Error('The end screen did not say why the run ended')
+  if (!ending.clockStopped) throw new Error('The simulation kept running after the scenario ended')
+
+  await page.screenshot({ path: join(OUT, '15-scenario-complete.png') })
+  await page.evaluate(() => {
+    window.game.world.outcome = 'playing'
+    window.game.hud.update()
+  })
+
   const finalState = await page.evaluate(() => {
     const plants = window.game.world.plants
     return {

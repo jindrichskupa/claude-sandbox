@@ -38,7 +38,16 @@ import {
   type SupportContract,
 } from './policy/contracts'
 import { runElection, salienceFrom } from './policy/elections'
+import {
+  evaluateObjectives,
+  scenarioOutcome,
+  type ObjectiveContext,
+  type ObjectiveDef,
+  type ObjectiveProgress,
+  type ScenarioOutcome,
+} from './scenario/objectives'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
+import type { SaveData } from './scenario/save'
 import { EventDirector } from './events/director'
 import {
   addLedger,
@@ -142,11 +151,6 @@ export interface TickSnapshot {
   heatUnservedMw: number
 }
 
-export interface ScenarioObjective {
-  id: string
-  descriptionKey: string
-}
-
 export interface ScenarioDef {
   id: string
   nameKey: string
@@ -165,7 +169,9 @@ export interface ScenarioDef {
   carbonPricePerTonne: number
   /** The government in office when the scenario begins. */
   initialRegimeId: string
-  objectives: ScenarioObjective[]
+  objectives: ObjectiveDef[]
+  /** The year the scenario is judged. */
+  endYear: number
   /** Guaranteed price per MWh by technology, paid outside the market. */
   feedInTariffs: Partial<Record<string, number>>
 }
@@ -216,6 +222,12 @@ export class World {
   openLedger: PeriodLedger = emptyLedger()
   lastMonthLedger: PeriodLedger = emptyLedger()
   yearLedger: PeriodLedger = emptyLedger()
+  /** Everything since the scenario began, which is the window most objectives are judged over. */
+  lifetimeLedger: PeriodLedger = emptyLedger()
+
+  /** How each objective stands. Re-judged when the year closes; a breach is permanent. */
+  objectives: ObjectiveProgress[] = []
+  outcome: ScenarioOutcome = 'playing'
   private periodStartTick = 0
 
   readonly director = new EventDirector()
@@ -758,6 +770,7 @@ export class World {
 
     this.finances.trailingRevenue = this.finances.trailingRevenue * (11 / 12) + this.openLedger.revenue
     addLedger(this.yearLedger, this.openLedger)
+    addLedger(this.lifetimeLedger, this.openLedger)
     this.lastMonthLedger = this.openLedger
     this.openLedger = emptyLedger()
     this.periodStartTick = this.tick
@@ -834,6 +847,37 @@ export class World {
     this.lastElection = { year, fromId: previousId, toId: result.winnerId, contractsRevoked: revoked }
   }
 
+  /**
+   * Re-judge the scenario's objectives.
+   *
+   * Once a year rather than every hour, because an objective is a claim about how the year went
+   * and because a continuous failure is permanent — judging it hourly would fail a player for a
+   * single bad hour that the year as a whole absorbed.
+   */
+  judgeObjectives(): void {
+    const context = this.objectiveContext()
+    this.objectives = evaluateObjectives(this.scenario.objectives, context, this.objectives)
+    this.outcome = scenarioOutcome(this.scenario.objectives, this.objectives, context)
+  }
+
+  /**
+   * What the objectives are measured against, right now.
+   *
+   * Exposed rather than kept inside `judgeObjectives` so the panel can take a live reading of
+   * the same numbers between judgements. The verdict is annual — a continuous objective must not
+   * fail on one bad hour — but the *measurement* should be current, or the player watching their
+   * unserved-energy allowance drain would be reading a figure up to a year out of date.
+   */
+  objectiveContext(): ObjectiveContext {
+    return {
+      plants: this.plants,
+      finances: this.finances,
+      lifetime: this.lifetimeLedger,
+      year: this.date.year,
+      endYear: this.scenario.endYear,
+    }
+  }
+
   private closeYear(): void {
     // Public opinion follows outcomes the utility produced — reliability and emissions —
     // never the identity of the technologies that produced them.
@@ -880,6 +924,8 @@ export class World {
     this.state.investorConfidence = Math.min(1, this.state.investorConfidence + CONFIDENCE_RECOVERY_PER_YEAR)
 
     if (this.tick >= this.state.nextElectionTick) this.holdElection(this.date.year)
+
+    this.judgeObjectives()
 
     this.yearLedger = emptyLedger()
     this.director.startYear()
@@ -965,5 +1011,111 @@ export class World {
 
   static playerOwner(): string {
     return PLAYER
+  }
+
+  // -------------------------------------------------------------------------
+  // Saving and loading
+  // -------------------------------------------------------------------------
+
+  /**
+   * Everything that could not be recomputed. See `scenario/save.ts` for why the list is this
+   * short — the map, the weather model, the islands, the parameter cache and every chart are all
+   * functions of what is here, and the randomness is stateless by construction.
+   */
+  toSaveData(): SaveData {
+    return {
+      tick: this.tick,
+      weather: this.weather,
+      nodes: this.network.allNodes(),
+      edges: this.network.allEdges(),
+      plants: this.plants,
+      cities: this.cities,
+      state: this.state,
+      finances: this.finances,
+      openLedger: this.openLedger,
+      lastMonthLedger: this.lastMonthLedger,
+      yearLedger: this.yearLedger,
+      lifetimeLedger: this.lifetimeLedger,
+      periodStartTick: this.periodStartTick,
+      serial: this.serial,
+      spending: this.spending,
+      energiseAt: [...this.energiseAt],
+      recentBlackoutTicks: this.recentBlackoutTicks,
+      lastSystemPrice: this.lastSystemPrice,
+      priceWindow: this.priceWindow,
+      termPriceSum: this.termPriceSum,
+      termPriceTicks: this.termPriceTicks,
+      termGenerationByFuel: [...this.termGenerationByFuel],
+      director: this.director.state,
+      objectives: this.objectives,
+      outcome: this.outcome,
+      modifiers: this.registry.toJSON(),
+    }
+  }
+
+  /**
+   * Replace this world's state with a save.
+   *
+   * Structured as an overwrite of a freshly constructed world rather than a constructor, so the
+   * terrain and the weather model are already built from the scenario's seed and this only has
+   * to deal with what genuinely varies. Everything is deep-copied out of the save so a loaded
+   * game cannot alias the file it came from — a game that mutated its own save while playing
+   * would be a memorable bug.
+   */
+  applySaveData(data: SaveData): void {
+    const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T
+
+    this.tick = data.tick
+    this.weather = clone(data.weather)
+
+    for (const node of clone(data.nodes)) this.network.addNode(node)
+    for (const edge of clone(data.edges)) this.network.addEdge(edge)
+
+    this.plants.length = 0
+    this.plantsById.clear()
+    for (const plant of clone(data.plants)) {
+      this.plants.push(plant)
+      this.plantsById.set(plant.id, plant)
+    }
+
+    this.cities.length = 0
+    this.citiesById.clear()
+    for (const city of clone(data.cities)) {
+      this.cities.push(city)
+      this.citiesById.set(city.id, city)
+    }
+
+    Object.assign(this.state, clone(data.state))
+    Object.assign(this.finances, clone(data.finances))
+
+    this.openLedger = clone(data.openLedger)
+    this.lastMonthLedger = clone(data.lastMonthLedger)
+    this.yearLedger = clone(data.yearLedger)
+    this.lifetimeLedger = clone(data.lifetimeLedger)
+    this.periodStartTick = data.periodStartTick
+    this.serial = data.serial
+
+    this.spending.length = 0
+    this.spending.push(...clone(data.spending))
+    this.energiseAt.clear()
+    for (const [id, tick] of data.energiseAt) this.energiseAt.set(id, tick)
+
+    this.recentBlackoutTicks = data.recentBlackoutTicks
+    this.lastSystemPrice = data.lastSystemPrice
+    this.priceWindow.length = 0
+    this.priceWindow.push(...data.priceWindow)
+
+    this.termPriceSum = data.termPriceSum
+    this.termPriceTicks = data.termPriceTicks
+    this.termGenerationByFuel = new Map(clone(data.termGenerationByFuel) as Array<[FuelId, number]>)
+
+    Object.assign(this.director.state, clone(data.director))
+    this.objectives = clone(data.objectives)
+    this.outcome = data.outcome
+
+    this.registry.loadJSON(clone(data.modifiers))
+    // The parameter cache is keyed by tick, so it has to be told which tick it is now or the
+    // first read after a load would return a value computed for a different year.
+    this.params.setTick(this.tick)
   }
 }

@@ -8,12 +8,13 @@
  */
 
 import { Application } from 'pixi.js'
-import { buildWorld } from '@sim/scenario/build'
+import { buildWorld, loadWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { MapView, TILE_PX, type BuildMode } from '@render/mapView'
 import { Hud, type Speed } from '@ui/hud'
 import type { BuildSelection } from '@ui/buildPanel'
 import { setLocale, t } from '@i18n/index'
+import { makeSaveFile, readLocalSave, writeLocalSave } from '@sim/scenario/save'
 import {
   beginHeatPipeConstruction,
   beginLineConstruction,
@@ -49,7 +50,13 @@ async function main(): Promise<void> {
     autoDensity: true,
   })
 
-  const world = buildWorld(FIRST_REGION)
+  // Not `const`: loading a save replaces all three, and everything below reaches them through
+  // these bindings rather than capturing a particular instance. That is the whole trick that
+  // lets a load happen without reloading the page.
+  let world = buildWorld(FIRST_REGION)
+  let hud!: Hud
+  let map!: MapView
+  let attached = false
 
   let speed: Speed = 1
 
@@ -78,53 +85,115 @@ async function main(): Promise<void> {
     hud.buildPanel.select(null)
   }
 
-  const hud = new Hud(overlay, world, {
-    onSetSpeed: (s) => {
-      speed = s
-      hud.setSpeed(s)
-    },
-    onSelectBuild: applySelection,
-    onRetire: (plantId) => {
-      const result = retirePlant(world, plantId)
-      hud.setHint(result.ok ? t('build.retiring') : t(result.quote.reasonKey ?? 'build.notRetirable'))
-      hud.update()
-    },
-    onRefurbish: (plantId) => {
-      const result = refurbishPlant(world, plantId)
-      hud.setHint(result.ok ? t('build.refurbishing') : t(result.quote.reasonKey ?? 'build.notRefurbishable'))
-      hud.update()
-    },
-    onMothball: (plantId, mothball) => {
-      if (mothball) mothballPlant(world, plantId)
-      else reactivatePlant(world, plantId)
-      hud.update()
-    },
-    onChooseEvent: (uid, choiceId) => {
-      world.director.choose(uid, choiceId)
-      hud.update()
-    },
-    onSetMaintenance: (level) => {
-      world.state.maintenanceLevel = level
-      hud.update()
-    },
-    onSetInsured: (insured) => {
-      world.state.insured = insured
-      hud.update()
-    },
-  })
-  hud.setSpeed(speed)
+  /**
+   * Write the current run to the browser's single save slot.
+   *
+   * The timestamp is passed in from here rather than read inside the simulation, which has no
+   * business knowing what the wall clock says: everything in there is a function of the tick.
+   */
+  const save = (): void => {
+    const file = makeSaveFile(FIRST_REGION.id, world.toSaveData(), new Date().toISOString())
+    hud.setHint(t(writeLocalSave(file) ? 'ui.saved' : 'ui.saveFailed'))
+  }
 
-  const map = new MapView(app, world, {
-    onSelectNode: (nodeId) => {
-      if (map.buildMode) return
-      hud.selectNode(nodeId)
-    },
-  })
+  /**
+   * Restore the saved run, replacing the world, the map and the overlay.
+   *
+   * Rebuilding the view rather than pointing the old one at the new world is the safe order:
+   * the map caches node graphics, pylons and particles keyed by asset, and a plant that the
+   * save does not contain would otherwise go on being drawn.
+   */
+  const load = (): void => {
+    const file = readLocalSave()
+    if (!file) {
+      hud.setHint(t('ui.noSave'))
+      return
+    }
+    try {
+      world = loadWorld(FIRST_REGION, file.data)
+    } catch {
+      hud.setHint(t('ui.loadFailed'))
+      return
+    }
+    speed = 0
+    attach()
+    hud.setHint(t('ui.loaded'))
+  }
+
+  /** Build the overlay and the map for whatever `world` currently is. */
+  const attach = (): void => {
+    // Where the player was looking is not part of the saved game — it is not part of the game at
+    // all — but throwing them back to a fitted view of the whole region after a load would lose
+    // the one piece of context they had. So it is carried across by hand.
+    let view: { x: number; y: number; zoom: number } | null = null
+    if (attached) {
+      view = { x: map.camera.x, y: map.camera.y, zoom: map.camera.zoom }
+      hud.destroy()
+      map.destroy()
+    }
+    attached = true
+    hud = makeHud()
+    map = makeMap()
+    if (view) {
+      map.camera.x = view.x
+      map.camera.y = view.y
+      map.camera.zoom = view.zoom
+      map.applyCamera()
+    }
+    hud.setSpeed(speed)
+    map.syncToWorld()
+    hud.update()
+  }
+
+  const makeHud = (): Hud =>
+    new Hud(overlay, world, {
+      onSetSpeed: (s) => {
+        speed = s
+        hud.setSpeed(s)
+      },
+      onSelectBuild: applySelection,
+      onRetire: (plantId) => {
+        const result = retirePlant(world, plantId)
+        hud.setHint(result.ok ? t('build.retiring') : t(result.quote.reasonKey ?? 'build.notRetirable'))
+        hud.update()
+      },
+      onRefurbish: (plantId) => {
+        const result = refurbishPlant(world, plantId)
+        hud.setHint(result.ok ? t('build.refurbishing') : t(result.quote.reasonKey ?? 'build.notRefurbishable'))
+        hud.update()
+      },
+      onMothball: (plantId, mothball) => {
+        if (mothball) mothballPlant(world, plantId)
+        else reactivatePlant(world, plantId)
+        hud.update()
+      },
+      onChooseEvent: (uid, choiceId) => {
+        world.director.choose(uid, choiceId)
+        hud.update()
+      },
+      onSetMaintenance: (level) => {
+        world.state.maintenanceLevel = level
+        hud.update()
+      },
+      onSetInsured: (insured) => {
+        world.state.insured = insured
+        hud.update()
+      },
+      onSave: save,
+      onLoad: load,
+    })
+
+  const makeMap = (): MapView =>
+    new MapView(app, world, {
+      onSelectNode: (nodeId) => {
+        if (map.buildMode) return
+        hud.selectNode(nodeId)
+      },
+    })
 
   // Run one tick immediately so the first frame shows a live system rather than an empty one.
   world.step()
-  map.syncToWorld()
-  hud.update()
+  attach()
 
   // --- Input -------------------------------------------------------------
 
@@ -285,10 +354,12 @@ async function main(): Promise<void> {
     if (e.key === 'Escape') {
       if (map.buildMode) cancelBuild()
       else if (hud.politicsPanel.isOpen()) hud.politicsPanel.setOpen(false)
+      else if (hud.objectivesPanel.isOpen()) hud.objectivesPanel.setOpen(false)
       else hud.selectNode(null)
     }
     if (e.key.toLowerCase() === 'b') hud.buildPanel.setOpen(!hud.buildPanel.isOpen())
     if (e.key.toLowerCase() === 'p') hud.politicsPanel.setOpen(!hud.politicsPanel.isOpen())
+    if (e.key.toLowerCase() === 'o') hud.objectivesPanel.setOpen(!hud.objectivesPanel.isOpen())
   })
 
   window.addEventListener('resize', () => {
@@ -304,7 +375,10 @@ async function main(): Promise<void> {
   app.ticker.add((ticker) => {
     const dt = Math.min(0.25, ticker.deltaMS / 1000)
 
-    if (speed > 0 && !world.finances.bankrupt) {
+    // A finished scenario stops the clock. Once the objectives have been judged there is nothing
+    // left for another hour to change, and letting it run on would quietly overwrite the result
+    // the player is still reading.
+    if (speed > 0 && !world.finances.bankrupt && world.outcome === 'playing') {
       accumulator += dt * TICKS_PER_SECOND_AT_1X * speed
       let stepped = 0
       while (accumulator >= 1 && stepped < MAX_TICKS_PER_FRAME) {
@@ -328,11 +402,21 @@ async function main(): Promise<void> {
     map.drawBuildOverlay()
   })
 
-  // Expose the world for the smoke test and for poking at it in the console.
+  // Expose the world for the smoke test and for poking at it in the console. Getters rather
+  // than fields, because loading a save replaces all three and a snapshot taken at boot would
+  // quietly go on describing the game the player abandoned.
   ;(window as unknown as { game: unknown }).game = {
-    world,
-    map,
-    hud,
+    get world() {
+      return world
+    },
+    get map() {
+      return map
+    },
+    get hud() {
+      return hud
+    },
+    save,
+    load,
     build: {
       beginPlantConstruction,
       beginLineConstruction,
