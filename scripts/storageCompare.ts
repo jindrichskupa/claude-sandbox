@@ -15,7 +15,7 @@ import { TICKS_PER_YEAR } from '../src/sim/core/time'
 import { beginLineConstruction, beginPlantConstruction } from '../src/sim/build/commands'
 import { LifecyclePhase } from '../src/sim/assets/types'
 import { energyCapacityMwh } from '../src/sim/dispatch/storage'
-import { isBuildable } from '../src/sim/map/terrain'
+import { judgeSite } from '../src/sim/build/siting'
 
 const SEEDS = [20250803, 20250804, 20250805, 11111, 22222, 33333, 44444, 55555, 66666, 77777, 88888, 99999]
 const YEARS = 5
@@ -32,18 +32,27 @@ function run(seed: number, typeId: PlantTypeId | null): Run {
   let plantId: string | null = null
 
   if (typeId) {
-    // Terrain comes from the seed, so a fixed site is not buildable in every world. Take the
-    // nearest legal spot to the capital, which keeps the comparison geographically fair.
+    // Siting rules mean a technology cannot go just anywhere: pumped storage needs a head
+    // drop the capital's surroundings may not have. Take the best site on the map for this
+    // technology, breaking ties toward the load, which is what a player would do.
     const capital = world.network.requireNode('n_rivermouth')
     let site: { x: number; y: number } | null = null
-    for (let r = 2; r <= 8 && !site; r++) {
-      for (let dy = -r; dy <= r && !site; dy++) {
-        for (let dx = -r; dx <= r && !site; dx++) {
-          const x = capital.x + dx
-          const y = capital.y + dy
-          if (x < 0 || y < 0 || x >= world.scenario.mapWidth || y >= world.scenario.mapHeight) continue
-          if (!isBuildable(world.terrain, x, y)) continue
-          if (world.nodeNear(x, y, 1.5)) continue
+    let bestScore = -Infinity
+    for (let y = 0; y < world.scenario.mapHeight; y++) {
+      for (let x = 0; x < world.scenario.mapWidth; x++) {
+        if (world.nodeNear(x, y, 1.5)) continue
+        const verdict = judgeSite(typeId, {
+          terrain: world.terrain,
+          network: world.network,
+          cities: world.cities,
+          x,
+          y,
+        })
+        if (!verdict.ok) continue
+        const distance = Math.hypot(x - capital.x, y - capital.y)
+        const score = verdict.quality - distance * 0.02
+        if (score > bestScore) {
+          bestScore = score
           site = { x, y }
         }
       }
