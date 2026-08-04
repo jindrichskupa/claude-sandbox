@@ -85,21 +85,44 @@ export function generateTerrain(seed: number, width: number, height: number): Te
       const e = Math.max(0, Math.min(1, n * 1.25 - coast * 0.55 + 0.12))
       elevation[i] = e
 
-      let tile: Tile
-      if (e < 0.18) tile = Tile.Water
-      else if (e < 0.42) tile = Tile.Plain
-      else if (e < 0.58) tile = Tile.Forest
-      else if (e < 0.75) tile = Tile.Hill
-      else tile = Tile.Mountain
-      tiles[i] = tile
-
-      // Wind exposure is filled in below, once the whole elevation field exists.
+      // Tile class is assigned below, by rank rather than by absolute height.
     }
   }
+
+  classifyByQuantile(tiles, elevation)
 
   computeWindExposure(base, width, height, elevation, tiles, windIndex)
   carveRivers(width, height, elevation, tiles, riverIndex)
   return { width, height, tiles, elevation, windIndex, riverIndex }
+}
+
+/**
+ * Turn the elevation field into tile classes by rank rather than by fixed thresholds.
+ *
+ * Fixed thresholds were the obvious approach and gave a badly wrong landscape: fractal noise
+ * clusters near its mean, so the same cut-offs produced 2% water and 36% mountain on one map
+ * and 0% water and 7% mountain on another. Ranking guarantees the proportions whatever the
+ * noise happens to do, and because the elevation field already slopes toward one corner, the
+ * water still gathers into a coast rather than scattering into puddles.
+ */
+const TILE_QUANTILES: Array<[number, Tile]> = [
+  [0.2, Tile.Water],
+  [0.55, Tile.Plain],
+  [0.76, Tile.Forest],
+  [0.93, Tile.Hill],
+  [1, Tile.Mountain],
+]
+
+function classifyByQuantile(tiles: Uint8Array, elevation: Float32Array): void {
+  const order = Array.from({ length: elevation.length }, (_, i) => i).sort(
+    (a, b) => elevation[a]! - elevation[b]!,
+  )
+  const total = order.length
+  let cursor = 0
+  for (const [quantile, tile] of TILE_QUANTILES) {
+    const limit = Math.round(quantile * total)
+    for (; cursor < limit; cursor++) tiles[order[cursor]!] = tile
+  }
 }
 
 /**
@@ -155,6 +178,13 @@ function computeWindExposure(
  * up in the valleys where they belong instead of being scattered noise, and they get larger
  * as they descend.
  */
+const ORTHOGONAL: Array<[number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+]
+
 function carveRivers(
   width: number,
   height: number,
@@ -174,19 +204,20 @@ function carveRivers(
     const y = (i / width) | 0
     if (tiles[i] === Tile.Water) continue
 
+    // Deliberately four-connected rather than eight. A diagonal step would leave a visual
+    // gap where the renderer draws river arms toward its four neighbours, so a river carved
+    // diagonally would appear as a chain of disconnected ditches. Orthogonal flow keeps the
+    // drainage and the drawing in agreement.
     let lowest = -1
     let lowestElevation = elevation[i]!
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue
-        const nx = x + dx
-        const ny = y + dy
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
-        const n = ny * width + nx
-        if (elevation[n]! < lowestElevation) {
-          lowestElevation = elevation[n]!
-          lowest = n
-        }
+    for (const [dx, dy] of ORTHOGONAL) {
+      const nx = x + dx
+      const ny = y + dy
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+      const n = ny * width + nx
+      if (elevation[n]! < lowestElevation) {
+        lowestElevation = elevation[n]!
+        lowest = n
       }
     }
     if (lowest >= 0) flow[lowest]! += flow[i]!
@@ -275,13 +306,16 @@ export function windSiteFactor(map: TerrainMap, x: number, y: number): number {
 export function terrainCostFactor(map: TerrainMap, x: number, y: number): number {
   switch (tileAt(map, x, y)) {
     case Tile.Water:
-      return 2.6
+      // A water crossing means either a very long span or a submarine cable.
+      return 4
     case Tile.Mountain:
-      return 2.2
+      // Access roads, helicopter erection and winter working; several times flat-land cost.
+      return 3.5
     case Tile.Hill:
-      return 1.4
+      return 1.5
     case Tile.Forest:
-      return 1.15
+      // Felling and maintaining a wayleave.
+      return 1.2
     default:
       return 1
   }

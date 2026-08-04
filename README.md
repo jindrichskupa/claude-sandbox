@@ -14,7 +14,14 @@ npm test           # unit and scenario tests
 npm run smoke      # launch the built game in a browser and screenshot it
 ```
 
-## What exists today (milestones 1-3)
+## What exists today (milestones 1-4)
+
+- **Pixel art.** Terrain, stations, towns and pylons are drawn programmatically into 16×16
+  textures with a fixed palette and one light direction, sampled nearest-neighbour at integer
+  scale. Town windows light up at night and go dark in a blackout.
+- **Lines follow corridors.** A transmission line is routed across the map by A* weighted by
+  what each tile costs to cross, so going round a ridge is a real option; pylons march along
+  the route and the placement preview shows the corridor the line would actually take.
 
 - **The map is a constraint.** Each technology is sited by what it physically needs: a
   run-of-river station wants a river, a steam plant wants cooling water within reach, a
@@ -92,7 +99,7 @@ the sequence of anything that already exists.
 ```
 src/
   sim/          simulation core — pure TypeScript, no renderer, no DOM
-    grid/       network topology and island detection
+    grid/       network topology, island detection, line routing
     dispatch/   min-cost flow solver, hourly dispatch, forecast, storage policy
     build/      construction, refurbishment, retirement, siting rules
     weather/    seeded weather and its parameter effects
@@ -101,7 +108,7 @@ src/
     economy/    costs, revenue, settlement
     map/        terrain, rivers, wind exposure and route costs
   content/      data with provenance: technologies, fuels, lines, scenarios
-  render/       PixiJS map, camera, flow animation
+  render/       PixiJS map, camera, flow animation, pixel-art tiles and sprites
   ui/           HTML overlay: panels, charts, build menu, the explanation inspector
   i18n/         t() and the English dictionary
 tests/          Vitest
@@ -136,9 +143,8 @@ Single-run comparisons of this quantity mean nothing.
 Stated plainly, because they are the difference between what the simulation looks like it
 models and what it actually models:
 
-- **Lines are drawn substation to substation as straight lines.** No route drawing, no
-  pylons, no following terrain.
-- **Graphics are placeholder.** Coloured squares and circles; pixel art is the intent.
+- **Routes cannot be drawn by hand.** The router picks the corridor; the player cannot drag
+  one tile by tile the way a Transport Tycoon player lays track.
 - **Costs do not move with time.** A technology built in 2020 costs what its source year says
   it cost, so `availableFromYear` prevents the obvious absurdities but a learning curve is
   what would actually make the timeline honest.
@@ -153,7 +159,6 @@ models and what it actually models:
 
 | Milestone | Content |
 |---|---|
-| M4 | Pixel-art tileset; route-drawn transmission lines with pylons |
 | M5 | District heating and cogeneration; the event and disaster system |
 | M6 | Subsidies and their withdrawal, taxes, carbon pricing, elections, fuel geopolitics |
 | M7 | Learning curves and standardisation |

@@ -9,7 +9,7 @@
  * its limit, so a saturated corridor is obvious at a glance without reading a single number.
  */
 
-import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js'
+import { Application, Container, Graphics, Sprite, Text, TextStyle, TilingSprite } from 'pixi.js'
 import { LINE_TYPES } from '@content/lineTypes'
 import { PLANT_TYPES } from '@content/plantTypes'
 import type { World } from '@sim/world'
@@ -20,16 +20,16 @@ import { judgeSite } from '@sim/build/siting'
 import type { PlantTypeId } from '@content/plantTypes'
 import { Camera } from './camera'
 import { t } from '@i18n/index'
+import { buildTileset, EDGE_E, EDGE_N, EDGE_S, EDGE_W, TILE_SOURCE_PX, variantFor, type Tileset } from './pixelArt'
+import { buildSprites, type SpriteSet } from './sprites'
+import { routeLine, simplifyRoute } from '@sim/grid/routing'
 
-export const TILE_PX = 26
-
-const TERRAIN_COLOURS: Record<Tile, number> = {
-  [Tile.Water]: 0x1b3a4b,
-  [Tile.Plain]: 0x3f5d43,
-  [Tile.Forest]: 0x2f4a35,
-  [Tile.Hill]: 0x5a5b3c,
-  [Tile.Mountain]: 0x6b6558,
-}
+/**
+ * Screen size of a tile. An exact multiple of the source resolution, so every source pixel
+ * lands on a whole number of screen pixels — the difference between pixel art and a blur.
+ */
+export const TILE_SCALE = 2
+export const TILE_PX = TILE_SOURCE_PX * TILE_SCALE
 
 const CATEGORY_COLOURS: Record<string, number> = {
   thermal: 0xc86a3a,
@@ -73,16 +73,20 @@ export type BuildMode =
 export class MapView {
   readonly camera: Camera
   private readonly root = new Container()
-  private readonly terrainLayer = new Graphics()
+  private readonly terrainLayer = new Container()
   private readonly lineLayer = new Graphics()
   private readonly particleLayer = new Container()
+  private readonly pylonLayer = new Container()
   private readonly nodeLayer = new Container()
   private readonly labelLayer = new Container()
   private readonly buildLayer = new Graphics()
 
   private readonly terrain: TerrainMap
+  private readonly tileset: Tileset
+  private readonly sprites: SpriteSet
   private particles: Particle[] = []
   private nodeGraphics = new Map<string, Graphics>()
+  private nodeSprites = new Map<string, Sprite>()
   private lastTopologyEpoch = -1
   selectedNodeId: string | null = null
 
@@ -102,11 +106,14 @@ export class MapView {
   ) {
     // Terrain belongs to the world — it decides siting, not just colour.
     this.terrain = world.terrain
+    this.tileset = buildTileset(world.scenario.seed)
+    this.sprites = buildSprites()
     this.camera = new Camera(app.canvas.width, app.canvas.height)
 
     this.root.addChild(
       this.terrainLayer,
       this.lineLayer,
+      this.pylonLayer,
       this.particleLayer,
       this.buildLayer,
       this.nodeLayer,
@@ -116,76 +123,166 @@ export class MapView {
 
     this.drawTerrain()
     this.buildNodes()
+    this.rebuildPylons()
     this.camera.fit(world.scenario.mapWidth * TILE_PX, world.scenario.mapHeight * TILE_PX)
     this.applyCamera()
   }
 
+  /**
+   * Lay out the terrain once, as sprites rather than rectangles.
+   *
+   * A shoreline overlay is added wherever land meets water and a river overlay wherever the
+   * drainage is high enough to see, which together do most of the work of making a grid of
+   * squares read as landscape.
+   */
   private drawTerrain(): void {
-    const g = this.terrainLayer
-    g.clear()
+    const layer = this.terrainLayer
+    layer.removeChildren()
 
     // Open water well beyond the map bounds, so panning to the edge shows a coastline
     // rather than the abrupt rectangle where the tile array happens to stop.
-    const bleed = 30
-    g.rect(
-      -bleed * TILE_PX,
-      -bleed * TILE_PX,
-      (this.terrain.width + bleed * 2) * TILE_PX,
-      (this.terrain.height + bleed * 2) * TILE_PX,
-    ).fill({ color: 0x14293a })
+    // A tiling sprite rather than a flat rectangle: six thousand individual water sprites
+    // would be absurd, and a plain fill makes the world stop at a hard rectangle.
+    const bleed = 24
+    const openSea = new TilingSprite({
+      texture: this.tileset.terrain[Tile.Water][0]!,
+      width: (this.terrain.width + bleed * 2) * TILE_SOURCE_PX,
+      height: (this.terrain.height + bleed * 2) * TILE_SOURCE_PX,
+    })
+    openSea.scale.set(TILE_SCALE)
+    openSea.position.set(-bleed * TILE_PX, -bleed * TILE_PX)
+    layer.addChild(openSea)
+
+    const tileAtSafe = (x: number, y: number): Tile => {
+      if (x < 0 || y < 0 || x >= this.terrain.width || y >= this.terrain.height) return Tile.Water
+      return this.terrain.tiles[y * this.terrain.width + x] as Tile
+    }
+    const riverAt = (x: number, y: number): number => {
+      if (x < 0 || y < 0 || x >= this.terrain.width || y >= this.terrain.height) return 0
+      return this.terrain.riverIndex[y * this.terrain.width + x] ?? 0
+    }
+
+    // Only real rivers are drawn. Lower thresholds pick up every minor gully, and because
+    // the drainage is four-connected the result reads as a grid of irrigation canals rather
+    // than as a river system.
+    const RIVER_VISIBLE = 0.66
 
     for (let y = 0; y < this.terrain.height; y++) {
       for (let x = 0; x < this.terrain.width; x++) {
-        const tile = this.terrain.tiles[y * this.terrain.width + x] as Tile
-        const elevation = this.terrain.elevation[y * this.terrain.width + x]!
-        // A touch of elevation shading keeps a flat colour grid from looking like a spreadsheet.
-        const shade = 0.85 + elevation * 0.3
-        const base = TERRAIN_COLOURS[tile]
-        const shaded = lerpColour(0x000000, base, Math.min(1, shade))
-        g.rect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX).fill({ color: shaded })
+        const tile = tileAtSafe(x, y)
+        const variants = this.tileset.terrain[tile]
+        const sprite = new Sprite(variants[variantFor(x, y) % variants.length])
+        sprite.position.set(x * TILE_PX, y * TILE_PX)
+        sprite.scale.set(TILE_SCALE)
+        layer.addChild(sprite)
+
+        if (tile !== Tile.Water) {
+          let mask = 0
+          if (tileAtSafe(x, y - 1) === Tile.Water) mask |= EDGE_N
+          if (tileAtSafe(x + 1, y) === Tile.Water) mask |= EDGE_E
+          if (tileAtSafe(x, y + 1) === Tile.Water) mask |= EDGE_S
+          if (tileAtSafe(x - 1, y) === Tile.Water) mask |= EDGE_W
+          if (mask !== 0) {
+            const shore = new Sprite(this.tileset.shoreline[mask]!)
+            shore.position.set(x * TILE_PX, y * TILE_PX)
+            shore.scale.set(TILE_SCALE)
+            layer.addChild(shore)
+          }
+
+          if (riverAt(x, y) >= RIVER_VISIBLE) {
+            // The arms point wherever the water continues, so a river joins up across tiles.
+            let flow = 0
+            if (riverAt(x, y - 1) >= RIVER_VISIBLE || tileAtSafe(x, y - 1) === Tile.Water) flow |= EDGE_N
+            if (riverAt(x + 1, y) >= RIVER_VISIBLE || tileAtSafe(x + 1, y) === Tile.Water) flow |= EDGE_E
+            if (riverAt(x, y + 1) >= RIVER_VISIBLE || tileAtSafe(x, y + 1) === Tile.Water) flow |= EDGE_S
+            if (riverAt(x - 1, y) >= RIVER_VISIBLE || tileAtSafe(x - 1, y) === Tile.Water) flow |= EDGE_W
+            const river = new Sprite(this.tileset.river[flow]!)
+            river.position.set(x * TILE_PX, y * TILE_PX)
+            river.scale.set(TILE_SCALE)
+            layer.addChild(river)
+          }
+        }
       }
     }
+
+    // Baked into one texture: twelve hundred sprites are fine to build once and hopeless to
+    // re-traverse every frame.
+    layer.cacheAsTexture(true)
   }
 
   private buildNodes(): void {
     this.nodeLayer.removeChildren()
     this.labelLayer.removeChildren()
     this.nodeGraphics.clear()
+    this.nodeSprites.clear()
 
     const labelStyle = new TextStyle({
       fontFamily: 'system-ui, sans-serif',
-      fontSize: 12,
+      fontSize: 11,
       fill: 0xe8eef4,
       stroke: { color: 0x0b1015, width: 3 },
     })
 
     for (const node of this.world.network.allNodes()) {
-      const g = new Graphics()
-      g.eventMode = 'static'
-      g.cursor = 'pointer'
-      g.on('pointertap', () => {
+      const holder = new Container()
+      holder.position.set(node.x * TILE_PX + TILE_PX / 2, node.y * TILE_PX + TILE_PX / 2)
+
+      const sprite = new Sprite(this.textureForNode(node))
+      sprite.anchor.set(0.5, 0.5)
+      sprite.scale.set(TILE_SCALE)
+      holder.addChild(sprite)
+      this.nodeSprites.set(node.id, sprite)
+
+      // The status ring sits under the sprite so it never hides the artwork.
+      const ring = new Graphics()
+      holder.addChildAt(ring, 0)
+      this.nodeGraphics.set(node.id, ring)
+
+      holder.eventMode = 'static'
+      holder.cursor = 'pointer'
+      holder.hitArea = { contains: (x: number, y: number) => Math.abs(x) < TILE_PX / 2 && Math.abs(y) < TILE_PX / 2 }
+      holder.on('pointertap', () => {
         this.selectedNodeId = node.id
         this.callbacks.onSelectNode?.(node.id)
       })
-      g.position.set(node.x * TILE_PX + TILE_PX / 2, node.y * TILE_PX + TILE_PX / 2)
-      this.nodeLayer.addChild(g)
-      this.nodeGraphics.set(node.id, g)
+      this.nodeLayer.addChild(holder)
 
       const labelText = nodeLabel(node)
       if (labelText) {
         const label = new Text({ text: labelText, style: labelStyle })
         label.anchor.set(0.5, 0)
-        label.position.set(node.x * TILE_PX + TILE_PX / 2, node.y * TILE_PX + TILE_PX / 2 + 14)
+        label.position.set(node.x * TILE_PX + TILE_PX / 2, node.y * TILE_PX + TILE_PX)
         this.labelLayer.addChild(label)
       }
     }
     this.lastTopologyEpoch = this.world.network.topologyEpoch
   }
 
+  /** Which sprite a node wears: its technology, its size as a town, or a switching yard. */
+  private textureForNode(node: GridNode) {
+    if (node.kind === 'city') {
+      const city = this.world.cities.find((c) => c.nodeId === node.id)
+      const large = (city?.baseDemandMw ?? 0) >= 200
+      return large ? this.sprites.cityLarge : this.sprites.citySmall
+    }
+    if (node.kind === 'plant') {
+      const plant = this.world.plants.find((p) => p.nodeId === node.id)
+      if (plant) {
+        return (
+          this.sprites.plants[plant.typeId] ??
+          this.sprites.categories[PLANT_TYPES[plant.typeId].category] ??
+          this.sprites.substation
+        )
+      }
+    }
+    return this.sprites.substation
+  }
+
   /** Redraw everything that depends on the latest dispatch. Called once per simulation tick. */
   syncToWorld(): void {
     if (this.world.network.topologyEpoch !== this.lastTopologyEpoch) {
       this.buildNodes()
+      this.rebuildPylons()
       this.particles = []
       this.particleLayer.removeChildren()
     }
@@ -198,15 +295,39 @@ export class MapView {
     return edge.kv === 0 ? 0 : LINE_TYPES[edge.kv].capacityMw.value * edge.circuits
   }
 
-  private edgeEndpoints(edge: GridEdge): { ax: number; ay: number; bx: number; by: number } {
-    const a = this.world.network.requireNode(edge.from)
-    const b = this.world.network.requireNode(edge.to)
-    return {
-      ax: a.x * TILE_PX + TILE_PX / 2,
-      ay: a.y * TILE_PX + TILE_PX / 2,
-      bx: b.x * TILE_PX + TILE_PX / 2,
-      by: b.y * TILE_PX + TILE_PX / 2,
+  /** The corridor a line follows, in world pixels. Straight for anything without a route. */
+  private edgePath(edge: GridEdge): Array<{ x: number; y: number }> {
+    const centre = (p: { x: number; y: number }) => ({
+      x: p.x * TILE_PX + TILE_PX / 2,
+      y: p.y * TILE_PX + TILE_PX / 2,
+    })
+    if (edge.route && edge.route.length >= 2) return edge.route.map(centre)
+    return [centre(this.world.network.requireNode(edge.from)), centre(this.world.network.requireNode(edge.to))]
+  }
+
+  /** Total length of a path, so particles can be placed evenly along a bent route. */
+  private pathLength(path: Array<{ x: number; y: number }>): number {
+    let total = 0
+    for (let i = 1; i < path.length; i++) total += Math.hypot(path[i]!.x - path[i - 1]!.x, path[i]!.y - path[i - 1]!.y)
+    return total
+  }
+
+  /** Point a given fraction of the way along a path. */
+  private pointAlong(path: Array<{ x: number; y: number }>, t: number): { x: number; y: number } {
+    const total = this.pathLength(path)
+    if (total <= 0) return path[0] ?? { x: 0, y: 0 }
+    let remaining = Math.max(0, Math.min(1, t)) * total
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1]!
+      const b = path[i]!
+      const segment = Math.hypot(b.x - a.x, b.y - a.y)
+      if (remaining <= segment || i === path.length - 1) {
+        const f = segment > 0 ? remaining / segment : 0
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }
+      }
+      remaining -= segment
     }
+    return path[path.length - 1]!
   }
 
   private drawLines(): void {
@@ -216,66 +337,126 @@ export class MapView {
 
     for (const edge of this.world.network.allEdges()) {
       if (edge.commodity !== 'electric') continue
-      const { ax, ay, bx, by } = this.edgeEndpoints(edge)
+      const path = this.edgePath(edge)
       const capacity = this.edgeCapacity(edge)
       const flow = Math.abs(dispatch?.lineFlowMw.get(edge.id) ?? 0)
       const loading = capacity > 0 ? flow / capacity : 0
 
       // Thicker for higher voltage: the backbone should read as the backbone.
-      const width = edge.kv === 400 ? 5 : edge.kv === 220 ? 3.5 : 2.2
+      const width = edge.kv === 400 ? 3 : edge.kv === 220 ? 2 : 1.5
       const colour =
         loading < 0.5
-          ? lerpColour(0x5c7a8a, 0x5fc27e, loading / 0.5)
+          ? lerpColour(0x6d7a84, 0x5fc27e, loading / 0.5)
           : loading < 0.9
             ? lerpColour(0x5fc27e, 0xe8b23a, (loading - 0.5) / 0.4)
             : lerpColour(0xe8b23a, 0xe2483d, Math.min(1, (loading - 0.9) / 0.1))
 
+      const stroke = (style: { width: number; color: number; alpha?: number }) => {
+        g.moveTo(path[0]!.x, path[0]!.y)
+        for (let i = 1; i < path.length; i++) g.lineTo(path[i]!.x, path[i]!.y)
+        g.stroke(style)
+      }
+
       if (!edge.energised) {
-        // Under construction: a dashed ghost of the route, so progress is visible.
-        drawDashed(g, ax, ay, bx, by, 10, 8, { width, color: 0x7fd4ff, alpha: 0.55 })
+        drawDashedPath(g, path, 8, 6, { width, color: 0x7fd4ff, alpha: 0.6 })
         continue
       }
 
       // A dark casing under the conductor keeps it legible over any terrain colour.
-      g.moveTo(ax, ay).lineTo(bx, by).stroke({ width: width + 3, color: 0x0e1418, alpha: 0.65 })
-      g.moveTo(ax, ay).lineTo(bx, by).stroke({ width, color: colour })
+      stroke({ width: width + 2, color: 0x0e1418, alpha: 0.7 })
+      stroke({ width, color: colour })
     }
   }
 
+  /**
+   * Pylons along each corridor.
+   *
+   * Spaced by distance rather than one per tile, so a long line does not turn into a solid
+   * hedge of steel. Rebuilt only when the network changes, since they never move.
+   */
+  private rebuildPylons(): void {
+    this.pylonLayer.removeChildren()
+    const spacingPx = TILE_PX * 1.5
+
+    for (const edge of this.world.network.allEdges()) {
+      if (edge.commodity !== 'electric') continue
+      const path = this.edgePath(edge)
+      const total = this.pathLength(path)
+      if (total < spacingPx) continue
+
+      const texture = edge.kv === 110 ? this.sprites.pylonShort : this.sprites.pylonTall
+      const count = Math.floor(total / spacingPx)
+      for (let i = 1; i < count; i++) {
+        const at = this.pointAlong(path, i / count)
+        const pylon = new Sprite(texture)
+        // Anchored at the foot, so a pylon stands on the ground rather than floating over it.
+        pylon.anchor.set(0.5, 1)
+        pylon.scale.set(TILE_SCALE * 0.75)
+        pylon.position.set(at.x, at.y + TILE_PX * 0.35)
+        pylon.alpha = edge.energised ? 1 : 0.5
+        this.pylonLayer.addChild(pylon)
+      }
+    }
+  }
+
+  /**
+   * Update what the sprites say about their own state.
+   *
+   * The artwork itself never changes; what changes is a status ring behind it, whether the
+   * sprite is dimmed, and — for towns — whether the windows are lit. City lights going out
+   * during a blackout is the clearest possible way to show one.
+   */
   private drawNodes(): void {
     const dispatch = this.world.lastDispatch
+    const hour = this.world.date.hour
+    const isNight = hour < 6 || hour >= 19
 
     for (const node of this.world.network.allNodes()) {
-      const g = this.nodeGraphics.get(node.id)
-      if (!g) continue
-      g.clear()
+      const ring = this.nodeGraphics.get(node.id)
+      const sprite = this.nodeSprites.get(node.id)
+      if (!ring || !sprite) continue
+      ring.clear()
 
-      const selected = node.id === this.selectedNodeId
       if (node.kind === 'city') {
         const city = this.world.cities.find((c) => c.nodeId === node.id)
         const unserved = city ? (dispatch?.unservedMw.get(city.id) ?? 0) : 0
-        const radius = city ? 6 + Math.sqrt(city.baseDemandMw) * 0.35 : 8
         const dark = unserved > 0.01
-        g.circle(0, 0, radius).fill({ color: dark ? 0x8c2a24 : 0xd8dee6 })
-        g.circle(0, 0, radius).stroke({ width: 2, color: dark ? 0xff6a5c : 0x0e1418 })
-        if (dark) g.circle(0, 0, radius + 4).stroke({ width: 2, color: 0xff6a5c, alpha: 0.7 })
+        const large = (city?.baseDemandMw ?? 0) >= 200
+
+        // Lights on at night, unless the supply has failed.
+        const lit = isNight && !dark
+        sprite.texture = large
+          ? lit
+            ? this.sprites.cityLargeLit
+            : this.sprites.cityLarge
+          : lit
+            ? this.sprites.citySmallLit
+            : this.sprites.citySmall
+        sprite.tint = dark ? 0xd08078 : 0xffffff
+
+        if (dark) {
+          ring.circle(0, 0, TILE_PX * 0.55).stroke({ width: 2, color: 0xff6a5c, alpha: 0.85 })
+        }
       } else if (node.kind === 'plant') {
         const plants = this.world.plants.filter((p) => p.nodeId === node.id)
-        const first = plants[0]
-        const colour = first ? (CATEGORY_COLOURS[PLANT_TYPES[first.typeId].category] ?? 0xaaaaaa) : 0x777777
-        const running = plants.some((p) => isDispatchable(p) && p.outputMw > 0.5)
-        const size = 8 + plants.length * 2
-        g.rect(-size / 2, -size / 2, size, size).fill({ color: colour, alpha: running ? 1 : 0.45 })
-        g.rect(-size / 2, -size / 2, size, size).stroke({ width: 2, color: 0x0e1418 })
-        if (!running) {
-          g.moveTo(-size / 2, -size / 2).lineTo(size / 2, size / 2).stroke({ width: 1.5, color: 0x0e1418 })
+        const running = plants.some((p) => isDispatchable(p) && Math.abs(p.outputMw) > 0.5)
+        const building = plants.some((p) => !isDispatchable(p))
+        sprite.alpha = running ? 1 : 0.55
+        sprite.tint = running ? 0xffffff : 0x9aa4ae
+
+        if (running) {
+          const category = plants[0] ? PLANT_TYPES[plants[0].typeId].category : 'thermal'
+          ring
+            .circle(0, 0, TILE_PX * 0.5)
+            .stroke({ width: 2, color: CATEGORY_COLOURS[category] ?? 0xaaaaaa, alpha: 0.5 })
+        } else if (building) {
+          ring.circle(0, 0, TILE_PX * 0.5).stroke({ width: 2, color: 0x7fd4ff, alpha: 0.5 })
         }
-      } else {
-        g.poly([0, -7, 7, 0, 0, 7, -7, 0]).fill({ color: 0x9fb0c0 })
-        g.poly([0, -7, 7, 0, 0, 7, -7, 0]).stroke({ width: 1.5, color: 0x0e1418 })
       }
 
-      if (selected) g.circle(0, 0, 18).stroke({ width: 2, color: 0x7fd4ff, alpha: 0.9 })
+      if (node.id === this.selectedNodeId) {
+        ring.circle(0, 0, TILE_PX * 0.62).stroke({ width: 2, color: 0x7fd4ff, alpha: 0.95 })
+      }
     }
   }
 
@@ -336,8 +517,8 @@ export class MapView {
       if (p.t > 1) p.t -= 1
       if (p.t < 0) p.t += 1
 
-      const { ax, ay, bx, by } = this.edgeEndpoints(edge)
-      p.gfx.position.set(ax + (bx - ax) * p.t, ay + (by - ay) * p.t)
+      const at = this.pointAlong(this.edgePath(edge), p.t)
+      p.gfx.position.set(at.x, at.y)
       p.gfx.alpha = 0.55 + 0.45 * Math.sin(p.t * Math.PI)
     }
   }
@@ -408,16 +589,18 @@ export class MapView {
       const from = this.world.network.getNode(mode.fromNodeId)
       if (from) {
         const colour = this.hoverValid ? 0x7fd4ff : 0xe2483d
-        drawDashed(
-          g,
-          from.x * TILE_PX + TILE_PX / 2,
-          from.y * TILE_PX + TILE_PX / 2,
-          this.hoverTile.x * TILE_PX + TILE_PX / 2,
-          this.hoverTile.y * TILE_PX + TILE_PX / 2,
-          12,
-          8,
-          { width: mode.kv === 400 ? 5 : mode.kv === 220 ? 3.5 : 2.2, color: colour, alpha: 0.8 },
-        )
+        // Preview the corridor the line would actually take, not a straight rubber band —
+        // otherwise the price quoted and the route drawn would disagree with each other.
+        const route = routeLine(this.terrain, from.x, from.y, this.hoverTile.x, this.hoverTile.y)
+        const path = simplifyRoute(route).map((p) => ({
+          x: p.x * TILE_PX + TILE_PX / 2,
+          y: p.y * TILE_PX + TILE_PX / 2,
+        }))
+        drawDashedPath(g, path, 10, 7, {
+          width: mode.kv === 400 ? 3 : mode.kv === 220 ? 2 : 1.5,
+          color: colour,
+          alpha: 0.85,
+        })
       }
     }
   }
@@ -480,8 +663,24 @@ export function nodeLabel(node: GridNode): string | null {
   return null
 }
 
-/** Pixi has no dashed stroke, and a dashed line is the clearest way to say "not yet real". */
-function drawDashed(
+/** Dashes along a multi-segment path. */
+function drawDashedPath(
+  g: Graphics,
+  path: Array<{ x: number; y: number }>,
+  dash: number,
+  gap: number,
+  style: { width: number; color: number; alpha?: number },
+): void {
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1]!
+    const b = path[i]!
+    dashSegment(g, a.x, a.y, b.x, b.y, dash, gap)
+  }
+  g.stroke(style)
+}
+
+/** Queue the dashes of one segment without stroking, so a whole path can be stroked at once. */
+function dashSegment(
   g: Graphics,
   ax: number,
   ay: number,
@@ -489,7 +688,6 @@ function drawDashed(
   by: number,
   dash: number,
   gap: number,
-  style: { width: number; color: number; alpha?: number },
 ): void {
   const dx = bx - ax
   const dy = by - ay
@@ -503,5 +701,5 @@ function drawDashed(
     g.moveTo(ax + ux * travelled, ay + uy * travelled).lineTo(ax + ux * end, ay + uy * end)
     travelled = end + gap
   }
-  g.stroke(style)
 }
+

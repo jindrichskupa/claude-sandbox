@@ -17,8 +17,8 @@ import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '../core/time'
 import { LifecyclePhase, type PlantAsset } from '../assets/types'
 import { lifeFraction } from '../assets/aging'
 import { PLAYER, tileDistance, type GridEdge, type GridNode, type NodeId } from '../grid/network'
-import { routeCostFactor } from '../map/terrain'
 import { judgeSite } from './siting'
+import { routeLine, simplifyRoute } from '../grid/routing'
 import { Param } from '../params/types'
 import { canAfford } from '../economy/economy'
 import type { World } from '../world'
@@ -42,6 +42,10 @@ export interface Quote {
   reasonParams?: Record<string, string | number>
   /** How well the ground suits this technology, 0..1. Only meaningful when `ok`. */
   siteQuality?: number
+  /** Route length for a line quote, following the corridor rather than the straight line. */
+  lengthKm?: number
+  /** The corridor itself, as tile corners. */
+  route?: Array<{ x: number; y: number }>
 }
 
 /** Synthetic parameter target used to price a plant that does not exist yet. */
@@ -171,18 +175,19 @@ export function quoteLine(world: World, fromId: NodeId, toId: NodeId, kv: Voltag
     .some((e) => (e.from === toId || e.to === toId) && e.kv === kv)
   if (duplicate) return refuse('build.alreadyConnected')
 
-  const lengthKm = tileDistance(from, to) * world.scenario.kmPerTile
+  // The line follows the cheapest corridor it can find rather than the straight line, so
+  // going around a ridge is a real option rather than an imaginary one.
+  const route = routeLine(world.terrain, from.x, from.y, to.x, to.y)
   const type = LINE_TYPES[kv]
-  // Rough ground costs more to cross, which is what makes the short route and the cheap
-  // route different questions.
-  const terrainFactor = routeCostFactor(world.terrain, from.x, from.y, to.x, to.y)
-  const totalCost = type.capexPerKm.value * lengthKm * terrainFactor * circuits + type.substationCapex.value * 2
+  const lengthKm = route.lengthTiles * world.scenario.kmPerTile
+  const weightedKm = route.weightedLengthTiles * world.scenario.kmPerTile
 
+  const totalCost = type.capexPerKm.value * weightedKm * circuits + type.substationCapex.value * 2
   const buildMonths = (type.buildTimeMonthsPer100Km.value * lengthKm) / 100
   const buildTicks = Math.max(1, Math.round(Math.max(3, buildMonths) * TICKS_PER_MONTH))
 
   if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
-  return { ok: true, totalCost, buildTicks }
+  return { ok: true, totalCost, buildTicks, lengthKm, route: simplifyRoute(route) }
 }
 
 /**
@@ -210,10 +215,13 @@ export function beginLineConstruction(
     from: fromId,
     to: toId,
     kv,
-    lengthKm: tileDistance(from, to) * world.scenario.kmPerTile,
+    // The routed length, not the straight line: a line that goes around a mountain really is
+    // longer, and it should lose more energy for it.
+    lengthKm: quote.lengthKm ?? tileDistance(from, to) * world.scenario.kmPerTile,
     circuits,
     energised: false,
     builtTick: world.tick + quote.buildTicks,
+    ...(quote.route ? { route: quote.route } : {}),
   }
   world.network.addEdge(edge)
   world.scheduleSpending(edgeId, quote.totalCost, quote.buildTicks, 'capex')

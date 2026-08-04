@@ -56,6 +56,11 @@ export interface GridEdge {
   /** False while under construction or after a fault. */
   energised: boolean
   builtTick: number
+  /**
+   * The corridor the line actually follows, as tile corners. Absent for lines that predate
+   * routing, which are drawn straight.
+   */
+  route?: Array<{ x: number; y: number }>
 }
 
 /**

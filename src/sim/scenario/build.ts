@@ -10,7 +10,8 @@
 import type { ScenarioContent } from '@content/scenarios/firstRegion'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { TICKS_PER_YEAR } from '../core/time'
-import { PLAYER, tileDistance, type GridEdge, type GridNode } from '../grid/network'
+import { PLAYER, type GridEdge, type GridNode } from '../grid/network'
+import { routeLine, simplifyRoute } from '../grid/routing'
 import { LifecyclePhase, type CityAsset, type PlantAsset } from '../assets/types'
 import { expectedCondition } from '../assets/aging'
 import { World, type ScenarioDef } from '../world'
@@ -52,6 +53,8 @@ export function buildWorld(content: ScenarioContent): World {
   for (const spec of content.lines) {
     const from = world.network.requireNode(spec.from)
     const to = world.network.requireNode(spec.to)
+    // Inherited lines were routed by somebody too, so they follow corridors like any other.
+    const route = routeLine(world.terrain, from.x, from.y, to.x, to.y)
     const edge: GridEdge = {
       id: spec.id,
       commodity: 'electric',
@@ -59,10 +62,11 @@ export function buildWorld(content: ScenarioContent): World {
       from: spec.from,
       to: spec.to,
       kv: spec.kv,
-      lengthKm: tileDistance(from, to) * content.kmPerTile,
+      lengthKm: route.lengthTiles * content.kmPerTile,
       circuits: spec.circuits,
       energised: true,
       builtTick: -1,
+      route: simplifyRoute(route),
     }
     world.network.addEdge(edge)
   }
