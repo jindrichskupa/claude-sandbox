@@ -28,9 +28,12 @@ import { generateTerrain, windSiteFactor, type TerrainMap } from './map/terrain'
 import { planStorage, settleStorage, isStorage, FORECAST_WINDOW_HOURS, type StoragePlan } from './dispatch/storage'
 import { dispatchHeat, isHeatStore, settleHeatStore, type HeatResult } from './heat/heat'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
+import { EventDirector } from './events/director'
 import {
   addLedger,
   chargeCapex,
+  chargeEventCost,
+  chargeInsurance,
   chargeUnservedHeat,
   creditHeatSales,
   chargeDecommissioning,
@@ -62,6 +65,14 @@ export interface WorldState {
   techLevel: Record<string, number>
   /** Cumulative MW of each technology deployed, which is what drives learning curves. */
   cumulativeDeployedMw: Record<string, number>
+  /**
+   * How hard the utility maintains its fleet. 0.6 is deferred, 1 is normal, 1.4 is thorough.
+   * Multiplies fixed cost and divides the technical failure rate, so it is a straight trade of
+   * money now against risk later — and the reason a bad year is usually traceable to a decision.
+   */
+  maintenanceLevel: number
+  /** Whether the fleet is insured. Turns a capital shock into a monthly premium. */
+  insured: boolean
 }
 
 export interface TickSnapshot {
@@ -111,6 +122,8 @@ export interface ScenarioDef {
 }
 
 const HISTORY_LENGTH = TICKS_PER_YEAR
+/** How long a failure to supply stays in the utility's reputation, for event risk. */
+const BLACKOUT_MEMORY_TICKS = 24 * 30
 /** How many recent hours the storage arbitrage policy looks back over. */
 const PRICE_WINDOW_TICKS = 24 * 7
 
@@ -156,6 +169,8 @@ export class World {
   yearLedger: PeriodLedger = emptyLedger()
   private periodStartTick = 0
 
+  readonly director = new EventDirector()
+
   lastDispatch: DispatchResult | null = null
   lastHeat: HeatResult | null = null
   /**
@@ -173,6 +188,7 @@ export class World {
   private serial = 0
   private readonly spending: ScheduledSpend[] = []
   private readonly energiseAt = new Map<string, number>()
+  private recentBlackoutTicks = 0
 
   constructor(readonly scenario: ScenarioDef) {
     this.rng = new RandomSource(scenario.seed)
@@ -188,6 +204,8 @@ export class World {
       fuelPriceIndex: 1,
       techLevel: {},
       cumulativeDeployedMw: {},
+      maintenanceLevel: 1,
+      insured: false,
     }
 
     this.finances = {
@@ -392,6 +410,25 @@ export class World {
     // 3. Forced outages. A state transition, not a modifier: the unit is out, not derated.
     this.rollOutages()
 
+    // 3b. Events. Raised, landed and retired here, before anything reads a parameter, so an
+    //     event that lands this hour is felt this hour rather than next.
+    const events = this.director.step({
+      tick: this.tick,
+      year: date.year,
+      weather: this.weather,
+      plants: this.plants,
+      cities: this.cities,
+      network: this.network,
+      finances: this.finances,
+      publicOpinion: this.state.publicOpinion,
+      maintenanceLevel: this.state.maintenanceLevel,
+      insured: this.state.insured,
+      recentBlackout: this.recentBlackoutTicks > 0,
+      registry: this.registry,
+      stream: this.rng.streamFor('events'),
+    })
+    if (events.spent > 0) chargeEventCost(this.openLedger, events.spent)
+
     // 4. Lifecycle transitions (construction finishing, dismantling completing) and the
     //    instalments owed on whatever is still being built.
     this.advanceLifecycles()
@@ -505,6 +542,13 @@ export class World {
     if (isMonthBoundary(this.tick)) this.closePeriod()
     if (isYearBoundary(this.tick)) this.closeYear()
 
+    // A rolling memory of failure, which several event risk factors read. Decays over a month,
+    // so one bad evening does not brand the utility for a year.
+    this.recentBlackoutTicks =
+      result.totalUnservedMw > 0.01 || heat.totalUnservedHeatMw > 0.01
+        ? BLACKOUT_MEMORY_TICKS
+        : Math.max(0, this.recentBlackoutTicks - 1)
+
     const snapshot = this.makeSnapshot(date, result, heat)
     this.lastSystemPrice = snapshot.pricePerMwh
     this.priceWindow.push(snapshot.pricePerMwh)
@@ -520,8 +564,9 @@ export class World {
       const plant = this.plants[i]!
       if (plant.phase !== LifecyclePhase.Operating) continue
       const type = PLANT_TYPES[plant.typeId]
-      // Wear makes failure more likely, which is what gives maintenance a purpose.
-      const rate = type.forcedOutageRate.value * (1 + (1 - plant.conditionPct) * 2)
+      // Wear makes failure more likely and maintenance makes it less likely — the same lever,
+      // pulled in two directions.
+      const rate = (type.forcedOutageRate.value * (1 + (1 - plant.conditionPct) * 2)) / this.state.maintenanceLevel
       // Convert an annual availability figure into an hourly transition probability.
       const failPerHour = rate / 400
       const repairPerHour = 1 / 72
@@ -590,7 +635,8 @@ export class World {
 
   private closePeriod(): void {
     const ticks = this.tick - this.periodStartTick
-    chargeFixedCosts(this.openLedger, this.plants, this.params, ticks)
+    chargeFixedCosts(this.openLedger, this.plants, this.params, ticks, this.state.maintenanceLevel)
+    if (this.state.insured) chargeInsurance(this.openLedger, this.plants, ticks)
     chargeInterest(this.openLedger, this.finances, ticks)
     settlePeriod(this.finances, this.openLedger)
 
@@ -613,6 +659,7 @@ export class World {
     const target = Math.max(0, Math.min(1, 0.75 - unservedShare * 12 - intensity * 0.35))
     this.state.publicOpinion += (target - this.state.publicOpinion) * 0.4
     this.yearLedger = emptyLedger()
+    this.director.startYear()
   }
 
   /**

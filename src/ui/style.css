@@ -521,3 +521,144 @@ button.danger:hover {
 #hint.visible {
   display: block;
 }
+
+/* --- Events -------------------------------------------------------------
+ *
+ * Sits under the charts on the right, so the two things that change without
+ * the player touching anything — the system's behaviour and the world's — are
+ * read in the same sweep of the eye. Deliberately not a modal: an event that
+ * stops the clock reads as a demand, and most of these arrive with warning
+ * precisely so they can be thought about while the world keeps turning.
+ */
+#events {
+  right: 12px;
+  top: 490px;
+  width: 300px;
+  padding: 12px;
+  max-height: calc(100vh - 510px);
+  overflow-y: auto;
+}
+
+#events h3 {
+  margin: 0 0 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.event-standing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.event-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.event-toggle-label {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.event-toggle button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.event-toggle button:hover {
+  color: var(--text);
+}
+
+.event-toggle button.active {
+  background: rgba(127, 212, 255, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.event-empty {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.event {
+  border-left: 2px solid var(--panel-border);
+  padding: 2px 0 8px 8px;
+  margin-bottom: 8px;
+}
+
+.event-pending {
+  border-left-color: var(--warn);
+}
+
+.event-active {
+  border-left-color: var(--bad);
+}
+
+.event-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.event-when {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin: 1px 0 4px;
+}
+
+.event-body {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.event-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.event-choices button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.event-choices button:hover {
+  border-color: var(--accent);
+}
+
+.event-choices button.active {
+  background: rgba(127, 212, 255, 0.16);
+  border-color: var(--accent);
+}
+
+.event-choices button.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.event-choices button.disabled:hover {
+  border-color: var(--panel-border);
+}

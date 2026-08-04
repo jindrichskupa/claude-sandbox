@@ -15,6 +15,8 @@ import { PLANT_TYPES } from '@content/plantTypes'
 import { FUELS } from '@content/fuels'
 import { LINE_TYPES, VOLTAGE_LEVELS } from '@content/lineTypes'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
+import { EVENTS } from '@content/events'
+import { HEAT_PIPE_TYPES, PIPE_SIZES } from '@content/heatPipeTypes'
 import { LAYER_KEYS, PARAM_KEYS } from '@sim/params/types'
 import { LIFECYCLE_KEYS } from '@sim/assets/types'
 
@@ -37,6 +39,14 @@ describe('i18n', () => {
     for (const kv of VOLTAGE_LEVELS) if (!DICT[LINE_TYPES[kv].nameKey]) missing.push(LINE_TYPES[kv].nameKey)
     if (!DICT[FIRST_REGION.nameKey]) missing.push(FIRST_REGION.nameKey)
     for (const o of FIRST_REGION.objectives) if (!DICT[o.descriptionKey]) missing.push(o.descriptionKey)
+    for (const e of EVENTS) {
+      // Both halves of an event are read aloud to the player, and so is every option it
+      // offers — an untranslated choice button is worse than no choice at all.
+      if (!DICT[e.nameKey]) missing.push(e.nameKey)
+      if (!DICT[e.descriptionKey]) missing.push(e.descriptionKey)
+      for (const c of e.choices) if (!DICT[c.labelKey]) missing.push(c.labelKey)
+    }
+    for (const size of PIPE_SIZES) if (!DICT[HEAT_PIPE_TYPES[size].nameKey]) missing.push(HEAT_PIPE_TYPES[size].nameKey)
     expect(missing).toEqual([])
   })
 

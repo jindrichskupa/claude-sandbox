@@ -99,6 +99,18 @@ async function main(): Promise<void> {
       else reactivatePlant(world, plantId)
       hud.update()
     },
+    onChooseEvent: (uid, choiceId) => {
+      world.director.choose(uid, choiceId)
+      hud.update()
+    },
+    onSetMaintenance: (level) => {
+      world.state.maintenanceLevel = level
+      hud.update()
+    },
+    onSetInsured: (insured) => {
+      world.state.insured = insured
+      hud.update()
+    },
   })
   hud.setSpeed(speed)
 

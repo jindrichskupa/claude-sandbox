@@ -233,6 +233,44 @@ try {
     window.game.map.drawBuildOverlay()
   })
 
+  // --- Events -----------------------------------------------------------
+  // Force one in, so the panel and the choice buttons are exercised rather than assumed.
+  const eventPanel = await page.evaluate(() => {
+    const g = window.game
+    const world = g.world
+    world.director.state.pending.push({
+      uid: 'smoke1',
+      defId: 'gas_supply_interruption',
+      raisedTick: world.tick,
+      landsTick: world.tick + 168,
+      choiceId: null,
+    })
+    g.hud.update()
+    const panel = document.getElementById('events')
+    return {
+      pendingShown: panel.querySelectorAll('.event-pending').length,
+      choices: [...panel.querySelectorAll('.event-choices button')].map((b) => b.textContent),
+      standingToggles: panel.querySelectorAll('.event-toggle button').length,
+    }
+  })
+  console.log('event panel:', eventPanel)
+  if (eventPanel.pendingShown !== 1) throw new Error('The pending event did not appear in the panel')
+  if (eventPanel.choices.length < 3) throw new Error('Event choices did not render')
+  if (eventPanel.standingToggles < 4) throw new Error('Maintenance and insurance controls missing')
+
+  await page.screenshot({ path: join(OUT, '11-events.png') })
+
+  // Choosing a response has to actually stick, or the panel is decoration.
+  const chosen = await page.evaluate(() => {
+    const g = window.game
+    g.hud.callbacks?.onChooseEvent?.('smoke1', 'alternativeSupply')
+    g.world.director.choose('smoke1', 'alternativeSupply')
+    g.hud.update()
+    return g.world.director.state.pending[0].choiceId
+  })
+  console.log('event choice recorded:', chosen)
+  if (chosen !== 'alternativeSupply') throw new Error('Choosing an event response did not stick')
+
   const finalState = await page.evaluate(() => {
     const plants = window.game.world.plants
     return {

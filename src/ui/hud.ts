@@ -12,6 +12,7 @@ import { formatDate, formatMoney, formatMw, formatMwth, formatPct, t } from '@i1
 import { PLANT_TYPES } from '@content/plantTypes'
 import { LINE_TYPES } from '@content/lineTypes'
 import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
+import { EVENTS_BY_ID } from '@content/events'
 import type { World } from '@sim/world'
 import { LIFECYCLE_KEYS, LifecyclePhase, isDispatchable } from '@sim/assets/types'
 import { ageYears } from '@sim/assets/aging'
@@ -33,6 +34,9 @@ export interface HudCallbacks {
   onRetire: (plantId: string) => void
   onMothball: (plantId: string, mothball: boolean) => void
   onRefurbish: (plantId: string) => void
+  onChooseEvent: (uid: string, choiceId: string) => void
+  onSetMaintenance: (level: number) => void
+  onSetInsured: (insured: boolean) => void
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -59,6 +63,7 @@ export class Hud {
   private readonly clock: HTMLDivElement
   private readonly speedButtons = new Map<Speed, HTMLButtonElement>()
   private readonly inspector: HTMLDivElement
+  private readonly events: HTMLDivElement
   private readonly banner: HTMLDivElement
   private readonly loadCanvas: HTMLCanvasElement
   private readonly mixCanvas: HTMLCanvasElement
@@ -140,6 +145,14 @@ export class Hud {
     }
     charts.appendChild(legend)
     root.appendChild(charts)
+
+    // --- Events ---
+    // Deliberately its own panel rather than a modal. A modal would stop the clock and make
+    // every event feel like a decision that must be taken *now*; the whole design here is that
+    // most of them arrive with warning and can be thought about while the world keeps turning.
+    this.events = el('div', 'panel')
+    this.events.id = 'events'
+    root.appendChild(this.events)
 
     // --- Inspector ---
     this.inspector = el('div', 'panel')
@@ -267,6 +280,98 @@ export class Hud {
     }
 
     this.renderInspector()
+    this.renderEvents()
+  }
+
+  /**
+   * The event feed: what is coming, what is in force, and the two standing decisions that move
+   * the odds before anything happens at all.
+   *
+   * Maintenance and insurance live here rather than in a settings menu on purpose. They are the
+   * player's answer to this panel, and putting them anywhere else would hide the connection
+   * between "things keep breaking" and "you cut the maintenance budget".
+   */
+  private renderEvents(): void {
+    const world = this.world
+    const state = world.director.state
+    this.events.replaceChildren()
+    this.events.appendChild(el('h3', undefined, t('ui.events')))
+
+    const standing = el('div', 'event-standing')
+
+    const maintenance = el('div', 'event-toggle')
+    maintenance.appendChild(el('span', 'event-toggle-label', t('ui.maintenance')))
+    for (const [level, key] of [
+      [0.6, 'ui.maintenanceDeferred'],
+      [1, 'ui.maintenanceNormal'],
+      [1.4, 'ui.maintenanceThorough'],
+    ] as const) {
+      const button = el('button', undefined, t(key))
+      button.classList.toggle('active', Math.abs(world.state.maintenanceLevel - level) < 1e-6)
+      button.addEventListener('click', () => this.callbacks.onSetMaintenance(level))
+      maintenance.appendChild(button)
+    }
+    standing.appendChild(maintenance)
+
+    const insurance = el('div', 'event-toggle')
+    insurance.appendChild(el('span', 'event-toggle-label', t('ui.insurance')))
+    const insured = el('button', undefined, t(world.state.insured ? 'ui.insured' : 'ui.uninsured'))
+    insured.classList.toggle('active', world.state.insured)
+    insured.addEventListener('click', () => this.callbacks.onSetInsured(!world.state.insured))
+    insurance.appendChild(insured)
+    standing.appendChild(insurance)
+
+    this.events.appendChild(standing)
+
+    if (state.pending.length === 0 && state.active.length === 0) {
+      this.events.appendChild(el('div', 'event-empty', t('ui.eventsNone')))
+      return
+    }
+
+    for (const pending of state.pending) {
+      const def = EVENTS_BY_ID.get(pending.defId)
+      if (!def) continue
+      const block = el('div', 'event event-pending')
+      block.appendChild(el('div', 'event-name', t(def.nameKey)))
+      const hours = Math.max(0, pending.landsTick - world.tick)
+      block.appendChild(el('div', 'event-when', t('ui.eventLandsIn', { hours })))
+      block.appendChild(el('div', 'event-body', t(def.descriptionKey)))
+
+      const choices = el('div', 'event-choices')
+      for (const choice of def.choices) {
+        // A response that needs cover the utility does not carry is shown but not offered, so
+        // the player can see what insurance would have bought them.
+        const unavailable = choice.requiresInsurance === true && !world.state.insured
+        const payable = choice.requiresInsurance && world.state.insured ? 0 : choice.costEur
+        const unaffordable = payable > world.finances.cash
+        const label = payable > 0 ? `${t(choice.labelKey)} · ${formatMoney(payable)}` : t(choice.labelKey)
+        const button = el('button', undefined, label)
+        button.classList.toggle('active', pending.choiceId === choice.id)
+        button.classList.toggle('disabled', unavailable || unaffordable)
+        if (!unavailable && !unaffordable) {
+          button.addEventListener('click', () => this.callbacks.onChooseEvent(pending.uid, choice.id))
+        }
+        choices.appendChild(button)
+      }
+      block.appendChild(choices)
+      this.events.appendChild(block)
+    }
+
+    for (const active of state.active) {
+      const def = EVENTS_BY_ID.get(active.defId)
+      if (!def) continue
+      const block = el('div', 'event event-active')
+      block.appendChild(el('div', 'event-name', t(def.nameKey)))
+      const choice = def.choices.find((c) => c.id === active.choiceId)
+      const remaining = Math.max(0, active.endsTick - world.tick)
+      block.appendChild(
+        el('div', 'event-when', `${t('ui.eventActive')} · ${t('ui.eventLandsIn', { hours: remaining })}`),
+      )
+      if (choice) {
+        block.appendChild(el('div', 'event-body', t('ui.eventChosen', { choice: t(choice.labelKey) })))
+      }
+      this.events.appendChild(block)
+    }
   }
 
   /**

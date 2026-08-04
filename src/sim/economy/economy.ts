@@ -29,6 +29,9 @@ export interface PeriodLedger {
   capex: number
   decommissioningCost: number
   recyclingIncome: number
+  /** What the player spent responding to events. */
+  eventCost: number
+  insurancePremium: number
   /** Energy sold, MWh. */
   energySoldMwh: number
   /** Energy not delivered, MWh. */
@@ -54,6 +57,8 @@ export function emptyLedger(): PeriodLedger {
     capex: 0,
     decommissioningCost: 0,
     recyclingIncome: 0,
+    eventCost: 0,
+    insurancePremium: 0,
     energySoldMwh: 0,
     energyUnservedMwh: 0,
     heatSoldMwh: 0,
@@ -74,7 +79,9 @@ export function ledgerProfit(l: PeriodLedger): number {
     l.interest -
     l.unservedPenalty -
     l.capex -
-    l.decommissioningCost
+    l.decommissioningCost -
+    l.eventCost -
+    l.insurancePremium
   )
 }
 
@@ -90,6 +97,8 @@ export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.capex += from.capex
   into.decommissioningCost += from.decommissioningCost
   into.recyclingIncome += from.recyclingIncome
+  into.eventCost += from.eventCost
+  into.insurancePremium += from.insurancePremium
   into.energySoldMwh += from.energySoldMwh
   into.energyUnservedMwh += from.energyUnservedMwh
   into.heatSoldMwh += from.heatSoldMwh
@@ -219,6 +228,7 @@ export function chargeFixedCosts(
   plants: PlantAsset[],
   params: Params,
   ticksInPeriod: number,
+  maintenanceLevel = 1,
 ): void {
   const yearFraction = ticksInPeriod / TICKS_PER_YEAR
   for (const plant of plants) {
@@ -227,8 +237,32 @@ export function chargeFixedCosts(
     const perKwYear = params.get(plant.id, Param.FixedOpexPerKwYear)
     // A mothballed unit is preserved rather than operated, which is much cheaper but not free.
     const factor = plant.phase === LifecyclePhase.Mothballed ? 0.3 : 1
-    ledger.fixedOpex += capacityKw * perKwYear * yearFraction * factor
+    // Maintenance is a real lever and it is priced like one: cutting it saves money now and is
+    // paid for later in failure rates. The saving is visible immediately, the bill is not,
+    // which is exactly why it is a tempting mistake.
+    ledger.fixedOpex += capacityKw * perKwYear * yearFraction * factor * maintenanceLevel
   }
+}
+
+/** What the player paid to respond to an event. */
+export function chargeEventCost(ledger: PeriodLedger, amount: number): void {
+  if (amount <= 0) return
+  ledger.eventCost += amount
+}
+
+/** The insurance premium for a period, on the capital value of the operating fleet. */
+export function chargeInsurance(
+  ledger: PeriodLedger,
+  plants: PlantAsset[],
+  ticksInPeriod: number,
+): void {
+  let insuredValue = 0
+  for (const plant of plants) {
+    if (!incursFixedCost(plant)) continue
+    insuredValue += plant.capexPaid
+  }
+  ledger.insurancePremium +=
+    insuredValue * ECONOMICS.insurancePremiumRate.value * (ticksInPeriod / TICKS_PER_YEAR)
 }
 
 /** Interest on outstanding debt for a period. */

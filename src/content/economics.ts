@@ -48,6 +48,15 @@ export interface EconomicsDef {
   valueOfLostHeatPerMwh: Sourced<number>
   /** Regulatory penalty per MWh of heat not delivered, on top of the lost revenue. */
   unservedHeatPenaltyPerMwh: Sourced<number>
+  /**
+   * Annual insurance premium, as a fraction of the fleet's capital value.
+   *
+   * What this buys is not money but *shape*: an insured utility pays a predictable amount every
+   * month instead of an unpredictable one after a failure. That is the whole point of insurance
+   * and the reason it belongs in a game about surviving decades — a capital shock can end a run,
+   * a slightly worse operating cost cannot.
+   */
+  insurancePremiumRate: Sourced<number>
 }
 
 export const ECONOMICS: EconomicsDef = {
@@ -62,4 +71,5 @@ export const ECONOMICS: EconomicsDef = {
   baseHeatTariffPerMwh: sourced(45, 'EUR/MWh_th', 'euro-chp-practice', 2021, 'District heat sells for far less than electricity'),
   valueOfLostHeatPerMwh: sourced(9000, 'EUR/MWh_th', 'euro-chp-practice', 2021, 'Frozen and burst pipes, not an inconvenient evening'),
   unservedHeatPenaltyPerMwh: sourced(550, 'EUR/MWh_th', 'game-design', 2024, 'Same share of lost value as the electrical penalty'),
+  insurancePremiumRate: sourced(0.006, 'fraction', 'game-design', 2024, 'Of insured capital value, per year'),
 }

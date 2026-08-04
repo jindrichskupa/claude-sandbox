@@ -8,6 +8,19 @@
 
 import { Layer, Op, type Modifier, type Param } from './types'
 
+/**
+ * Target id meaning "everything".
+ *
+ * A modifier registered against this applies to every asset in the game, on top of whatever is
+ * registered against the asset itself. It exists because several real forces genuinely are
+ * global — an interest-rate shock raises the cost of *all* capital, a permitting slowdown
+ * lengthens *all* builds, a carbon price touches everything that burns — and the alternative
+ * would be for each such force to enumerate the fleet and re-register itself every time the
+ * player builds something. That enumeration is exactly the kind of bookkeeping that quietly
+ * goes wrong.
+ */
+export const ALL_TARGETS = '*'
+
 interface Entry {
   targetId: string
   mod: Modifier
@@ -20,6 +33,8 @@ function key(targetId: string, param: Param): string {
 export class ModifierRegistry {
   private readonly bySource = new Map<string, Entry[]>()
   private index = new Map<string, Modifier[]>()
+  /** Modifiers registered against `ALL_TARGETS`, keyed by parameter alone. */
+  private globalIndex = new Map<string, Modifier[]>()
   private indexDirty = true
 
   /** Bumped on every mutation so caches downstream know to recompute. */
@@ -75,21 +90,29 @@ export class ModifierRegistry {
 
   private rebuildIndex(): void {
     this.index = new Map()
+    this.globalIndex = new Map()
     for (const entries of this.bySource.values()) {
       for (const e of entries) {
-        const k = key(e.targetId, e.mod.param)
-        const list = this.index.get(k)
+        const target = e.targetId === ALL_TARGETS ? this.globalIndex : this.index
+        const k = e.targetId === ALL_TARGETS ? String(e.mod.param) : key(e.targetId, e.mod.param)
+        const list = target.get(k)
         if (list) list.push(e.mod)
-        else this.index.set(k, [e.mod])
+        else target.set(k, [e.mod])
       }
     }
     this.indexDirty = false
   }
 
-  /** All modifiers acting on one parameter of one target. */
+  /** All modifiers acting on one parameter of one target, including the global ones. */
   lookup(targetId: string, param: Param): Modifier[] {
     if (this.indexDirty) this.rebuildIndex()
-    return this.index.get(key(targetId, param)) ?? []
+    const own = this.index.get(key(targetId, param))
+    const global = this.globalIndex.get(String(param))
+    // The overwhelmingly common case is neither, and the next is one or the other. Only
+    // allocate a joined array when both actually exist.
+    if (!global) return own ?? []
+    if (!own) return global
+    return [...own, ...global]
   }
 
   /** Total number of registered modifiers. Diagnostics only. */

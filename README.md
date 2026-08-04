@@ -28,8 +28,27 @@ with no network at all. All the artwork is generated at runtime, so there is not
 carry. `scripts/smokeSingle.mjs` opens it with every outbound request blocked and fails if
 the document tries to fetch anything.
 
-## What exists today (milestones 1-4)
+## What exists today (milestones 1-5)
 
+- **District heating, and cogeneration that means it.** Heat is a second commodity with its
+  own network, solved *before* electricity. Three things make it a different problem rather
+  than the same one in different units. A buried main loses heat through its insulation
+  whether or not anyone is drawing from it, so the loss is constant per kilometre instead of
+  quadratic in flow — which is why a heat plant must stand at the edge of the town it serves
+  while a power station can stand anywhere, and why that is now a siting rule with physics
+  behind it. Heat cannot be refused: a network that fails in February bursts the pipework
+  inside the buildings, so unserved heat is priced far above unserved electricity. And the two
+  commodities are locked together at the plant — a backpressure set makes power and heat from
+  the same steam in a fixed ratio, so on a cold evening its electrical output is an injection
+  the dispatch has no say over.
+- **Things go wrong, and you can see them coming.** Failures, storms, droughts, price shocks,
+  fuel cuts and blockades, all as data rather than code: an event may issue only a
+  time-limited modifier through the parameter pipeline or a declared state transition, which
+  is what keeps every consequence explainable back to its cause in the inspector. Five
+  mechanisms make the randomness bearable — forewarning for everything that is not physics, an
+  annual severity budget scaled to what the utility can absorb, a guaranteed way out of every
+  severe event, a grace period and a cooldown, and maintenance and insurance as standing
+  decisions that move the odds before anything happens.
 - **Pixel art.** Terrain, stations, towns and pylons are drawn programmatically into 16×16
   textures with a fixed palette and one light direction, sampled nearest-neighbour at integer
   scale. Town windows light up at night and go dark in a blackout.
@@ -96,7 +115,13 @@ things enforce that rather than merely promising it:
 3. `tests/neutrality.test.ts` checks that no technology is beaten by another on every
    dimension at once, and that emissions follow purely from fuel and efficiency. Two of its
    axes — whether a thing produces net energy at all, and how much of its rating it actually
-   delivers over a year — are measured by running the weather model, not asserted.
+   delivers over a year — are measured by running the weather model, not asserted. Heat and
+   electricity are compared separately, because a peak boiler and a combined-cycle station are
+   not competing for the same job and scoring them together would say only that thermal
+   megawatts are cheaper than electrical ones.
+4. `tests/events.test.ts` checks the same guarantee for adversity: every severe event has a
+   response that actually reduces it, every event leaves accepting the consequences available
+   and free, and nothing that is not physics arrives without warning.
 
 Policy bias exists in the game only as a modelled external force the player navigates, never
 as a silent simulation bonus.
@@ -116,6 +141,8 @@ src/
     grid/       network topology, island detection, line routing
     dispatch/   min-cost flow solver, hourly dispatch, forecast, storage policy
     build/      construction, refurbishment, retirement, siting rules
+    heat/       district heating, cogeneration coupling, heat accumulators
+    events/     the event director: risk, forewarning, severity budget, outages
     weather/    seeded weather and its parameter effects
     assets/     lifecycle and ageing
     params/     the modifier pipeline — the spine of the whole model
@@ -168,12 +195,22 @@ models and what it actually models:
 - **Feed-in tariffs are a flat scenario setting.** The mechanism behind negative prices is
   real, but tariffs do not yet arrive, change, or get withdrawn — that is the policy
   milestone, and the withdrawal is the interesting half.
+- **Heat mains cannot be extended or resized once built.** A pipe can be laid between two
+  existing nodes and that is all; there is no way to add a second main alongside an existing
+  one, and the heat network has no equivalent of the electrical grid's reinforcement decisions.
+- **Cogeneration heat is priced against last hour's electricity price.** Using this hour's
+  would be circular, and the approximation is good because the price moves slowly — but it
+  does mean the heat merit order is always one hour behind a sudden price move.
+- **The test suite takes about three minutes.** Almost all of it is the multi-year scenario
+  tests stepping tens of thousands of hours at roughly 0.75 ms each. The simulation itself has
+  sixty times the headroom it needs at the fastest game speed, so this is a CI cost rather
+  than a gameplay one; warm-starting the loss iteration from the previous hour would likely
+  halve it, and belongs in its own change where it can be measured properly.
 
 ## Roadmap
 
 | Milestone | Content |
 |---|---|
-| M5 | District heating and cogeneration; the event and disaster system |
 | M6 | Subsidies and their withdrawal, taxes, carbon pricing, elections, fuel geopolitics |
 | M7 | Learning curves and standardisation |
 | M8 | Campaign: scenarios, objectives, unlocks, saved games; publish to GitHub Pages |
