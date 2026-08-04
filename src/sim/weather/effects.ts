@@ -97,12 +97,18 @@ export interface WeatherEntries {
   mod: Modifier
 }
 
-/** Build the whole weather contribution for this tick. */
+/**
+ * Build the whole weather contribution for this tick.
+ *
+ * `siteWindFactor` scales the regional wind speed to what a particular site actually sees.
+ * Terrain belongs to the world, so it is passed in rather than reached for from here.
+ */
 export function weatherModifiers(
   weather: Weather,
   plants: PlantAsset[],
   cities: CityAsset[],
   hour: number,
+  siteWindFactor: (plant: PlantAsset) => number = () => 1,
 ): WeatherEntries[] {
   const out: WeatherEntries[] = []
   const tempRounded = Math.round(weather.tempC * 10) / 10
@@ -113,7 +119,8 @@ export function weatherModifiers(
 
     switch (type.weatherDependence) {
       case 'wind': {
-        const f = windPowerFraction(weather.windMs)
+        const siteWind = weather.windMs * siteWindFactor(plant)
+        const f = windPowerFraction(siteWind)
         out.push({
           targetId: plant.id,
           mod: {
@@ -124,7 +131,7 @@ export function weatherModifiers(
             sourceKind: 'weather',
             sourceId: WEATHER_SOURCE,
             reasonKey: 'reason.windSpeed',
-            reasonParams: { wind: Math.round(weather.windMs * 10) / 10 },
+            reasonParams: { wind: Math.round(siteWind * 10) / 10 },
           },
         })
         break

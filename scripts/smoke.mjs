@@ -110,6 +110,51 @@ try {
   if (whySteps < 3) throw new Error('Modifier explanation did not render')
   await page.screenshot({ path: join(OUT, '03-plant-inspector.png') })
 
+  // --- Building ---------------------------------------------------------
+  // The point of this milestone: the player can actually do something.
+  await page.evaluate(() => window.game.hud.buildPanel.setOpen(true))
+  await page.waitForTimeout(300)
+  const buildRows = await page.evaluate(() => document.querySelectorAll('#build-panel .build-row').length)
+  console.log('build options offered:', buildRows)
+  if (buildRows < 5) throw new Error('Build panel did not populate')
+
+  // A technology that does not exist in 1995 must be offered as blocked, with a reason.
+  const blocked = await page.evaluate(() =>
+    [...document.querySelectorAll('#build-panel .build-blocked')].map((n) => n.textContent),
+  )
+  console.log('blocked options:', blocked)
+  if (blocked.length === 0) throw new Error('Expected some technologies to be unavailable in 1995')
+
+  await page.screenshot({ path: join(OUT, '06-build-panel.png') })
+
+  // Place a gas turbine and wire it to the capital.
+  const built = await page.evaluate(() => {
+    const g = window.game
+    const site = { x: 26, y: 24 }
+    const plant = g.build.beginPlantConstruction(g.world, 'ccgt', site.x, site.y)
+    if (!plant.ok) return { ok: false, why: plant.quote.reasonKey }
+    const line = g.build.beginLineConstruction(
+      g.world,
+      g.world.getPlant(plant.plantId).nodeId,
+      'n_rivermouth',
+      220,
+      1,
+    )
+    g.map.syncToWorld()
+    return {
+      ok: line.ok,
+      why: line.quote.reasonKey,
+      plantId: plant.plantId,
+      cost: plant.quote.totalCost + line.quote.totalCost,
+      months: Math.round(plant.quote.buildTicks / (8760 / 12)),
+    }
+  })
+  console.log('placed:', built)
+  if (!built.ok) throw new Error(`Could not build: ${built.why}`)
+
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: join(OUT, '07-under-construction.png') })
+
   // Run fast for a while so the charts fill up and a season passes.
   await page.evaluate(() => window.game.hud.setSpeed(10))
   await page.keyboard.press('3')
@@ -134,6 +179,33 @@ try {
   })
   await page.waitForTimeout(800)
   await page.screenshot({ path: join(OUT, '05-zoomed.png') })
+
+  // The placement overlay: shaded unbuildable ground and a ghost under the cursor.
+  await page.evaluate(() => {
+    const g = window.game
+    g.map.buildMode = { kind: 'plant', typeId: 'wind' }
+    g.map.hoverTile = { x: 20, y: 12 }
+    g.map.hoverValid = true
+    g.map.drawBuildOverlay()
+  })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: join(OUT, '08-placement-overlay.png') })
+  await page.evaluate(() => {
+    window.game.map.buildMode = null
+    window.game.map.drawBuildOverlay()
+  })
+
+  const finalState = await page.evaluate(() => {
+    const plants = window.game.world.plants
+    return {
+      plants: plants.length,
+      building: plants.filter((p) => p.phase === 1).length,
+      operating: plants.filter((p) => p.phase === 2).length,
+      committed: Math.round(window.game.world.committedSpend() / 1e6),
+    }
+  })
+  console.log('fleet:', finalState)
+  if (finalState.plants < 7) throw new Error('The built plant is missing from the fleet')
 
   if (errors.length > 0) {
     console.error('\nBrowser reported errors:')

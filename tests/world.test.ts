@@ -62,7 +62,7 @@ describe('one year of operation', () => {
       const d = world.lastDispatch!
       let served = 0
       for (const city of world.cities) served += d.servedMw.get(city.id) ?? 0
-      expect(d.totalGenerationMw).toBeCloseTo(served + d.totalLossMw, 3)
+      expect(d.totalGenerationMw).toBeCloseTo(served + d.totalLossMw + d.totalStorageChargeMw, 3)
     }
   })
 

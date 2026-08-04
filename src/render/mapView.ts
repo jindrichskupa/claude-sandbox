@@ -15,8 +15,9 @@ import { PLANT_TYPES } from '@content/plantTypes'
 import type { World } from '@sim/world'
 import type { GridEdge, GridNode } from '@sim/grid/network'
 import { isDispatchable } from '@sim/assets/types'
-import { generateTerrain, Tile, type TerrainMap } from '@sim/map/terrain'
+import { isBuildable, Tile, type TerrainMap } from '@sim/map/terrain'
 import { Camera } from './camera'
+import { t } from '@i18n/index'
 
 export const TILE_PX = 26
 
@@ -61,6 +62,12 @@ export interface MapViewCallbacks {
   onSelectNode?: (nodeId: string) => void
 }
 
+/** What the player is currently placing, if anything. */
+export type BuildMode =
+  | { kind: 'plant'; typeId: string }
+  | { kind: 'line'; kv: 110 | 220 | 400; circuits: number; fromNodeId: string | null }
+  | null
+
 export class MapView {
   readonly camera: Camera
   private readonly root = new Container()
@@ -69,22 +76,37 @@ export class MapView {
   private readonly particleLayer = new Container()
   private readonly nodeLayer = new Container()
   private readonly labelLayer = new Container()
+  private readonly buildLayer = new Graphics()
 
-  private terrain: TerrainMap
+  private readonly terrain: TerrainMap
   private particles: Particle[] = []
   private nodeGraphics = new Map<string, Graphics>()
   private lastTopologyEpoch = -1
   selectedNodeId: string | null = null
+
+  buildMode: BuildMode = null
+  /** Tile under the cursor, in tile coordinates. */
+  hoverTile: { x: number; y: number } | null = null
+  /** Set by the UI so the ghost can show whether the placement would be accepted. */
+  hoverValid = true
 
   constructor(
     app: Application,
     private readonly world: World,
     private readonly callbacks: MapViewCallbacks = {},
   ) {
-    this.terrain = generateTerrain(world.scenario.seed, world.scenario.mapWidth, world.scenario.mapHeight)
+    // Terrain belongs to the world — it decides siting, not just colour.
+    this.terrain = world.terrain
     this.camera = new Camera(app.canvas.width, app.canvas.height)
 
-    this.root.addChild(this.terrainLayer, this.lineLayer, this.particleLayer, this.nodeLayer, this.labelLayer)
+    this.root.addChild(
+      this.terrainLayer,
+      this.lineLayer,
+      this.particleLayer,
+      this.buildLayer,
+      this.nodeLayer,
+      this.labelLayer,
+    )
     app.stage.addChild(this.root)
 
     this.drawTerrain()
@@ -144,8 +166,9 @@ export class MapView {
       this.nodeLayer.addChild(g)
       this.nodeGraphics.set(node.id, g)
 
-      if (node.name) {
-        const label = new Text({ text: node.name, style: labelStyle })
+      const labelText = nodeLabel(node)
+      if (labelText) {
+        const label = new Text({ text: labelText, style: labelStyle })
         label.anchor.set(0.5, 0)
         label.position.set(node.x * TILE_PX + TILE_PX / 2, node.y * TILE_PX + TILE_PX / 2 + 14)
         this.labelLayer.addChild(label)
@@ -203,7 +226,8 @@ export class MapView {
             : lerpColour(0xe8b23a, 0xe2483d, Math.min(1, (loading - 0.9) / 0.1))
 
       if (!edge.energised) {
-        g.moveTo(ax, ay).lineTo(bx, by).stroke({ width, color: 0x4a3030, alpha: 0.5 })
+        // Under construction: a dashed ghost of the route, so progress is visible.
+        drawDashed(g, ax, ay, bx, by, 10, 8, { width, color: 0x7fd4ff, alpha: 0.55 })
         continue
       }
 
@@ -323,6 +347,73 @@ export class MapView {
     this.applyCamera()
   }
 
+  /**
+   * The placement overlay: where you may build, and what the thing you are placing would
+   * look like. Drawn every frame while a build mode is active, and nothing at all otherwise.
+   */
+  drawBuildOverlay(): void {
+    const g = this.buildLayer
+    g.clear()
+    const mode = this.buildMode
+    if (!mode) return
+
+    if (mode.kind === 'plant') {
+      // Shade the ground that cannot take a station, so the rule is visible rather than
+      // discovered by having a click refused.
+      for (let y = 0; y < this.terrain.height; y++) {
+        for (let x = 0; x < this.terrain.width; x++) {
+          if (isBuildable(this.terrain, x, y)) continue
+          g.rect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX).fill({ color: 0x000000, alpha: 0.35 })
+        }
+      }
+      const hover = this.hoverTile
+      if (hover) {
+        const cx = hover.x * TILE_PX + TILE_PX / 2
+        const cy = hover.y * TILE_PX + TILE_PX / 2
+        const colour = this.hoverValid ? 0x5fc27e : 0xe2483d
+        g.rect(hover.x * TILE_PX, hover.y * TILE_PX, TILE_PX, TILE_PX).fill({ color: colour, alpha: 0.3 })
+        g.circle(cx, cy, 16).stroke({ width: 2, color: colour, alpha: 0.9 })
+      }
+      return
+    }
+
+    // Line mode: highlight the nodes that can be connected, and rubber-band from the one
+    // already chosen to the cursor.
+    for (const node of this.world.network.allNodes()) {
+      const cx = node.x * TILE_PX + TILE_PX / 2
+      const cy = node.y * TILE_PX + TILE_PX / 2
+      const chosen = node.id === mode.fromNodeId
+      g.circle(cx, cy, chosen ? 20 : 15).stroke({
+        width: 2,
+        color: chosen ? 0x7fd4ff : 0x9fb0c0,
+        alpha: chosen ? 1 : 0.45,
+      })
+    }
+
+    if (mode.fromNodeId && this.hoverTile) {
+      const from = this.world.network.getNode(mode.fromNodeId)
+      if (from) {
+        const colour = this.hoverValid ? 0x7fd4ff : 0xe2483d
+        drawDashed(
+          g,
+          from.x * TILE_PX + TILE_PX / 2,
+          from.y * TILE_PX + TILE_PX / 2,
+          this.hoverTile.x * TILE_PX + TILE_PX / 2,
+          this.hoverTile.y * TILE_PX + TILE_PX / 2,
+          12,
+          8,
+          { width: mode.kv === 400 ? 5 : mode.kv === 220 ? 3.5 : 2.2, color: colour, alpha: 0.8 },
+        )
+      }
+    }
+  }
+
+  /** Tile coordinates under a screen point. */
+  tileAtScreen(screenX: number, screenY: number): { x: number; y: number } {
+    const w = this.camera.screenToWorld(screenX, screenY)
+    return { x: Math.floor(w.x / TILE_PX), y: Math.floor(w.y / TILE_PX) }
+  }
+
   /** Nearest node to a world-space point, for click handling on empty ground. */
   nodeAtWorld(wx: number, wy: number, maxDistancePx = 22): GridNode | null {
     let best: GridNode | null = null
@@ -338,4 +429,37 @@ export class MapView {
     }
     return best
   }
+}
+
+/** A node's display name: either a place name or a localised technology plus its number. */
+export function nodeLabel(node: GridNode): string | null {
+  if (node.name) return node.name
+  if (node.nameKey) return node.nameIndex === undefined ? t(node.nameKey) : `${t(node.nameKey)} ${node.nameIndex}`
+  return null
+}
+
+/** Pixi has no dashed stroke, and a dashed line is the clearest way to say "not yet real". */
+function drawDashed(
+  g: Graphics,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  dash: number,
+  gap: number,
+  style: { width: number; color: number; alpha?: number },
+): void {
+  const dx = bx - ax
+  const dy = by - ay
+  const length = Math.hypot(dx, dy)
+  if (length < 0.5) return
+  const ux = dx / length
+  const uy = dy / length
+  let travelled = 0
+  while (travelled < length) {
+    const end = Math.min(length, travelled + dash)
+    g.moveTo(ax + ux * travelled, ay + uy * travelled).lineTo(ax + ux * end, ay + uy * end)
+    travelled = end + gap
+  }
+  g.stroke(style)
 }

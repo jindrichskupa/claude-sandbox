@@ -23,8 +23,13 @@ import { Param } from './params/types'
 import { dispatch, type DispatchResult } from './dispatch/dispatch'
 import { WeatherModel, type ClimateDef, type Weather } from './weather/weather'
 import { weatherModifiers, WEATHER_SOURCE } from './weather/effects'
+import { generateTerrain, windSiteFactor, type TerrainMap } from './map/terrain'
+import { planStorage, settleStorage, isStorage, type StoragePlan } from './dispatch/storage'
 import {
   addLedger,
+  chargeCapex,
+  chargeDecommissioning,
+  creditRecycling,
   chargeFixedCosts,
   chargeGeneration,
   chargeInterest,
@@ -93,6 +98,21 @@ export interface ScenarioDef {
 }
 
 const HISTORY_LENGTH = TICKS_PER_YEAR
+/** How many recent hours the storage arbitrage policy looks back over. */
+const PRICE_WINDOW_TICKS = 24 * 7
+
+/**
+ * Money committed to a project and paid out over its duration. Keeping the schedule here
+ * rather than on the asset means a cancelled or completed project simply stops being billed,
+ * with no partial-payment bookkeeping scattered through the lifecycle code.
+ */
+interface ScheduledSpend {
+  /** Plant or edge id this belongs to. */
+  ownerId: string
+  perTick: number
+  remainingTicks: number
+  kind: 'capex' | 'decommissioning'
+}
 
 export class World {
   readonly network = new Network()
@@ -105,6 +125,8 @@ export class World {
 
   readonly state: WorldState
   readonly finances: Finances
+  /** Owned by the world, not the renderer: it decides where things can stand. */
+  readonly terrain: TerrainMap
 
   private readonly weatherModel: WeatherModel
   weather: Weather
@@ -121,9 +143,17 @@ export class World {
   private periodStartTick = 0
 
   lastDispatch: DispatchResult | null = null
+  lastStoragePlans: Map<string, StoragePlan> = new Map()
+
+  /** Recent prices, feeding the storage arbitrage policy. */
+  private readonly priceWindow: number[] = []
+  private serial = 0
+  private readonly spending: ScheduledSpend[] = []
+  private readonly energiseAt = new Map<string, number>()
 
   constructor(readonly scenario: ScenarioDef) {
     this.rng = new RandomSource(scenario.seed)
+    this.terrain = generateTerrain(scenario.seed, scenario.mapWidth, scenario.mapHeight)
     this.weatherModel = new WeatherModel(this.rng, scenario.climate)
     this.electricIslands = new IslandCache(this.network, 'electric')
 
@@ -152,6 +182,28 @@ export class World {
    * everything else in the simulation goes through `params.get`.
    */
   private baseValue(targetId: string, param: Param): number | undefined {
+    // Synthetic target used to price a plant that does not exist yet, so the build menu and
+    // the eventual charge come from the same code path and cannot drift apart.
+    if (targetId.startsWith('quote:')) {
+      const typeId = targetId.slice('quote:'.length) as keyof typeof PLANT_TYPES
+      const type = PLANT_TYPES[typeId]
+      if (!type) return undefined
+      switch (param) {
+        case Param.CapacityMw:
+          return type.capacityMw.value
+        case Param.CapexPerKw:
+          return type.capexPerKw.value
+        case Param.BuildTimeMonths:
+          return type.buildTimeMonths.value
+        case Param.FixedOpexPerKwYear:
+          return type.fixedOpexPerKwYear.value
+        case Param.Efficiency:
+          return type.efficiency.value
+        default:
+          return undefined
+      }
+    }
+
     const plant = this.plantsById.get(targetId)
     if (plant) {
       const type = PLANT_TYPES[plant.typeId]
@@ -226,6 +278,43 @@ export class World {
     return this.citiesById.get(id)
   }
 
+  /** Monotonic counter for generated ids. Part of the world state, so replays match. */
+  nextSerial(): number {
+    return ++this.serial
+  }
+
+  /** Any node within `radius` tiles, used to stop the player stacking stations on one spot. */
+  nodeNear(x: number, y: number, radius: number): NodeId | null {
+    for (const node of this.network.allNodes()) {
+      if (Math.hypot(node.x - x, node.y - y) <= radius) return node.id
+    }
+    return null
+  }
+
+  /** Commit money to a project, paid in equal instalments across its duration. */
+  scheduleSpending(ownerId: string, total: number, ticks: number, kind: ScheduledSpend['kind']): void {
+    if (total <= 0 || ticks <= 0) return
+    this.spending.push({ ownerId, perTick: total / ticks, remainingTicks: ticks, kind })
+  }
+
+  /** Stop billing a project, e.g. because it was cancelled. */
+  cancelSpending(ownerId: string): void {
+    for (let i = this.spending.length - 1; i >= 0; i--) {
+      if (this.spending[i]!.ownerId === ownerId) this.spending.splice(i, 1)
+    }
+  }
+
+  /** Remaining committed spend, so the UI can show what is already promised. */
+  committedSpend(): number {
+    let total = 0
+    for (const s of this.spending) total += s.perTick * s.remainingTicks
+    return total
+  }
+
+  scheduleEnergising(edgeId: string, tick: number): void {
+    this.energiseAt.set(edgeId, tick)
+  }
+
   get date(): GameDate {
     return tickToDate(this.tick, this.scenario.startYear)
   }
@@ -250,9 +339,16 @@ export class World {
 
     const date = this.date
 
-    // 1. Weather, and everything it implies about plants and demand.
+    // 1. Weather, and everything it implies about plants and demand. Wind farms see the
+    //    wind their own site gets, not a national average — siting is a real decision.
     this.weather = this.weatherModel.generate(this.tick, this.weather.snowpackMm)
-    this.registry.setSource(WEATHER_SOURCE, weatherModifiers(this.weather, this.plants, this.cities, date.hour))
+    this.registry.setSource(
+      WEATHER_SOURCE,
+      weatherModifiers(this.weather, this.plants, this.cities, date.hour, (plant) => {
+        const node = this.network.getNode(plant.nodeId)
+        return node ? windSiteFactor(this.terrain, node.x, node.y) : 1
+      }),
+    )
 
     // 2. Ageing, monthly — nothing here changes meaningfully within a day.
     if (isMonthBoundary(this.tick) || this.tick === 1) {
@@ -262,10 +358,21 @@ export class World {
     // 3. Forced outages. A state transition, not a modifier: the unit is out, not derated.
     this.rollOutages()
 
-    // 4. Lifecycle transitions (construction finishing, dismantling completing).
+    // 4. Lifecycle transitions (construction finishing, dismantling completing) and the
+    //    instalments owed on whatever is still being built.
     this.advanceLifecycles()
+    this.payInstalments()
 
-    // 5. Dispatch.
+    // 5. Storage decides before the flow problem is posed. See `dispatch/storage.ts` for why.
+    const storagePlans = planStorage({
+      plants: this.plants,
+      params: this.params,
+      priceHistory: this.priceWindow,
+      recentShortage: (this.lastDispatch?.totalUnservedMw ?? 0) > 0.01,
+    })
+    this.lastStoragePlans = storagePlans
+
+    // 6. Dispatch.
     const result = dispatch({
       network: this.network,
       islands: this.electricIslands.get(),
@@ -273,13 +380,20 @@ export class World {
       cities: this.cities,
       params: this.params,
       carbonPrice: this.state.carbonPricePerTonne,
+      storagePlans,
     })
     this.lastDispatch = result
 
-    // 6. Money and wear from what actually ran.
+    // 7. Money and wear from what actually ran.
     const tariff = this.params.getOr('world', Param.TariffPerMwh, this.scenario.tariffPerMwh)
     for (const plant of this.plants) {
       const mw = result.generationMw.get(plant.id) ?? 0
+      if (isStorage(plant)) {
+        settleStorage(plant, storagePlans.get(plant.id), mw)
+        // Only the discharge burns variable cost; charging is bought energy, not fuel.
+        chargeGeneration(this.openLedger, plant, Math.max(0, mw), this.params, this.state.carbonPricePerTonne)
+        continue
+      }
       if (mw > 0 && plant.outputMw <= 0) plant.cumulativeStarts++
       plant.outputMw = mw
       chargeGeneration(this.openLedger, plant, mw, this.params, this.state.carbonPricePerTonne)
@@ -301,11 +415,13 @@ export class World {
     creditSales(this.openLedger, served, tariff)
     chargeUnserved(this.openLedger, result.totalUnservedMw)
 
-    // 7. Close the period if the month turned.
+    // 8. Close the period if the month turned.
     if (isMonthBoundary(this.tick)) this.closePeriod()
     if (isYearBoundary(this.tick)) this.closeYear()
 
     const snapshot = this.makeSnapshot(date, result)
+    this.priceWindow.push(snapshot.pricePerMwh)
+    if (this.priceWindow.length > PRICE_WINDOW_TICKS) this.priceWindow.shift()
     this.history[this.historyCount % HISTORY_LENGTH] = snapshot
     this.historyCount++
     return snapshot
@@ -337,14 +453,37 @@ export class World {
         plant.commissionedTick = this.tick
         plant.conditionPct = 1
         plant.online = true
+        plant.capexPaid = this.params.get(plant.id, Param.CapexPerKw) * this.params.get(plant.id, Param.CapacityMw) * 1000
       } else if (plant.phase === LifecyclePhase.Decommissioning && this.tick >= plant.phaseEndsTick) {
         const type = PLANT_TYPES[plant.typeId]
         plant.phase = LifecyclePhase.Remediating
         plant.phaseEndsTick = this.tick + Math.round(type.remediationYears.value * TICKS_PER_YEAR)
-        this.openLedger.recyclingIncome += type.recyclingRecoveryPerKw.value * type.capacityMw.value * 1000
+        // Scrap value comes back only once the machine is actually dismantled.
+        creditRecycling(this.openLedger, type.recyclingRecoveryPerKw.value * type.capacityMw.value * 1000)
       } else if (plant.phase === LifecyclePhase.Remediating && this.tick >= plant.phaseEndsTick) {
         plant.phase = LifecyclePhase.Cleared
       }
+    }
+
+    // A finished line joins the grid. Until then it exists on the map but carries nothing,
+    // which is what makes the construction time mean something.
+    if (this.energiseAt.size > 0) {
+      for (const [edgeId, tick] of [...this.energiseAt]) {
+        if (this.tick < tick) continue
+        this.energiseAt.delete(edgeId)
+        if (this.network.getEdge(edgeId)) this.network.setEnergised(edgeId, true)
+      }
+    }
+  }
+
+  /** Pay this tick's share of everything under construction or being dismantled. */
+  private payInstalments(): void {
+    for (let i = this.spending.length - 1; i >= 0; i--) {
+      const item = this.spending[i]!
+      if (item.kind === 'capex') chargeCapex(this.openLedger, item.perTick)
+      else chargeDecommissioning(this.openLedger, item.perTick)
+      item.remainingTicks--
+      if (item.remainingTicks <= 0) this.spending.splice(i, 1)
     }
   }
 

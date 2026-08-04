@@ -1,13 +1,11 @@
 {
   "app.title": "Powergrid Tycoon",
-
   "fuel.coal": "Hard coal",
   "fuel.lignite": "Lignite",
   "fuel.gas": "Natural gas",
   "fuel.uranium": "Uranium",
   "fuel.biomass": "Biomass",
   "fuel.none": "None",
-
   "plant.coal": "Coal-fired station",
   "plant.lignite": "Lignite station",
   "plant.ccgt": "Combined-cycle gas",
@@ -19,18 +17,15 @@
   "plant.solar": "Solar farm",
   "plant.battery": "Battery storage",
   "plant.gas_chp": "Gas cogeneration",
-
   "line.110": "110 kV line",
   "line.220": "220 kV line",
   "line.400": "400 kV line",
-
   "layer.tech": "Technology",
   "layer.age": "Age and condition",
   "layer.weather": "Weather",
   "layer.policy": "Policy",
   "layer.event": "Event",
   "layer.geopolitics": "Geopolitics",
-
   "param.capacityMw": "Capacity",
   "param.efficiency": "Efficiency",
   "param.availability": "Availability",
@@ -45,7 +40,6 @@
   "param.lineCapacity": "Line capacity",
   "param.carbonPrice": "Carbon price",
   "param.tariff": "Tariff",
-
   "reason.windSpeed": "Wind {wind} m/s",
   "reason.irradiance": "Sunlight {irradiance}%",
   "reason.riverFlow": "River flow {flow}%",
@@ -57,7 +51,6 @@
   "reason.wearEfficiency": "Wear after {years} years",
   "reason.wearAvailability": "Condition {condition}%",
   "reason.maintenanceCost": "Maintenance after {years} years",
-
   "lifecycle.planned": "Planned",
   "lifecycle.building": "Under construction",
   "lifecycle.operating": "Operating",
@@ -66,14 +59,11 @@
   "lifecycle.decommissioning": "Being dismantled",
   "lifecycle.remediating": "Site remediation",
   "lifecycle.cleared": "Cleared",
-
   "scenario.firstRegion.name": "The Inherited Grid",
   "scenario.firstRegion.description": "You take over an ageing utility. The cheap lignite is in the west, the demand is in the east, and the corridor between them was built for a smaller country.",
-
   "objective.keepLightsOn": "Keep unserved energy below 0.1% of demand",
   "objective.staySolvent": "Avoid bankruptcy",
   "objective.replaceOldHarbour": "Replace Old Harbour before it reaches end of life",
-
   "ui.cash": "Cash",
   "ui.debt": "Debt",
   "ui.demand": "Demand",
@@ -107,11 +97,34 @@
   "ui.years": "years",
   "ui.bankrupt": "The utility is bankrupt.",
   "ui.forcedOutage": "Out on a forced outage",
-
   "category.thermal": "Thermal",
   "category.nuclear": "Nuclear",
   "category.hydro": "Hydro",
   "category.wind": "Wind",
   "category.solar": "Solar",
-  "category.storage": "Storage"
+  "category.storage": "Storage",
+  "ui.months": "months",
+  "ui.perSubstation": "{cost} per substation",
+  "ui.retire": "Retire",
+  "ui.mothball": "Mothball",
+  "ui.reactivate": "Reactivate",
+  "ui.committed": "Committed",
+  "ui.storage": "Stored energy",
+  "ui.charging": "Charging",
+  "ui.discharging": "Discharging",
+  "ui.buildProgress": "Construction",
+  "ui.completesIn": "{months} months to go",
+  "ui.buildHint": "Click a site to place. Right-click or Esc to cancel.",
+  "ui.lineHint": "Click the first substation, then the second.",
+  "build.notYetAvailable": "Not available until {year}",
+  "build.cannotAfford": "Cannot afford it",
+  "build.unsuitableGround": "Unsuitable ground",
+  "build.tooClose": "Too close to something else",
+  "build.sameNode": "Pick two different points",
+  "build.noSuchNode": "No connection point there",
+  "build.alreadyConnected": "Already connected at this voltage",
+  "build.noSuchPlant": "No such plant",
+  "build.notRetirable": "Cannot be retired now",
+  "build.placed": "Construction started",
+  "build.retiring": "Dismantling started"
 }

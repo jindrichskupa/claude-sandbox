@@ -198,7 +198,7 @@ button.active {
 
 #inspector {
   left: 12px;
-  top: 74px;
+  top: 112px;
   width: 330px;
   max-height: calc(100vh - 100px);
   overflow-y: auto;
@@ -370,4 +370,154 @@ button.active {
   border-radius: 2px;
   vertical-align: 3px;
   margin-right: 5px;
+}
+
+/* ---- Build panel ------------------------------------------------------ */
+
+#build-toggle {
+  position: absolute;
+  left: 12px;
+  top: 74px;
+  z-index: 2;
+  font-weight: 600;
+  padding: 7px 16px;
+}
+
+#build-panel {
+  left: 12px;
+  top: 112px;
+  width: 300px;
+  max-height: calc(100vh - 232px);
+  overflow-y: auto;
+  padding: 12px;
+  display: none;
+}
+
+#build-panel.visible {
+  display: block;
+}
+
+.build-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.build-header h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+}
+
+.build-group-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin: 12px 0 6px;
+}
+
+.build-group-title:first-child {
+  margin-top: 0;
+}
+
+.build-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.build-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.build-row.selected {
+  background: rgba(127, 212, 255, 0.14);
+  border-color: var(--accent);
+}
+
+.build-row.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.build-row.disabled:hover {
+  background: transparent;
+}
+
+.build-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+  margin-top: 3px;
+}
+
+.build-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.build-name {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.build-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+
+.build-blocked {
+  font-size: 10px;
+  color: var(--warn);
+  margin-top: 3px;
+}
+
+/* ---- Inspector actions and hint --------------------------------------- */
+
+.asset-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.asset-actions button {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+button.danger {
+  border-color: rgba(226, 72, 61, 0.45);
+  color: #ffb4ac;
+}
+
+button.danger:hover {
+  background: rgba(226, 72, 61, 0.18);
+}
+
+#hint {
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 16px;
+  font-size: 12px;
+  color: var(--text);
+  display: none;
+  white-space: nowrap;
+}
+
+#hint.visible {
+  display: block;
 }

@@ -31,8 +31,14 @@ export interface GridNode {
   /** Tile coordinates on the map. */
   x: number
   y: number
+  /**
+   * Localisable name for things the player builds: the key names the technology and the
+   * index distinguishes the third gas turbine from the first. Composed at render time so
+   * switching language renames them properly.
+   */
   nameKey?: string
-  /** Free-form display name for cities, which are named rather than keyed. */
+  nameIndex?: number
+  /** Free-form display name for places that are named rather than keyed, such as cities. */
   name?: string
 }
 

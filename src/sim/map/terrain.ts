@@ -1,9 +1,9 @@
 /**
  * Terrain.
  *
- * Cosmetic in this milestone, but generated in the simulation rather than the renderer
- * because later milestones need it: hydro wants rivers, wind wants exposed high ground,
- * lines cost more over mountains, and cooling water is only where the water is.
+ * Owned by the world rather than the renderer, because it decides things: where a station
+ * can stand, how good a wind site is, and how expensive a line is to string across a ridge.
+ * The renderer reads it; it does not generate it.
  */
 
 import { hashString } from '../core/rng'
@@ -103,4 +103,62 @@ export function tileAt(map: TerrainMap, x: number, y: number): Tile {
 export function isBuildable(map: TerrainMap, x: number, y: number): boolean {
   const t = tileAt(map, x, y)
   return t !== Tile.Water && t !== Tile.Mountain
+}
+
+function indexAt(map: TerrainMap, x: number, y: number): number {
+  const cx = Math.max(0, Math.min(map.width - 1, Math.round(x)))
+  const cy = Math.max(0, Math.min(map.height - 1, Math.round(y)))
+  return cy * map.width + cx
+}
+
+/** Wind exposure of a site, 0..1. */
+export function windIndexAt(map: TerrainMap, x: number, y: number): number {
+  return map.windIndex[indexAt(map, x, y)] ?? 0.5
+}
+
+export function elevationAt(map: TerrainMap, x: number, y: number): number {
+  return map.elevation[indexAt(map, x, y)] ?? 0
+}
+
+/**
+ * Multiplier on a wind site's effective wind speed.
+ *
+ * A sheltered valley and an exposed ridge are not the same investment, and the difference is
+ * large: because power goes with the cube of speed, a 20% better site produces roughly 70%
+ * more energy. This is the main reason siting a wind farm is a decision rather than a
+ * formality.
+ */
+export function windSiteFactor(map: TerrainMap, x: number, y: number): number {
+  return 0.65 + 0.7 * windIndexAt(map, x, y)
+}
+
+/**
+ * How much dearer a line is to build over this ground. Mountains and water crossings are
+ * where transmission projects actually get expensive.
+ */
+export function terrainCostFactor(map: TerrainMap, x: number, y: number): number {
+  switch (tileAt(map, x, y)) {
+    case Tile.Water:
+      return 2.6
+    case Tile.Mountain:
+      return 2.2
+    case Tile.Hill:
+      return 1.4
+    case Tile.Forest:
+      return 1.15
+    default:
+      return 1
+  }
+}
+
+/** Mean cost factor along a straight route, sampled every half tile. */
+export function routeCostFactor(map: TerrainMap, ax: number, ay: number, bx: number, by: number): number {
+  const distance = Math.hypot(bx - ax, by - ay)
+  const samples = Math.max(2, Math.ceil(distance * 2))
+  let total = 0
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples
+    total += terrainCostFactor(map, ax + (bx - ax) * t, ay + (by - ay) * t)
+  }
+  return total / (samples + 1)
 }

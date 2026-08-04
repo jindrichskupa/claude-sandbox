@@ -15,6 +15,7 @@ import { isDispatchable, type CityAsset, type PlantAsset } from '../assets/types
 import { Param } from '../params/types'
 import type { Params } from '../params/Params'
 import { MinCostFlowSolver } from './minCostFlow'
+import { isStorage, type StoragePlan } from './storage'
 
 export interface DispatchResult {
   /** MW generated per plant. Negative for storage that is charging. */
@@ -29,10 +30,15 @@ export interface DispatchResult {
   /** Marginal cost of delivering one more MW to each node. */
   nodalPrice: Map<NodeId, number>
 
+  /** Demand from cities. Deliberately excludes the grid's own losses and storage charging. */
   totalDemandMw: number
   totalGenerationMw: number
   totalLossMw: number
   totalUnservedMw: number
+  /** MW drawn by storage that was actually charging. */
+  totalStorageChargeMw: number
+  /** MW supplied by storage that was discharging. */
+  totalStorageDischargeMw: number
   /** Marginal cost of the most expensive dispatched unit, per island. */
   marketPriceByIsland: number[]
   /** Fuel plus carbon plus variable cost of this hour's generation. */
@@ -89,6 +95,7 @@ interface Built {
   cityArcs: Array<{ city: CityAsset; serveArc: number; unservedArc: number; demand: number }>
   lineArcs: Array<{ edgeId: string; fwd: number; rev: number }>
   lossArcs: Array<{ serveArc: number; unservedArc: number }>
+  storageArcs: Array<{ plantId: string; dischargeArc: number; chargeArc: number; forgoArc: number }>
   totalDemand: number
 }
 
@@ -101,10 +108,12 @@ export interface DispatchInput {
   carbonPrice: number
   /** Extra demand per node from the previous loss estimate, in MW. */
   lossDemand?: Map<NodeId, number>
+  /** What each storage unit intends to do this hour. See `storage.ts`. */
+  storagePlans?: Map<string, StoragePlan>
 }
 
 function build(input: DispatchInput): Built {
-  const { network, plants, cities, params, carbonPrice, lossDemand } = input
+  const { network, plants, cities, params, carbonPrice, lossDemand, storagePlans } = input
   const nodeIds = network.nodeIds()
   const indexOf = new Map<NodeId, number>()
   nodeIds.forEach((id, i) => indexOf.set(id, i))
@@ -115,17 +124,43 @@ function build(input: DispatchInput): Built {
 
   const dispatchable = plants.filter(isDispatchable)
   const electricEdges = network.activeEdges('electric')
-  // Two arcs per plant, two per city, two per node carrying losses, two directions per line.
+  // Two arcs per plant, three per storage unit, two per city, two per node carrying losses,
+  // two directions per line.
   const maxEdges =
-    dispatchable.length * 2 + cities.length * 2 + electricEdges.length * 2 + nodeIds.length * 2 + 8
+    dispatchable.length * 3 + cities.length * 2 + electricEdges.length * 2 + nodeIds.length * 2 + 8
 
   const solver = new MinCostFlowSolver(nodeCount, maxEdges)
   solver.reset()
 
   const plantArcs: Built['plantArcs'] = []
+  const storageArcs: Built['storageArcs'] = []
+  let storageChargeDemand = 0
+
   for (const plant of dispatchable) {
     const node = indexOf.get(plant.nodeId)
     if (node === undefined) continue
+
+    if (isStorage(plant)) {
+      // Storage does not belong in the merit stack; its decision was already made by the
+      // policy in `storage.ts`, and here it is only a shape the solver understands.
+      const plan = storagePlans?.get(plant.id)
+      if (!plan || plan.mode === 'idle') continue
+
+      if (plan.mode === 'discharging' && plan.dischargeCeilingMw > 0) {
+        const dischargeArc = solver.addArc(source, node, plan.dischargeCeilingMw, plan.offerPricePerMwh)
+        storageArcs.push({ plantId: plant.id, dischargeArc, chargeArc: -1, forgoArc: -1 })
+      } else if (plan.mode === 'charging' && plan.chargeMw > 0) {
+        // Charging is real demand, but curtailable: if the system turns out to be short, the
+        // battery goes without rather than a city going dark. The forgo arc is what lets the
+        // solver make that trade, priced above any generator but far below lost load.
+        const chargeArc = solver.addArc(node, sink, plan.chargeMw, 0)
+        const forgoArc = solver.addArc(source, node, plan.chargeMw, ECONOMICS.forgoneChargePricePerMwh.value)
+        storageChargeDemand += plan.chargeMw
+        storageArcs.push({ plantId: plant.id, dischargeArc: -1, chargeArc, forgoArc })
+      }
+      continue
+    }
+
     const { floor, ceiling } = availableRange(plant, params)
     const cost = marginalCostPerMwh(plant, params, carbonPrice)
 
@@ -138,7 +173,7 @@ function build(input: DispatchInput): Built {
   }
 
   const cityArcs: Built['cityArcs'] = []
-  let totalDemand = 0
+  let totalDemand = storageChargeDemand
   for (const city of cities) {
     const node = indexOf.get(city.nodeId)
     if (node === undefined) continue
@@ -179,7 +214,7 @@ function build(input: DispatchInput): Built {
     lineArcs.push({ edgeId: edge.id, fwd, rev })
   }
 
-  return { solver, source, sink, indexOf, plantArcs, cityArcs, lineArcs, lossArcs, totalDemand }
+  return { solver, source, sink, indexOf, plantArcs, cityArcs, lineArcs, lossArcs, storageArcs, totalDemand }
 }
 
 function lineCapacityOf(kv: number, circuits: number): number {
@@ -190,7 +225,8 @@ function lineCapacityOf(kv: number, circuits: number): number {
 /** One pass of the flow problem, with no loss feedback. */
 function solveOnce(input: DispatchInput): DispatchResult {
   const built = build(input)
-  const { solver, source, sink, indexOf, plantArcs, cityArcs, lineArcs, lossArcs, totalDemand } = built
+  const { solver, source, sink, indexOf, plantArcs, cityArcs, lineArcs, lossArcs, storageArcs, totalDemand } =
+    built
   const result = solver.solve(source, sink, totalDemand)
 
   const generationMw = new Map<string, number>()
@@ -211,10 +247,30 @@ function solveOnce(input: DispatchInput): DispatchResult {
     }
   }
 
+  // Storage, read back as a signed figure: positive discharged, negative charged. Only the
+  // charge that actually happened counts — a forgone charge is not consumption.
+  let totalStorageChargeMw = 0
+  let totalStorageDischargeMw = 0
+  for (const { plantId, dischargeArc, chargeArc, forgoArc } of storageArcs) {
+    let mw = 0
+    if (dischargeArc >= 0) {
+      mw = solver.flowOf(dischargeArc)
+      totalGenerationMw += mw
+      totalStorageDischargeMw += mw
+    } else if (chargeArc >= 0) {
+      const charged = Math.max(0, solver.flowOf(chargeArc) - (forgoArc >= 0 ? solver.flowOf(forgoArc) : 0))
+      mw = -charged
+      totalStorageChargeMw += charged
+    }
+    generationMw.set(plantId, mw)
+  }
+
   const servedMw = new Map<string, number>()
   const unservedMw = new Map<string, number>()
   let totalUnservedMw = 0
-  for (const { city, serveArc, unservedArc } of cityArcs) {
+  let cityDemandMw = 0
+  for (const { city, serveArc, unservedArc, demand } of cityArcs) {
+    cityDemandMw += demand
     const unserved = solver.flowOf(unservedArc)
     const served = solver.flowOf(serveArc) - unserved
     servedMw.set(city.id, Math.max(0, served))
@@ -258,10 +314,12 @@ function solveOnce(input: DispatchInput): DispatchResult {
     servedMw,
     unservedMw,
     nodalPrice,
-    totalDemandMw: totalDemand,
+    totalDemandMw: cityDemandMw,
     totalGenerationMw,
     totalLossMw,
     totalUnservedMw,
+    totalStorageChargeMw,
+    totalStorageDischargeMw,
     marketPriceByIsland: dispatchedCostByIsland,
     totalVariableCost,
     aborted: result.aborted,

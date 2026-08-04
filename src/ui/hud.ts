@@ -16,11 +16,20 @@ import { LIFECYCLE_KEYS, LifecyclePhase, isDispatchable } from '@sim/assets/type
 import { ageYears } from '@sim/assets/aging'
 import { Layer, LAYER_KEYS, Op, Param, PARAM_KEYS, type Explanation } from '@sim/params/types'
 import { drawLoadCurve, drawMix, drawPrice } from './charts'
+import { nodeLabel } from '@render/mapView'
+import { BuildPanel, type BuildSelection } from './buildPanel'
+import { energyCapacityMwh, isStorage } from '@sim/dispatch/storage'
+import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
+
+const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 
 export type Speed = 0 | 1 | 3 | 10
 
 export interface HudCallbacks {
   onSetSpeed: (speed: Speed) => void
+  onSelectBuild: (selection: BuildSelection) => void
+  onRetire: (plantId: string) => void
+  onMothball: (plantId: string, mothball: boolean) => void
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -51,8 +60,10 @@ export class Hud {
   private readonly loadCanvas: HTMLCanvasElement
   private readonly mixCanvas: HTMLCanvasElement
   private readonly priceCanvas: HTMLCanvasElement
+  readonly buildPanel: BuildPanel
 
   private selectedNodeId: string | null = null
+  private readonly hint: HTMLDivElement
 
   constructor(
     private readonly root: HTMLElement,
@@ -154,6 +165,25 @@ export class Hud {
       lineLegend.appendChild(row)
     }
     root.appendChild(lineLegend)
+
+    // --- Build panel and its hint line ---
+    this.buildPanel = new BuildPanel(root, world, {
+      onSelect: (s) => this.callbacks.onSelectBuild(s),
+      onOpen: () => {
+        this.selectedNodeId = null
+        this.renderInspector()
+      },
+    })
+
+    this.hint = el('div', 'panel')
+    this.hint.id = 'hint'
+    root.appendChild(this.hint)
+  }
+
+  /** Show the one-line instruction that goes with the current placement mode. */
+  setHint(text: string | null): void {
+    this.hint.textContent = text ?? ''
+    this.hint.classList.toggle('visible', text !== null)
   }
 
   setSpeed(speed: Speed): void {
@@ -163,6 +193,9 @@ export class Hud {
   }
 
   selectNode(nodeId: string | null): void {
+    // The inspector and the build panel occupy the same corner, so they take turns rather
+    // than stacking on top of one another.
+    if (nodeId) this.buildPanel.setOpen(false)
     this.selectedNodeId = nodeId
     this.renderInspector()
   }
@@ -203,6 +236,8 @@ export class Hud {
     this.stats.opinion!.textContent = formatPct(opinion)
     this.stats.opinion!.className = `stat-value ${opinion < 0.3 ? 'bad' : opinion > 0.6 ? 'good' : 'warn'}`
 
+    this.buildPanel.render()
+
     const history = world.recentHistory(240)
     if (history.length > 1) {
       drawLoadCurve(this.loadCanvas, history)
@@ -236,7 +271,7 @@ export class Hud {
     close.addEventListener('click', () => this.selectNode(null))
     this.inspector.appendChild(close)
 
-    this.inspector.appendChild(el('h2', undefined, node.name ?? node.id))
+    this.inspector.appendChild(el('h2', undefined, nodeLabel(node) ?? node.id))
     const dispatch = this.world.lastDispatch
 
     const city = this.world.cities.find((c) => c.nodeId === nodeId)
@@ -283,6 +318,7 @@ export class Hud {
         this.kv(t('ui.age'), `${ageYears(plant, this.world.tick).toFixed(0)} ${t('ui.years')} / ${type.designLifeYears.value}`),
       )
       block.appendChild(this.kv(t('ui.condition'), formatPct(plant.conditionPct)))
+
       // A unit can be nominally "operating" and still not be generating, because it has
       // tripped. Saying "Operating" in that case would be true and useless.
       if (!plant.online && plant.phase === LifecyclePhase.Operating) {
@@ -291,9 +327,36 @@ export class Hud {
         block.appendChild(this.kv('', t(LIFECYCLE_KEYS[plant.phase])))
       }
 
+      // Anything with a countdown gets a progress bar, because "under construction" without
+      // a date is not information the player can plan around.
+      if (plant.phase === LifecyclePhase.Building || plant.phase === LifecyclePhase.Decommissioning) {
+        const remaining = Math.max(0, plant.phaseEndsTick - this.world.tick)
+        const months = Math.ceil(remaining / TICKS_PER_MONTH)
+        block.appendChild(this.kv(t('ui.buildProgress'), t('ui.completesIn', { months })))
+      }
+
+      if (isStorage(plant)) {
+        const capacityMwh = energyCapacityMwh(plant)
+        const socBar = el('div', 'bar')
+        const socFill = el('div')
+        socFill.style.width = `${Math.min(100, (plant.storageMwh / Math.max(1, capacityMwh)) * 100)}%`
+        socFill.style.background = '#7fd4ff'
+        socBar.appendChild(socFill)
+        block.appendChild(socBar)
+        block.appendChild(
+          this.kv(t('ui.storage'), `${plant.storageMwh.toFixed(0)} / ${capacityMwh.toFixed(0)} MWh`),
+        )
+        const plan = this.world.lastStoragePlans.get(plant.id)
+        if (plan && plan.mode !== 'idle') {
+          block.appendChild(this.kv('', t(plan.mode === 'charging' ? 'ui.charging' : 'ui.discharging')))
+        }
+      }
+
       // Two chains worth showing: why the output is limited, and why the fuel bill is what it is.
       block.appendChild(this.explainBlock(this.world.params.explain(plant.id, Param.Availability), '', true))
       block.appendChild(this.explainBlock(this.world.params.explain(plant.id, Param.Efficiency), '', true))
+
+      block.appendChild(this.plantActions(plant))
       this.inspector.appendChild(block)
     }
 
@@ -317,6 +380,27 @@ export class Hud {
         this.inspector.appendChild(block)
       }
     }
+  }
+
+  /** Retire and mothball, offered only where they actually apply. */
+  private plantActions(plant: { id: string; phase: LifecyclePhase }): HTMLDivElement {
+    const row = el('div', 'asset-actions')
+    if (plant.phase === LifecyclePhase.Operating) {
+      const mothball = el('button', undefined, t('ui.mothball'))
+      mothball.addEventListener('click', () => this.callbacks.onMothball(plant.id, true))
+      row.appendChild(mothball)
+      const retire = el('button', 'danger', t('ui.retire'))
+      retire.addEventListener('click', () => this.callbacks.onRetire(plant.id))
+      row.appendChild(retire)
+    } else if (plant.phase === LifecyclePhase.Mothballed) {
+      const back = el('button', undefined, t('ui.reactivate'))
+      back.addEventListener('click', () => this.callbacks.onMothball(plant.id, false))
+      row.appendChild(back)
+      const retire = el('button', 'danger', t('ui.retire'))
+      retire.addEventListener('click', () => this.callbacks.onRetire(plant.id))
+      row.appendChild(retire)
+    }
+    return row
   }
 
   private kv(label: string, value: string): HTMLDivElement {

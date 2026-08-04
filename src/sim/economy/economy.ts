@@ -23,6 +23,8 @@ export interface PeriodLedger {
   fixedOpex: number
   interest: number
   unservedPenalty: number
+  /** Capital spent on construction in this period. */
+  capex: number
   decommissioningCost: number
   recyclingIncome: number
   /** Energy sold, MWh. */
@@ -42,6 +44,7 @@ export function emptyLedger(): PeriodLedger {
     fixedOpex: 0,
     interest: 0,
     unservedPenalty: 0,
+    capex: 0,
     decommissioningCost: 0,
     recyclingIncome: 0,
     energySoldMwh: 0,
@@ -60,6 +63,7 @@ export function ledgerProfit(l: PeriodLedger): number {
     l.fixedOpex -
     l.interest -
     l.unservedPenalty -
+    l.capex -
     l.decommissioningCost
   )
 }
@@ -72,6 +76,7 @@ export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.fixedOpex += from.fixedOpex
   into.interest += from.interest
   into.unservedPenalty += from.unservedPenalty
+  into.capex += from.capex
   into.decommissioningCost += from.decommissioningCost
   into.recyclingIncome += from.recyclingIncome
   into.energySoldMwh += from.energySoldMwh
@@ -161,6 +166,46 @@ export function chargeInterest(ledger: PeriodLedger, finances: Finances, ticksIn
 export function borrowingHeadroom(finances: Finances): number {
   const limit = finances.trailingRevenue * ECONOMICS.maxDebtToRevenue.value
   return Math.max(0, limit - finances.debt)
+}
+
+/** Everything the utility could put behind a commitment right now. */
+export function spendingPower(finances: Finances): number {
+  return finances.cash + borrowingHeadroom(finances)
+}
+
+/**
+ * Whether a project can be committed to.
+ *
+ * The whole cost must be covered, not just the first instalment. A half-built power station
+ * is worth nothing, so letting the player start one they cannot finish would be a way to
+ * lose the game by accident rather than by decision — and the design rules that out.
+ */
+export function canAfford(finances: Finances, totalCost: number): boolean {
+  return !finances.bankrupt && spendingPower(finances) >= totalCost
+}
+
+/**
+ * Charge one instalment of construction spending.
+ *
+ * Capital is paid out across the build rather than in one lump, which is both how projects
+ * are really financed and what makes a long build a sustained drain the player has to plan
+ * around rather than a single shock.
+ */
+export function chargeCapex(ledger: PeriodLedger, amount: number): void {
+  if (amount <= 0) return
+  ledger.capex += amount
+}
+
+/** Charge one instalment of dismantling. */
+export function chargeDecommissioning(ledger: PeriodLedger, amount: number): void {
+  if (amount <= 0) return
+  ledger.decommissioningCost += amount
+}
+
+/** Credit the scrap and material value recovered at end of life. */
+export function creditRecycling(ledger: PeriodLedger, amount: number): void {
+  if (amount <= 0) return
+  ledger.recyclingIncome += amount
 }
 
 /**

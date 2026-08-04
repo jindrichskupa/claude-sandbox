@@ -27,6 +27,12 @@ export interface EconomicsDef {
   wheelingTieBreakPerMwh: Sourced<number>
   /** Penalty charged per MWh of unserved energy, on top of the lost revenue. */
   unservedPenaltyPerMwh: Sourced<number>
+  /**
+   * What it "costs" to abandon a planned storage charge. Priced above any real generator so
+   * charging is dropped only when the system is genuinely short, and far below lost load so
+   * a battery always goes without before a city does.
+   */
+  forgoneChargePricePerMwh: Sourced<number>
 }
 
 export const ECONOMICS: EconomicsDef = {
@@ -37,4 +43,5 @@ export const ECONOMICS: EconomicsDef = {
   maxDebtToRevenue: sourced(4, 'fraction', 'game-design', 2024),
   wheelingTieBreakPerMwh: sourced(0.01, 'EUR/MWh', 'game-design', 2024, 'Numerical tie-break only'),
   unservedPenaltyPerMwh: sourced(300, 'EUR/MWh', 'game-design', 2024, 'Regulatory penalty for failing to supply'),
+  forgoneChargePricePerMwh: sourced(600, 'EUR/MWh', 'game-design', 2024, 'Ordering only; not a real cost'),
 }

@@ -95,6 +95,16 @@ export interface PlantTypeDef {
   weatherDependence: WeatherDependence
   cooling: CoolingType
 
+  /**
+   * First year the technology can be built at all.
+   *
+   * A caveat worth stating: the cost figures above are held at their reference year, so a
+   * technology built in 2005 costs what it cost in the source year rather than what it cost
+   * in 2005. Making cost move with time is the learning-curve work, and until that lands this
+   * field at least prevents the obvious absurdities — grid batteries in 1995, say.
+   */
+  availableFromYear: Sourced<number>
+
   chp: ChpSpec | null
   storage: StorageSpec | null
 }
@@ -125,6 +135,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.08, 'fraction', 'entsoe-factsheet', 2022),
     weatherDependence: 'none',
     cooling: 'water',
+    availableFromYear: sourced(1900, 'count', 'engineering-standard', 2023, 'Mature long before the game begins'),
     chp: null,
     storage: null,
   },
@@ -151,6 +162,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.09, 'fraction', 'entsoe-factsheet', 2022),
     weatherDependence: 'none',
     cooling: 'water',
+    availableFromYear: sourced(1900, 'count', 'engineering-standard', 2023, 'Mature long before the game begins'),
     chp: null,
     storage: null,
   },
@@ -177,6 +189,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.05, 'fraction', 'entsoe-factsheet', 2022),
     weatherDependence: 'none',
     cooling: 'water',
+    availableFromYear: sourced(1985, 'count', 'engineering-standard', 2023, 'Combined cycle became the default choice in the late 1980s'),
     chp: null,
     storage: null,
   },
@@ -203,6 +216,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.04, 'fraction', 'entsoe-factsheet', 2022),
     weatherDependence: 'none',
     cooling: 'air',
+    availableFromYear: sourced(1960, 'count', 'engineering-standard', 2023, 'Mature'),
     chp: null,
     storage: null,
   },
@@ -229,6 +243,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.04, 'fraction', 'entsoe-factsheet', 2022),
     weatherDependence: 'none',
     cooling: 'water',
+    availableFromYear: sourced(1970, 'count', 'engineering-standard', 2023, 'Commercial fleet build-out'),
     chp: null,
     storage: null,
   },
@@ -255,6 +270,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.02, 'fraction', 'entsoe-factsheet', 2022),
     weatherDependence: 'riverflow',
     cooling: 'none',
+    availableFromYear: sourced(1900, 'count', 'engineering-standard', 2023, 'The oldest of them all'),
     chp: null,
     storage: null,
   },
@@ -281,6 +297,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.02, 'fraction', 'entsoe-factsheet', 2022),
     weatherDependence: 'none',
     cooling: 'none',
+    availableFromYear: sourced(1960, 'count', 'engineering-standard', 2023, 'Widely built from the 1960s'),
     chp: null,
     storage: {
       energyMwh: sourced(1800, 'MWh', 'engineering-standard', Y, 'About 6 hours at rated power'),
@@ -310,6 +327,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.03, 'fraction', 'irena-costs', 2022),
     weatherDependence: 'wind',
     cooling: 'none',
+    availableFromYear: sourced(1995, 'count', 'engineering-standard', 2023, 'Utility-scale onshore wind became commercially routine in the mid 1990s'),
     chp: null,
     storage: null,
   },
@@ -336,6 +354,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.02, 'fraction', 'irena-costs', 2022),
     weatherDependence: 'solar',
     cooling: 'none',
+    availableFromYear: sourced(2008, 'count', 'engineering-standard', 2023, 'Utility-scale photovoltaics only became affordable in the late 2000s'),
     chp: null,
     storage: null,
   },
@@ -362,6 +381,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.02, 'fraction', 'nrel-atb', 2023),
     weatherDependence: 'none',
     cooling: 'none',
+    availableFromYear: sourced(2015, 'count', 'engineering-standard', 2023, 'Grid-scale lithium storage'),
     chp: null,
     storage: {
       energyMwh: sourced(100, 'MWh', 'nrel-atb', 2023, '2 hours at rated power'),
@@ -391,6 +411,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     forcedOutageRate: sourced(0.05, 'fraction', 'entsoe-factsheet', 2022),
     weatherDependence: 'none',
     cooling: 'water',
+    availableFromYear: sourced(1980, 'count', 'engineering-standard', 2023, 'Mature'),
     chp: {
       mode: 'extraction',
       heatCapacityMwth: sourced(150, 'MW', 'euro-chp-practice', 2021),

@@ -104,6 +104,14 @@ export function buildWorld(content: ScenarioContent): World {
     world.addPlant(plant)
   }
 
+  // An inherited utility arrives with a trading history, and its bank knows it. Without
+  // this the borrowing limit would be zero on day one and the player could not fund the
+  // replacement the scenario is built around — a starting position that forbids the only
+  // sensible move is a broken one, not a hard one.
+  let annualDemandMwh = 0
+  for (const spec of content.cities) annualDemandMwh += spec.baseDemandMw * TICKS_PER_YEAR
+  world.finances.trailingRevenue = annualDemandMwh * content.tariffPerMwh
+
   // Prime the modifier layers and the first weather sample so tick 0 is already coherent.
   world.params.setTick(0)
   return world
