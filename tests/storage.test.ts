@@ -173,8 +173,8 @@ describe('storage is not a free energy source', () => {
     const capacity = energyCapacityMwh(battery)
     const eta = onewayEfficiency(battery)
 
-    // Charge 40 MWh in...
-    settleStorage(battery, { plantId: 'bat', mode: 'charging', chargeMw: 40, dischargeCeilingMw: 0, offerPricePerMwh: 0 }, 0)
+    // Charge 40 MWh in. The delivered figure is signed: negative means drawn from the grid.
+    settleStorage(battery, { plantId: 'bat', mode: 'charging', chargeMw: 40, dischargeCeilingMw: 0, offerPricePerMwh: 0 }, -40)
     const stored = battery.storageMwh
     expect(stored).toBeLessThan(40)
     expect(stored).toBeCloseTo(40 * eta, 6)
@@ -186,6 +186,31 @@ describe('storage is not a free energy source', () => {
     expect(out).toBeLessThan(40)
     expect(out / 40).toBeCloseTo(PLANT_TYPES.battery.storage!.roundTripEfficiency.value, 3)
     expect(battery.storageMwh).toBeCloseTo(0, 6)
+  })
+})
+
+describe('storage settlement', () => {
+  it('stores only what was delivered, not what was planned', () => {
+    const battery = plant('bat', 'site', 'battery', 0)
+    const eta = onewayEfficiency(battery)
+    // Planned 50 MW, but the grid could only spare 12.
+    settleStorage(
+      battery,
+      { plantId: 'bat', mode: 'charging', chargeMw: 50, dischargeCeilingMw: 0, offerPricePerMwh: 0 },
+      -12,
+    )
+    expect(battery.storageMwh).toBeCloseTo(12 * eta, 6)
+    expect(battery.outputMw).toBeCloseTo(-12, 6)
+  })
+
+  it('stores nothing when the charge was curtailed entirely', () => {
+    const battery = plant('bat', 'site', 'battery', 0)
+    settleStorage(
+      battery,
+      { plantId: 'bat', mode: 'charging', chargeMw: 50, dischargeCeilingMw: 0, offerPricePerMwh: 0 },
+      0,
+    )
+    expect(battery.storageMwh).toBe(0)
   })
 })
 
@@ -246,7 +271,14 @@ describe('storage policy', () => {
 
     // The city is served in full; the battery takes only what was left over.
     expect(result.totalUnservedMw).toBeCloseTo(0, 3)
-    expect(result.totalStorageChargeMw).toBeLessThan(plans.get('bat')!.chargeMw)
+    const actualCharge = result.totalStorageChargeMw
+    expect(actualCharge).toBeLessThan(plans.get('bat')!.chargeMw)
+
+    // And the store gains only what was actually delivered — crediting the plan instead
+    // would conjure energy nobody generated.
+    settleStorage(battery, plans.get('bat'), result.generationMw.get('bat') ?? 0)
+    expect(battery.storageMwh).toBeCloseTo(actualCharge * onewayEfficiency(battery), 6)
+    expect(battery.storageMwh).toBeLessThan(plans.get('bat')!.chargeMw * onewayEfficiency(battery))
   })
 })
 

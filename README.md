@@ -94,17 +94,55 @@ Drag to pan, scroll to zoom, click a node to inspect it. `B` opens the build pan
 technology, then click a site; for a line, click the two substations in turn. Right-click or
 `Esc` abandons a placement. Space pauses; `1` `2` `3` set speed.
 
+## Known gaps
+
+Stated plainly, because they are the difference between what the simulation looks like it
+models and what it actually models:
+
+- **Siting is one rule for every technology.** Water and mountains are refused and that is
+  all. A hydro station does not need a river, a nuclear station does not need cooling water
+  or distance from a city, and a lignite plant does not need a mine.
+- **Storage decides reactively, not by looking ahead.** The policy reads the recent price
+  distribution, so it chases small spreads and can be empty when the expensive hour arrives.
+  Measured over two years, a 50 MW battery makes unserved energy *worse* than having no
+  storage at all, while 300 MW of pumped storage more than halves it. Anticipation, not a
+  better threshold, is the fix.
+- **Battery life is calendar-only.** Real cells wear out by cycles, and the current policy
+  runs about 370 full cycles a year — enough that cycle life, not the 15-year figure, would
+  bind first.
+- **Lines are drawn substation to substation as straight lines.** No route drawing, no
+  pylons, no following terrain.
+- **Refurbishment does not exist.** `LifecyclePhase.Refurbishing` is declared and never used,
+  so the only answers to an ageing plant are "run it into the ground" or "replace it".
+- **Graphics are placeholder.** Coloured squares and circles.
+
 ## Roadmap
 
 | Milestone | Content |
 |---|---|
-| M3 | Repairs, refurbishment and mid-life uprating; forecasts |
-| M4 | District heating and cogeneration; the event and disaster system |
-| M5 | Subsidies and their withdrawal, taxes, carbon pricing, elections, fuel geopolitics |
-| M6 | Learning curves and standardisation |
-| M7 | Campaign: scenarios, objectives, unlocks, saved games |
-| M8+ | Cross-border interconnectors and transit; then market prices and rival utilities |
+| M3 | Forecast-driven storage; per-technology siting rules; battery cycle life; refurbishment and uprating |
+| M4 | Pixel-art tileset; route-drawn transmission lines with pylons |
+| M5 | District heating and cogeneration; the event and disaster system |
+| M6 | Subsidies and their withdrawal, taxes, carbon pricing, elections, fuel geopolitics |
+| M7 | Learning curves and standardisation |
+| M8 | Campaign: scenarios, objectives, unlocks, saved games; publish to GitHub Pages |
+| M9+ | Cross-border interconnectors and transit; then market prices and rival utilities |
 
 The data model already carries the hooks these need — `ownerId` on every asset, a
 `commodity` tag on every edge, the full weather struct, and lifecycle fields — so they are
 additions rather than rewrites.
+
+### Notes on the next few
+
+**Siting** wants a per-technology predicate rather than one global `isBuildable`: adjacency to
+water for cooling and for hydro, the terrain's existing `windIndex` for wind, flat open ground
+for solar, distance from population for nuclear, a fuel source for lignite. The terrain layer
+already carries elevation and a wind index; what is missing is rivers and a rule table.
+
+**Solar geometry** is already better than "day or night": day length, sunrise, sunset and peak
+elevation all vary through the year, and panel output falls as cells heat up. What it does not
+have is latitude as a scenario parameter, a real solar azimuth, or panel tilt and tracking.
+
+**Storage variety** beyond lithium and pumped hydro — flow batteries, compressed air, hydrogen,
+thermal — is mostly a content question once duration and round-trip efficiency drive the
+choice, which they now do. `StorageSpec` already carries both.

@@ -38,11 +38,9 @@ export interface StoragePlan {
 }
 
 /** Below this percentile of recent prices, filling up is worthwhile. */
-const CHARGE_PERCENTILE = 0.3
+const CHARGE_PERCENTILE = 0.25
 /** Above this percentile, emptying is worthwhile. */
-const DISCHARGE_PERCENTILE = 0.7
-/** How much cheaper the charge must be than the expected discharge to bother. */
-const MIN_SPREAD_RATIO = 1.25
+const DISCHARGE_PERCENTILE = 0.75
 
 export function isStorage(plant: PlantAsset): boolean {
   return PLANT_TYPES[plant.typeId].storage !== null
@@ -111,16 +109,16 @@ export function planStorage(input: StoragePolicyInput): Map<string, StoragePlan>
     const canCharge = headroomMwh > 0.01 && power > 0
     const canDischarge = stored > 0.01 && power > 0
 
+    // Whether the spread is worth having is decided by the break-even price, not by a ratio
+    // between two percentiles. An earlier version used a ratio, and it was quietly fatal:
+    // with only a handful of units on the system the price distribution is a step function,
+    // so the 25th and 75th percentiles frequently land on the *same* value and the ratio
+    // test blocked every action forever. The break-even test is the physically correct
+    // statement of the same idea and does not care how lumpy the distribution is.
     let mode: StorageMode = 'idle'
-    if (
-      canDischarge &&
-      latest >= dear &&
-      dear > breakEven &&
-      // Never sit idle through a shortage: unserved energy is worth far more than arbitrage.
-      (recentShortage || dear >= cheap * MIN_SPREAD_RATIO)
-    ) {
+    if (canDischarge && (recentShortage || (latest >= dear && latest > breakEven))) {
       mode = 'discharging'
-    } else if (canCharge && latest <= cheap && !recentShortage && dear >= cheap * MIN_SPREAD_RATIO) {
+    } else if (canCharge && !recentShortage && latest <= cheap && dear > breakEven) {
       mode = 'charging'
     }
 
@@ -150,9 +148,12 @@ export function settleStorage(plant: PlantAsset, plan: StoragePlan | undefined, 
   const capacityMwh = energyCapacityMwh(plant)
 
   if (plan.mode === 'charging') {
-    // Charging is committed, so the full planned amount is drawn whether or not it was cheap.
-    plant.storageMwh = Math.min(capacityMwh, plant.storageMwh + plan.chargeMw * eta)
-    plant.outputMw = -plan.chargeMw
+    // Only what the grid actually delivered goes in. The plan is an intention, and the
+    // solver is entitled to curtail it when the system is short; crediting the intention
+    // would put energy into the store that nobody ever generated.
+    const actuallyCharged = Math.max(0, -deliveredMw)
+    plant.storageMwh = Math.min(capacityMwh, plant.storageMwh + actuallyCharged * eta)
+    plant.outputMw = -actuallyCharged
   } else if (plan.mode === 'discharging' && deliveredMw > 0) {
     plant.storageMwh = Math.max(0, plant.storageMwh - deliveredMw / eta)
     plant.outputMw = deliveredMw

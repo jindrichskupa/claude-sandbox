@@ -514,6 +514,34 @@ export class World {
     this.yearLedger = emptyLedger()
   }
 
+  /**
+   * The price the system is actually clearing at: a demand-weighted average of the nodal
+   * prices, which are the solver's dual variables and therefore the true cost of delivering
+   * one more MW to each city.
+   *
+   * The obvious alternative — the marginal cost of the most expensive running unit — is
+   * wrong, and wrong in a way that quietly ruins the price signal. A unit held at its
+   * technical minimum cannot respond to demand, so it is not the marginal unit; but taking
+   * the maximum over everything dispatched makes it set the price anyway. In this scenario
+   * that pinned 92% of all hours to a single value and left storage with nothing to arbitrage.
+   */
+  private systemPrice(result: DispatchResult): number {
+    let weighted = 0
+    let weight = 0
+    for (const city of this.cities) {
+      const served = result.servedMw.get(city.id) ?? 0
+      const unserved = result.unservedMw.get(city.id) ?? 0
+      const demand = served + unserved
+      if (demand <= 0) continue
+      const nodal = result.nodalPrice.get(city.nodeId)
+      if (nodal === undefined || !Number.isFinite(nodal)) continue
+      weighted += nodal * demand
+      weight += demand
+    }
+    if (weight <= 0) return 0
+    return Math.max(0, Math.min(ECONOMICS.valueOfLostLoadPerMwh.value, weighted / weight))
+  }
+
   private makeSnapshot(date: GameDate, result: DispatchResult): TickSnapshot {
     const mixMw: Record<string, number> = {}
     for (const plant of this.plants) {
@@ -522,7 +550,6 @@ export class World {
       const cat = PLANT_TYPES[plant.typeId].category
       mixMw[cat] = (mixMw[cat] ?? 0) + mw
     }
-    const price = Math.max(0, ...result.marketPriceByIsland)
     return {
       tick: this.tick,
       date,
@@ -531,7 +558,7 @@ export class World {
       generationMw: result.totalGenerationMw,
       lossMw: result.totalLossMw,
       unservedMw: result.totalUnservedMw,
-      pricePerMwh: result.totalUnservedMw > 0.01 ? ECONOMICS.valueOfLostLoadPerMwh.value : price,
+      pricePerMwh: this.systemPrice(result),
       cash: this.finances.cash,
       debt: this.finances.debt,
       co2Tonnes: this.openLedger.co2Tonnes,
