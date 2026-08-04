@@ -181,6 +181,19 @@ export interface ScenarioDef {
 const HISTORY_LENGTH = TICKS_PER_YEAR
 /** How long a failure to supply stays in the utility's reputation, for event risk. */
 const BLACKOUT_MEMORY_TICKS = 24 * 30
+/**
+ * Below this, "unserved" is solver noise rather than a town in the dark.
+ *
+ * The same tolerance the rest of the world uses for the same judgement, named once so the
+ * regulator's view of a failed hour and the banner that tells the player about it can never
+ * disagree about which hours those were.
+ */
+const UNSERVED_EPSILON_MW = 0.01
+/**
+ * What share of a year's demand must have been served before its prices are worth resetting the
+ * tariff against. A tenth: enough that a seasonal quirk cannot set the price of everything.
+ */
+const MIN_TARIFF_SAMPLE_SHARE = 0.1
 /** How many recent hours the storage arbitrage policy looks back over. */
 const PRICE_WINDOW_TICKS = 24 * 7
 
@@ -257,6 +270,9 @@ export class World {
   /** Accumulated over the electoral term, because that is the period voters judge. */
   private termPriceSum = 0
   private termPriceTicks = 0
+  /** Cost of energy delivered in the hours the system actually served, for the annual reset. */
+  private tariffPriceSum = 0
+  private tariffVolumeMwh = 0
   private termGenerationByFuel = new Map<FuelId, number>()
   /** Set for one tick after an election, so the UI can announce it. */
   lastElection: { year: number; fromId: string; toId: string; contractsRevoked: number } | null = null
@@ -670,9 +686,38 @@ export class World {
 
     const snapshot = this.makeSnapshot(date, result, heat)
     this.lastSystemPrice = snapshot.pricePerMwh
-    // What the voters will be judging at the end of the term.
+    // What the voters will be judging at the end of the term. Every hour counts here, scarcity
+    // included: people paid those prices and they remember them.
     this.termPriceSum += snapshot.pricePerMwh
     this.termPriceTicks++
+
+    // What the *regulator* will reset the tariff against, which is deliberately not the same
+    // window — and the difference between the two is the point.
+    //
+    // An hour in which load was shed clears at the value of lost load, because that is the price
+    // on the unserved arc. Averaging those hours into the tariff meant a handful of catastrophic
+    // hours permanently raised the price charged in all 8760 of them: at two percent of hours,
+    // an inflated value of lost load contributed more to the annual average than every real
+    // generator put together. The utility was being paid a rent for the scarcity it had caused,
+    // it outran the penalty for causing it, and thirty passive years ended with billions in the
+    // bank and the lights going out more each year.
+    //
+    // So the regulator sees only the hours the system actually served. No threshold and no magic
+    // number: the test is whether demand was met, which is the same question the penalty asks.
+    // Genuinely tight hours still pass through in full — a peaking unit clearing at three hundred
+    // is a real cost signal and belongs in the tariff. Only the hours that failed are struck out.
+    //
+    // Weighted by the energy actually delivered, not by the hour. A simple mean over hours gives
+    // a cheap summer night the same say as a cold December evening, when the tariff has to
+    // recover the cost of *volume* — and load and price are correlated, so the unweighted mean is
+    // biased low exactly where the money is. That bias was invisible while scarcity rent was
+    // propping the number up, and is the reason a carbon price nearly equal to the whole tariff
+    // was still not being passed through.
+    if (result.totalUnservedMw <= UNSERVED_EPSILON_MW) {
+      const servedMwh = Math.max(0, snapshot.demandMw - snapshot.unservedMw)
+      this.tariffPriceSum += snapshot.pricePerMwh * servedMwh
+      this.tariffVolumeMwh += servedMwh
+    }
     for (const plant of this.plants) {
       const mw = result.generationMw.get(plant.id) ?? 0
       if (mw <= 0) continue
@@ -804,6 +849,32 @@ export class World {
    */
   private applyRegime(): void {
     this.registry.setSource(POLICY_SOURCE, policyModifiers(this.state.policyRegimeId, this.scenario.carbonPricePerTonne))
+  }
+
+  /**
+   * Cash including the month that has not closed yet.
+   *
+   * `finances.cash` only moves when a period settles, which is once a game month — six minutes of
+   * real time at normal speed. So the single number the player watches most closely sat perfectly
+   * still while the thing it measures moved every hour, and every consequence of a decision was
+   * invisible until a boundary that gives no warning it is coming.
+   *
+   * The settled figure stays the authoritative one: borrowing, bankruptcy and the objectives are
+   * all judged on it, because a utility is solvent or not at the moment its bills fall due and not
+   * on a running total. This is for the display, which needs to move when the world does.
+   */
+  get liveCash(): number {
+    return this.finances.cash + ledgerProfit(this.openLedger)
+  }
+
+  /**
+   * How much delivered energy a year must have accumulated before its prices are worth resetting
+   * the tariff against, taken from the demand the cities actually have.
+   */
+  private minimumTariffSampleMwh(): number {
+    let annualMwh = 0
+    for (const city of this.cities) annualMwh += city.baseDemandMw * TICKS_PER_YEAR
+    return annualMwh * MIN_TARIFF_SAMPLE_SHARE
   }
 
   /** Set when the fleet changes, so the Tech layer is rebuilt before the next parameter read. */
@@ -955,16 +1026,24 @@ export class World {
     const target = Math.max(0, Math.min(1, 0.75 - unservedShare * 12 - intensity * 0.35))
     this.state.publicOpinion += (target - this.state.publicOpinion) * 0.4
 
-    // Reset the regulated tariff against what the market actually cleared at. Sticky downwards,
-    // as real regulated tariffs are, so a mild year does not wipe out the ability to recover a
-    // hard one.
-    const averagePrice = this.termPriceTicks > 0 ? this.termPriceSum / this.termPriceTicks : 0
-    const reset = averagePrice * (1 + ECONOMICS.retailMarginOverWholesale.value)
-    this.state.regulatedTariffPerMwh = Math.max(
-      this.prices.tariffFloorPerMwh,
-      // Move most of the way, not all: a regulator reviews rather than tracks.
-      this.state.regulatedTariffPerMwh + (reset - this.state.regulatedTariffPerMwh) * 0.6,
-    )
+    // Reset the regulated tariff against what the market cleared at in the hours it was actually
+    // supplied. Sticky downwards, as real regulated tariffs are, so a mild year does not wipe out
+    // the ability to recover a hard one.
+    //
+    // A year with almost no fully-served hours leaves the tariff where it is rather than resetting
+    // off a handful of samples. That is the safe direction to fail in: it neither rewards the
+    // collapse nor compounds it, and a utility in that state has larger problems than its tariff.
+    if (this.tariffVolumeMwh >= this.minimumTariffSampleMwh()) {
+      const averagePrice = this.tariffPriceSum / this.tariffVolumeMwh
+      const reset = averagePrice * (1 + ECONOMICS.retailMarginOverWholesale.value)
+      this.state.regulatedTariffPerMwh = Math.max(
+        this.prices.tariffFloorPerMwh,
+        // Move most of the way, not all: a regulator reviews rather than tracks.
+        this.state.regulatedTariffPerMwh + (reset - this.state.regulatedTariffPerMwh) * 0.6,
+      )
+    }
+    this.tariffPriceSum = 0
+    this.tariffVolumeMwh = 0
 
     // Capacity payments and tax both land on the year, in that order: the payment is income and
     // the tax is charged on what is left of it.
@@ -1110,6 +1189,8 @@ export class World {
       priceWindow: this.priceWindow,
       termPriceSum: this.termPriceSum,
       termPriceTicks: this.termPriceTicks,
+      tariffPriceSum: this.tariffPriceSum,
+      tariffVolumeMwh: this.tariffVolumeMwh,
       termGenerationByFuel: [...this.termGenerationByFuel],
       director: this.director.state,
       objectives: this.objectives,
@@ -1172,6 +1253,8 @@ export class World {
 
     this.termPriceSum = data.termPriceSum
     this.termPriceTicks = data.termPriceTicks
+    this.tariffPriceSum = data.tariffPriceSum
+    this.tariffVolumeMwh = data.tariffVolumeMwh
     this.termGenerationByFuel = new Map(clone(data.termGenerationByFuel) as Array<[FuelId, number]>)
 
     Object.assign(this.director.state, clone(data.director))

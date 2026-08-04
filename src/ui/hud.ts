@@ -258,7 +258,11 @@ export class Hud {
 
     this.clock.textContent = formatDate(world.date)
 
-    this.stats.cash!.textContent = formatMoney(world.finances.cash)
+    // The running figure, not the settled one. Cash only settles monthly, so the headline number
+    // would otherwise stand still for six minutes of real time at normal speed while everything
+    // it measures moved every hour. Red is still judged on the settled balance, because that is
+    // what actually decides whether the utility can pay.
+    this.stats.cash!.textContent = formatMoney(world.liveCash)
     this.stats.cash!.className = `stat-value ${world.finances.cash < 0 ? 'bad' : ''}`
 
     if (snap && dispatch) {

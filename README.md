@@ -50,6 +50,15 @@ the document tries to fetch anything.
   In the 1995 build menu that comes out as nuclear at ↑7% a decade in real terms and solar at
   ↓51%, with nothing about either technology asserted anywhere. See
   [How prices move with time](#how-prices-move-with-time).
+- **The regulator does not pay you for your own scarcity.** The tariff is reset each year
+  against what the market cleared at — but only over the hours demand was actually met, and
+  weighted by the energy delivered rather than by the hour. Both halves were found by measuring
+  rather than by reading: an hour that sheds load clears at the value of lost load, so averaging
+  those hours in meant a couple of percent of failures set the price charged in all 8760, and
+  the utility grew richer the worse it got. Weighting by the hour then biased the result low,
+  because load and price are correlated and a summer night is not equal evidence to a December
+  evening. With the scarcity hours put back, a crippled fleet's tariff is 22× a healthy one's and
+  twelve years end with €151bn in the bank; with them removed it is 1.4×.
 - **A brief you can lose, and a run you can put down.** The scenario states six objectives
   drawn from a closed set of measurable conditions, and the panel shows each one's live reading
   beside its last verdict. The verdict is annual — a continuous objective must not fail on one
@@ -261,14 +270,13 @@ models and what it actually models:
 - **The regulated tariff is reset against the market once a year.** That is enough for a carbon
   price to be passed through rather than being a pure loss, but a real regulator's review is
   slower, lumpier and negotiated, and a player cannot see the reset coming.
-- **A passive utility gets rich by failing.** Measured over thirty years of doing nothing: the
-  ageing fleet produces more scarcity hours, scarcity hours clear near the value of lost load,
-  the annual tariff reset follows the market up, and revenue outruns the penalties for the
-  shortfall that caused it. Cash reaches billions while unserved energy climbs. A real regulator
-  would not pass a scarcity rent straight through to a utility that created the scarcity, and the
-  fix is a tariff reset that is disciplined by reliability rather than by price alone. This
-  predates the cost-trend work — the same run before it showed the same shape at 55 → 311 €/MWh —
-  and inflation left it almost exactly where it was in real terms.
+- **Mothballing can beat generating, under a heavy carbon price.** Measured: take the two lignite
+  units out of service and after twelve years the utility has €1.2bn against €0 for the one that
+  kept them running, having shed 11% of demand along the way. The arithmetic is real — avoiding
+  a carbon bill of that size is worth more than the penalty for the shortfall — and it is what a
+  carbon price is *for*. It is not exploitable, because cash is not the win condition: 11%
+  unserved fails `keep-lights-on` by two orders of magnitude and loses the scenario. But the
+  scenario is the only thing stopping it, and a sandbox with no objectives would reward it.
 - **The test suite takes about five minutes.** Almost all of it is the multi-year scenario tests
   stepping tens of thousands of hours at roughly 0.8 ms each. The simulation has sixty times the
   headroom it needs at the fastest game speed, so this is a CI cost rather than a gameplay one.
