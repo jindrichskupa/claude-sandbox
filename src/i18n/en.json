@@ -289,5 +289,16 @@
   "ui.coldHours": "{mwh} MWh not delivered",
   "ui.noneSoFar": "None so far",
   "ui.noReadingYet": "No reading yet",
-  "ui.lostToBankruptcy": "The utility ran out of money and its creditors took it."
+  "ui.lostToBankruptcy": "The utility ran out of money and its creditors took it.",
+  "tech.inflation": "price inflation",
+  "tech.escalation": "labour and civil works",
+  "tech.labourEscalation": "labour costs",
+  "tech.learning": "learning curve",
+  "tech.quality": "a better machine",
+  "tech.progress": "current technology",
+  "tech.vintage": "built to {year} standards",
+  "tech.standardisation": "{built} already built",
+  "ui.costTrend": "Cost trend",
+  "ui.realTermsSince": "{pct} in real terms since {year}",
+  "ui.perDecadeReal": "per decade, in real terms"
 }

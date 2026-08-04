@@ -1000,3 +1000,19 @@ button.danger:hover {
   margin-top: 10px;
   line-height: 1.45;
 }
+
+/* Where a technology's real cost is heading over the next decade. Real terms
+ * rather than nominal, because nominal would show inflation carrying every row
+ * upward together — true, and no help at all in choosing between them. */
+.build-trend {
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.build-trend.good {
+  color: var(--good);
+}
+
+.build-trend.bad {
+  color: var(--warn);
+}

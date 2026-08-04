@@ -17,6 +17,8 @@ import { HEAT_PIPE_TYPES, type PipeSize } from '@content/heatPipeTypes'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '../core/time'
 import { LifecyclePhase, type PlantAsset } from '../assets/types'
 import { lifeFraction } from '../assets/aging'
+import { designLifeFactor, realDecommissioningFactor } from '../tech/costs'
+import { nominal } from '../tech/money'
 import { PLAYER, tileDistance, type GridEdge, type GridNode, type NodeId } from '../grid/network'
 import { judgeSite } from './siting'
 import { routeLine, simplifyRoute } from '../grid/routing'
@@ -147,6 +149,15 @@ export function beginPlantConstruction(
     phaseEndsTick: world.tick + quote.buildTicks,
     // Set on commissioning; until then the plant has no age.
     commissionedTick: world.tick + quote.buildTicks,
+    // The vintage is the year it enters service, not the year it was ordered — which is the
+    // right way round, and occasionally worth a year of extra design life on a long build.
+    designLifeYears:
+      type.designLifeYears.value *
+      designLifeFactor(
+        typeId,
+        world.scenario.startYear + (world.tick + quote.buildTicks) / TICKS_PER_YEAR,
+        type.designLifeYears.sourceYear,
+      ),
     conditionPct: 1,
     cumulativeRunHours: 0,
     cumulativeStarts: 0,
@@ -341,7 +352,17 @@ export function quoteRetirement(world: World, plantId: string): Quote {
 
   const type = PLANT_TYPES[plant.typeId]
   const capacityMw = world.params.get(plant.id, Param.CapacityMw)
-  const totalCost = type.decommissionCostPerKw.value * capacityMw * 1000
+  // Dismantling is half labour and half civil works and nothing else, so it inflates *and*
+  // escalates and never learns. This is why decommissioning provisions set decades in advance
+  // are so reliably short: the thing being provided for is made entirely of the two components
+  // that only ever go up.
+  const year = world.date.year
+  const source = type.decommissionCostPerKw.sourceYear
+  const totalCost =
+    nominal(type.decommissionCostPerKw, year) *
+    realDecommissioningFactor(year, source) *
+    capacityMw *
+    1000
   const buildTicks = Math.max(1, Math.round(type.decommissionYears.value * TICKS_PER_YEAR))
 
   if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
@@ -430,7 +451,7 @@ export function refurbishmentGains(world: World, plantId: string): {
   const type = PLANT_TYPES[plant.typeId]
   const escalation = 1 / (1 + plant.refurbishments * 0.5)
   return {
-    lifeYears: type.designLifeYears.value * type.refurbishLifeExtension.value * escalation,
+    lifeYears: plant.designLifeYears * type.refurbishLifeExtension.value * escalation,
     efficiencyPct: type.refurbishEfficiencyGain.value * escalation,
     capacityMw: world.params.get(plant.id, Param.CapacityMw) * type.refurbishCapacityGain.value * escalation,
   }

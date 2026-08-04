@@ -189,8 +189,14 @@ export const LAYER_TIER: Record<Layer, Tier> = {
  *
  * `AddFrac` is the normal case and accumulates within its layer: -0.10 means "10% worse".
  * `AddAbs` is for interval-scale quantities where a percentage is meaningless (a temperature
- * offset, an absolute MW derating). `MulFactor` overrides the whole layer and exists for the
- * rare case where a factor genuinely is multiplicative on its own.
+ * offset, an absolute MW derating).
+ *
+ * `MulFactor` composes multiplicatively *within* the layer, after the additive terms, and exists
+ * for forces that are genuinely ratios rather than adjustments. Thirty years of price inflation
+ * and a learning curve are the clearest case: at +80% and -60% respectively, adding them would
+ * give +20% where the truth is -28%, and the error grows with the span. Where two effects both
+ * scale a quantity, they multiply — using `AddFrac` for them is a bug that only shows up once
+ * the numbers get large.
  */
 export enum Op {
   AddFrac,

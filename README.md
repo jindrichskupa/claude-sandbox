@@ -41,6 +41,15 @@ the document tries to fetch anything.
 
 ## What exists today (milestones 1-8)
 
+- **Prices that move, in opposite directions.** Nothing is frozen at the year its source
+  published it any more. Inflation carries every figure from its own `sourceYear` to the game's;
+  capital cost splits into equipment, labour and civil works, and those three then diverge —
+  equipment learns with cumulative deployment worldwide, labour and land escalate above
+  inflation, and each technology's installation learns only as fast as it is genuinely
+  repeatable. Progress makes a machine more efficient, longer-lived *and* dearer per kilowatt.
+  In the 1995 build menu that comes out as nuclear at ↑7% a decade in real terms and solar at
+  ↓51%, with nothing about either technology asserted anywhere. See
+  [How prices move with time](#how-prices-move-with-time).
 - **A brief you can lose, and a run you can put down.** The scenario states six objectives
   drawn from a closed set of measurable conditions, and the panel shows each one's live reading
   beside its last verdict. The verdict is annual — a continuous objective must not fail on one
@@ -231,15 +240,15 @@ models and what it actually models:
 
 - **Routes cannot be drawn by hand.** The router picks the corridor; the player cannot drag
   one tile by tile the way a Transport Tycoon player lays track.
-- **Costs do not move with time.** A technology built in 2020 costs what its source year says
-  it cost, so `availableFromYear` prevents the obvious absurdities but a learning curve is
-  what would actually make the timeline honest.
+- **World deployment is a fixed exponential.** Learning is driven by an exogenous path per
+  technology — a 1995 total compounding at a published growth rate — so the world's build-out
+  is the same in every playthrough and cannot respond to anything. That is deliberate for
+  neutrality's sake, since driving learning off the player's own choices would make whatever
+  they built first the cheapest thing to keep building. But it does mean a technology's cost
+  curve is a fact about the calendar rather than about the world.
 - **Solar geometry has no latitude.** Day length, sunrise, sunset, peak elevation and panel
   temperature all vary through the year, but latitude is not a scenario parameter and there
   is no true solar azimuth, panel tilt or tracking.
-- **Feed-in tariffs are a flat scenario setting.** The mechanism behind negative prices is
-  real, but tariffs do not yet arrive, change, or get withdrawn — that is the policy
-  milestone, and the withdrawal is the interesting half.
 - **Heat mains cannot be extended or resized once built.** A pipe can be laid between two
   existing nodes and that is all; there is no way to add a second main alongside an existing
   one, and the heat network has no equivalent of the electrical grid's reinforcement decisions.
@@ -252,6 +261,14 @@ models and what it actually models:
 - **The regulated tariff is reset against the market once a year.** That is enough for a carbon
   price to be passed through rather than being a pure loss, but a real regulator's review is
   slower, lumpier and negotiated, and a player cannot see the reset coming.
+- **A passive utility gets rich by failing.** Measured over thirty years of doing nothing: the
+  ageing fleet produces more scarcity hours, scarcity hours clear near the value of lost load,
+  the annual tariff reset follows the market up, and revenue outruns the penalties for the
+  shortfall that caused it. Cash reaches billions while unserved energy climbs. A real regulator
+  would not pass a scarcity rent straight through to a utility that created the scarcity, and the
+  fix is a tariff reset that is disciplined by reliability rather than by price alone. This
+  predates the cost-trend work — the same run before it showed the same shape at 55 → 311 €/MWh —
+  and inflation left it almost exactly where it was in real terms.
 - **The test suite takes about five minutes.** Almost all of it is the multi-year scenario tests
   stepping tens of thousands of hours at roughly 0.8 ms each. The simulation has sixty times the
   headroom it needs at the fastest game speed, so this is a CI cost rather than a gameplay one.
@@ -264,7 +281,6 @@ models and what it actually models:
 
 | Milestone | Content |
 |---|---|
-| M7 | Prices that move with time: inflation, learning curves, standardisation, and technology that gets better *and* dearer |
 | M9 | More scenarios and unlocks. The objective conditions, the scenario registry and the save envelope are all in place; what is missing is written content |
 | M10+ | Cross-border interconnectors and transit; then market prices and rival utilities |
 
@@ -272,50 +288,61 @@ The data model already carries the hooks these need — `ownerId` on every asset
 `commodity` tag on every edge, the full weather struct, and lifecycle fields — so they are
 additions rather than rewrites.
 
-### A note on how M7 has to work
+### How prices move with time
 
-Costs currently do not move at all: a station built in 2035 costs what its source publication
-said it cost in 2023. Every price in the game has to move with time, and the reason that is a
-milestone rather than a multiplier is that the forces move in **opposite directions** and land
-on **different technologies by different amounts**. A single "things get cheaper" dial would
-teach the player something false.
+Costs are no longer frozen at the year their source published them. Four forces move them, they
+pull in opposite directions, and the divergence between them is the whole point — a single
+"things get cheaper" dial would have been worse than nothing, because it would teach the player
+something false.
 
-1. **Inflation** moves every price nominally and nothing really. Its natural home is already in
-   the content: `Sourced<T>` carries the year each figure refers to, so a 2020 IEA capital cost
-   and a 2023 NREL one are not the same money, and inflating each from its own `sourceYear` to
-   the game year is well defined. That the provenance system turns out to be exactly the
-   machinery an inflation model needs is a happy accident of having insisted on it from the
-   first commit.
+1. **Inflation** moves every price nominally and nothing really. Its home was already in the
+   content: `Sourced<T>` carries the year each figure refers to, so a 2020 IEA capital cost and a
+   2022 EIA one are not the same money, and carrying each from its own `sourceYear` to the game
+   year is well defined. That the provenance system turns out to be exactly the machinery an
+   inflation model needs is a happy accident of having insisted on provenance from the first
+   commit. The game runs in **nominal** money, which makes three real things fall out for free:
+   old debt gets cheap, a twenty-year fixed feed-in tariff erodes to nearly nothing, and the
+   regulated tariff keeps up only because it is reset against the market each year.
 
-2. **Capital cost is not one thing.** Split each technology's capex into equipment, labour, and
-   civil works and land. Those three then move differently, and that is the whole point:
+2. **Capital cost is not one thing.** Each technology's capex splits into equipment, labour, and
+   civil works and land. Equipment falls with cumulative deployment — the learning curve proper,
+   driven by megawatts built rather than years elapsed. Labour and civil works escalate above
+   general inflation, and learn back only as fast as the installation is *repeatable*.
 
-   - **Equipment falls** in real terms with cumulative deployment. This is the learning curve
-     proper, driven by megawatts built rather than years elapsed, which is why
-     `cumulativeDeployedMw` has been on `WorldState` since M1.
-   - **Labour rises** faster than general inflation, as skilled construction labour does
-     everywhere.
-   - **Land and civil works rise** too, and neither has a learning curve worth the name: a
-     cubic metre of concrete poured on a difficult site in 2040 is not cheaper than one poured
-     in 2000.
+3. **Progress makes a machine better and dearer.** More efficient, longer-lived, and more
+   expensive per kilowatt for exactly those reasons. Leaving this out produces the fantasy where
+   everything improves and nothing costs anything.
 
-   The consequence is the thing the game currently cannot produce, and it is not a balance
-   choice: an equipment-dominated technology deployed at enormous scale gets radically cheaper,
-   while a civil-and-labour-dominated one built a handful of times gets *more expensive in real
-   terms*. That is the actual divergence between photovoltaics and new nuclear over the last
-   twenty years, and it falls out of the cost structure rather than being asserted.
+4. **Standardisation** cuts cost and build time for repeated builds of the same type. Unlike
+   learning it is driven by the player's own fleet, because it is about their crews and their
+   supply chain — which is why an *inherited* station teaches them nothing.
 
-3. **Technological progress makes a machine better and dearer.** A turbine built ten years
-   later is more efficient, cleaner and longer-lived, and it costs more per kilowatt for
-   exactly those reasons. This is the one most often left out, and leaving it out produces the
-   fantasy where everything improves and nothing costs anything.
+The result, in the 1995 build menu, with nothing about any technology asserted anywhere:
 
-4. **Standardisation** cuts capex and build time for repeated builds of the same type, which
-   rewards a coherent strategy over a zoo of one-offs.
+| | nuclear | coal | gas | wind | solar | battery |
+|---|---|---|---|---|---|---|
+| real cost per decade | ↑ 7% | ↑ 6% | ↑ 4% | ↓ 17% | ↓ 51% | ↓ 47% |
 
-Operating costs, fuel, decommissioning and the tariff all have to move too, and for the same
-reasons — a decommissioning bill quoted in 2020 money is not what it costs to dismantle
-something in 2045.
+Two decisions inside that are worth stating, because both were got wrong first and the errors
+were invisible to inspection.
+
+**Every trend is anchored at the figure's own source year.** A trend index only means anything as
+a ratio between two years, and the year a figure is already quoted in is its own denominator.
+Anchoring everything at 1995 instead quietly asserted that the 2020 figures *were* 1995 costs, so
+the scenario opened with three decades of learning already banked.
+
+**What learns is not "equipment", it is whatever is repeatable.** Treating labour and civil works
+as a floor that never learns left photovoltaics stuck at 40% of their original cost, when the real
+fall is nearer 90% — because installing a solar farm genuinely did become an industrial process,
+standard racking and crews who do nothing else. None of that happens to a dam. So the learning
+rate on the install share is per technology, and it is the sharpest distinction in the file.
+
+Neither bug showed up in any internal-consistency check: both models were perfectly consistent and
+simply wrong. What catches them is a handful of tests that compare the model against **published
+reality** — a combined-cycle station at roughly 480 €/kW and 51% efficient in 1995, roughly
+1000 €/kW and 59% by 2025; solar near 940 €/kW in 2015. Those are in `tests/costTrends.test.ts`
+with deliberately wide bounds, there to catch a model that has come loose from reality rather than
+to pin content to a decimal place.
 
 **Storage variety** beyond lithium and pumped hydro — flow batteries, compressed air,
 hydrogen, thermal — is now mostly a content question, since duration, round-trip efficiency

@@ -300,10 +300,24 @@ describe('a built plant actually helps', () => {
 describe('refurbishment', () => {
   it('refuses a plant that is too new to be worth overhauling', () => {
     const world = buildWorld(FIRST_REGION)
-    // Eastfield is twelve years into a thirty-year life.
-    const quote = quoteRefurbishment(world, 'p_eastfield')
+    // Quayside is nine years old. Asserted against its *own* design life rather than the
+    // datasheet's, because a machine's design life now depends on its vintage — and this test
+    // previously used Eastfield, which sat so close to the threshold that giving it a 1983
+    // design life rather than a modern one was enough to tip it over.
+    const plant = world.getPlant('p_quayside')!
+    expect(9 / plant.designLifeYears).toBeLessThan(0.45)
+    const quote = quoteRefurbishment(world, 'p_quayside')
     expect(quote.ok).toBe(false)
     expect(quote.reasonKey).toBe('build.tooNewToRefurbish')
+  })
+
+  it('gives an older machine the shorter design life it was actually built to', () => {
+    // The consequence that tipped the test above over, stated directly. Design lives lengthened
+    // across the game's span, and a plant keeps whatever its year of construction was good for —
+    // so an inherited unit is further through its life than the datasheet suggests.
+    const world = buildWorld(FIRST_REGION)
+    const old = world.getPlant('p_eastfield')!
+    expect(old.designLifeYears).toBeLessThan(PLANT_TYPES.ccgt.designLifeYears.value)
   })
 
   it('offers an overhaul on a worn-out plant, and takes it out of service meanwhile', () => {

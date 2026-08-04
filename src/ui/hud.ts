@@ -484,7 +484,10 @@ export class Hud {
 
       block.appendChild(this.kv(t('ui.output'), `${formatMw(output)} / ${formatMw(capacity)}`))
       block.appendChild(
-        this.kv(t('ui.age'), `${ageYears(plant, this.world.tick).toFixed(0)} ${t('ui.years')} / ${type.designLifeYears.value}`),
+        this.kv(
+          t('ui.age'),
+          `${ageYears(plant, this.world.tick).toFixed(0)} ${t('ui.years')} / ${plant.designLifeYears.toFixed(0)}`,
+        ),
       )
       block.appendChild(this.kv(t('ui.condition'), formatPct(plant.conditionPct)))
       if (plant.refurbishments > 0) {

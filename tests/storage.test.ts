@@ -58,6 +58,7 @@ function plant(id: string, nodeId: string, typeId: PlantTypeId, storageMwh = 0):
     phase: LifecyclePhase.Operating,
     phaseEndsTick: Number.MAX_SAFE_INTEGER,
     commissionedTick: 0,
+    designLifeYears: PLANT_TYPES[typeId].designLifeYears.value,
     conditionPct: 1,
     cumulativeRunHours: 0,
     cumulativeStarts: 0,

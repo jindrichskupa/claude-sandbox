@@ -12,6 +12,7 @@ import { PLANT_TYPES, PLANT_TYPE_IDS } from '@content/plantTypes'
 import { FUELS } from '@content/fuels'
 import { LINE_TYPES, VOLTAGE_LEVELS } from '@content/lineTypes'
 import { ECONOMICS } from '@content/economics'
+import { COST_TRENDS, PRICE_TRENDS, STANDARDISATION } from '@content/costTrends'
 
 /** Fields that are legitimately plain values rather than measurements. */
 const STRUCTURAL_KEYS = new Set([
@@ -78,6 +79,26 @@ describe('content provenance', () => {
     findUnsourced(LINE_TYPES, 'LINE_TYPES', findings)
     findUnsourced(ECONOMICS, 'ECONOMICS', findings)
     expect(findings.map((f) => `${f.path}: ${f.problem}`)).toEqual([])
+  })
+
+  it('every cost trend carries a source', () => {
+    const findings: Finding[] = []
+    findUnsourced(COST_TRENDS, 'COST_TRENDS', findings)
+    findUnsourced(PRICE_TRENDS, 'PRICE_TRENDS', findings)
+    findUnsourced(STANDARDISATION, 'STANDARDISATION', findings)
+    expect(findings.map((f) => `${f.path}: ${f.problem}`)).toEqual([])
+  })
+
+  it('every capital cost splits into exactly one whole', () => {
+    // A split that does not add up would silently rescale that technology's entire capital
+    // cost, and it would look like a considered number while doing it.
+    for (const id of PLANT_TYPE_IDS) {
+      const s = COST_TRENDS[id].structure
+      const total = s.equipment.value + s.labour.value + s.civil.value
+      expect(total, `${id} cost structure`).toBeCloseTo(1, 6)
+      expect(s.equipment.value, `${id} equipment share`).toBeGreaterThan(0)
+      expect(s.civil.value, `${id} civil share`).toBeGreaterThan(0)
+    }
   })
 
   it('physical parameters are within plausible bounds', () => {

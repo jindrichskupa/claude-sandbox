@@ -8,6 +8,7 @@
  */
 
 import { ECONOMICS } from '@content/economics'
+import { BASE_PRICES, type Prices } from '../tech/money'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { FUELS } from '@content/fuels'
 import { TICKS_PER_YEAR } from '../core/time'
@@ -214,10 +215,10 @@ export function creditHeatSales(ledger: PeriodLedger, mwh: number, tariffPerMwh:
  * Charge one hour of failing to deliver heat. Priced far above the electrical equivalent,
  * because the consequence is not an inconvenient evening — see `valueOfLostHeatPerMwh`.
  */
-export function chargeUnservedHeat(ledger: PeriodLedger, mwh: number): void {
+export function chargeUnservedHeat(ledger: PeriodLedger, mwh: number, prices: Prices = BASE_PRICES): void {
   if (mwh <= 0) return
   ledger.heatUnservedMwh += mwh
-  ledger.unservedPenalty += mwh * ECONOMICS.unservedHeatPenaltyPerMwh.value
+  ledger.unservedPenalty += mwh * prices.unservedHeatPenaltyPerMwh
 }
 
 /** Credit one hour of sales. */
@@ -228,10 +229,10 @@ export function creditSales(ledger: PeriodLedger, mwh: number, tariffPerMwh: num
 }
 
 /** Charge one hour of failing to supply. */
-export function chargeUnserved(ledger: PeriodLedger, mwh: number): void {
+export function chargeUnserved(ledger: PeriodLedger, mwh: number, prices: Prices = BASE_PRICES): void {
   if (mwh <= 0) return
   ledger.energyUnservedMwh += mwh
-  ledger.unservedPenalty += mwh * ECONOMICS.unservedPenaltyPerMwh.value
+  ledger.unservedPenalty += mwh * prices.unservedPenaltyPerMwh
 }
 
 /**

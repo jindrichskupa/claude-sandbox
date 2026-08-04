@@ -30,8 +30,9 @@ export function ageYears(plant: PlantAsset, tick: number): number {
  * outages — becomes cycle-aware without a single special case downstream.
  */
 export function lifeFraction(plant: PlantAsset, tick: number): number {
-  // Refurbishment buys extra design life, so the same age is a smaller fraction of it.
-  const life = PLANT_TYPES[plant.typeId].designLifeYears.value * (1 + plant.lifeExtension)
+  // Refurbishment buys extra design life, so the same age is a smaller fraction of it. The
+  // design life itself is the machine's own, fixed at its vintage, not the datasheet's.
+  const life = plant.designLifeYears * (1 + plant.lifeExtension)
   const calendar = ageYears(plant, tick) / Math.max(1, life)
   const cycles = cycleLifeUsed(plant)
   return cycles === null ? calendar : Math.max(calendar, cycles)

@@ -47,6 +47,8 @@ import {
   type ScenarioOutcome,
 } from './scenario/objectives'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
+import { techModifiers, TECH_SOURCE } from './tech/modifiers'
+import { nominal, pricesFor, type Prices } from './tech/money'
 import type { SaveData } from './scenario/save'
 import { EventDirector } from './events/director'
 import {
@@ -404,6 +406,9 @@ export class World {
     const type = PLANT_TYPES[plant.typeId]
     const key = plant.typeId
     this.state.cumulativeDeployedMw[key] = (this.state.cumulativeDeployedMw[key] ?? 0) + type.capacityMw.value
+    // A new machine needs its vintage before it generates anything, and the type it belongs to
+    // may now be one build further down its standardisation curve.
+    this.techDirty = true
   }
 
   addCity(city: CityAsset): void {
@@ -508,6 +513,13 @@ export class World {
       )
     }
 
+    // 2b. Technology and prices, annually. Nothing in here changes within a year: a learning
+    //     curve does not move overnight, and inflation is quoted per annum. Re-registered when
+    //     the fleet changes as well, because a newly commissioned plant needs its vintage.
+    if (isYearBoundary(this.tick) || this.tick === 1 || this.techDirty) {
+      this.applyTechTrends()
+    }
+
     // 3. Forced outages. A state transition, not a modifier: the unit is out, not derated.
     this.rollOutages()
 
@@ -574,6 +586,7 @@ export class World {
       // Last hour's clearing price is the best estimate available of what the electricity a
       // cogeneration unit gives up is worth. Using this hour's would be circular.
       electricityPricePerMwh: this.lastSystemPrice,
+      prices: this.prices,
     })
     this.lastHeat = heat
 
@@ -588,6 +601,7 @@ export class World {
       storagePlans,
       chpCommitments: heat.commitments,
       auxDemand: heat.pumpingDemandMw,
+      prices: this.prices,
       // Last hour's losses are an excellent first guess at this hour's, because load moves
       // slowly. Same fixed point, roughly half the solves to reach it.
       ...(this.lastLossDemand ? { initialLossDemand: this.lastLossDemand } : {}),
@@ -636,12 +650,12 @@ export class World {
       }
     }
     creditSales(this.openLedger, served, tariff)
-    chargeUnserved(this.openLedger, result.totalUnservedMw)
+    chargeUnserved(this.openLedger, result.totalUnservedMw, this.prices)
 
     let heatServed = 0
     for (const city of this.cities) heatServed += heat.servedHeatMw.get(city.id) ?? 0
     creditHeatSales(this.openLedger, heatServed, heatTariff)
-    chargeUnservedHeat(this.openLedger, heat.totalUnservedHeatMw)
+    chargeUnservedHeat(this.openLedger, heat.totalUnservedHeatMw, this.prices)
 
     // 9. Close the period if the month turned.
     if (isMonthBoundary(this.tick)) this.closePeriod()
@@ -719,7 +733,12 @@ export class World {
         plant.phase = LifecyclePhase.Remediating
         plant.phaseEndsTick = this.tick + Math.round(type.remediationYears.value * TICKS_PER_YEAR)
         // Scrap value comes back only once the machine is actually dismantled.
-        creditRecycling(this.openLedger, type.recyclingRecoveryPerKw.value * type.capacityMw.value * 1000)
+        // Scrap is a commodity, so it inflates but does not learn — and neither does the bill
+        // for the dismantling that produced it, which is charged at today's labour rates.
+        creditRecycling(
+          this.openLedger,
+          nominal(type.recyclingRecoveryPerKw, this.date.year) * type.capacityMw.value * 1000,
+        )
       } else if (plant.phase === LifecyclePhase.Remediating && this.tick >= plant.phaseEndsTick) {
         plant.phase = LifecyclePhase.Cleared
       }
@@ -785,6 +804,52 @@ export class World {
    */
   private applyRegime(): void {
     this.registry.setSource(POLICY_SOURCE, policyModifiers(this.state.policyRegimeId, this.scenario.carbonPricePerTonne))
+  }
+
+  /** Set when the fleet changes, so the Tech layer is rebuilt before the next parameter read. */
+  private techDirty = true
+
+  private pricesYear = Number.NaN
+  private pricesCache: Prices = pricesFor(0)
+
+  /**
+   * Economy-wide prices in this year's money.
+   *
+   * Cached by year rather than recomputed per tick. These feed the dispatch solver's arc costs,
+   * so they are read several times an hour, and they change once a year — which is the same
+   * argument that put the whole Tech layer on the annual tier.
+   */
+  get prices(): Prices {
+    const year = this.date.year
+    if (year !== this.pricesYear) {
+      this.pricesYear = year
+      this.pricesCache = pricesFor(year)
+    }
+    return this.pricesCache
+  }
+
+  /**
+   * Re-register everything the passage of time does to prices and machines.
+   *
+   * Standardisation counts only what the player has *commissioned themselves*, which is what
+   * `commissionedTick >= 0` means — an inherited station was built by somebody else's engineers
+   * with somebody else's supply chain, and inheriting it teaches the player's organisation
+   * nothing. Deriving the count rather than storing it also means it cannot fall out of step
+   * with the fleet across a save.
+   */
+  applyTechTrends(): void {
+    const builtCount: Record<string, number> = {}
+    const builtMw: Record<string, number> = {}
+    for (const plant of this.plants) {
+      if (plant.commissionedTick < 0) continue
+      builtCount[plant.typeId] = (builtCount[plant.typeId] ?? 0) + 1
+      builtMw[plant.typeId] = (builtMw[plant.typeId] ?? 0) + PLANT_TYPES[plant.typeId].capacityMw.value
+    }
+    this.registry.setSource(
+      TECH_SOURCE,
+      techModifiers(this.date.year, this.plants, this.scenario.startYear, builtMw, builtCount),
+    )
+    this.techDirty = false
   }
 
   /**
@@ -896,7 +961,7 @@ export class World {
     const averagePrice = this.termPriceTicks > 0 ? this.termPriceSum / this.termPriceTicks : 0
     const reset = averagePrice * (1 + ECONOMICS.retailMarginOverWholesale.value)
     this.state.regulatedTariffPerMwh = Math.max(
-      ECONOMICS.tariffFloorPerMwh.value,
+      this.prices.tariffFloorPerMwh,
       // Move most of the way, not all: a regulator reviews rather than tracks.
       this.state.regulatedTariffPerMwh + (reset - this.state.regulatedTariffPerMwh) * 0.6,
     )
@@ -959,7 +1024,7 @@ export class World {
     // Deliberately not floored at zero. A market with subsidised must-take generation really
     // does clear below zero, and clamping it away would hide the single clearest signal that
     // there is more generation than the system can use.
-    return Math.min(ECONOMICS.valueOfLostLoadPerMwh.value, weighted / weight)
+    return Math.min(this.prices.valueOfLostLoadPerMwh, weighted / weight)
   }
 
   private makeSnapshot(date: GameDate, result: DispatchResult, heat: HeatResult): TickSnapshot {

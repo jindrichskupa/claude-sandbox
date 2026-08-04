@@ -23,6 +23,7 @@ import { Params } from '@sim/params/Params'
 import { buildWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { LifecyclePhase, type PlantAsset } from '@sim/assets/types'
+import { PLANT_TYPES } from '@content/plantTypes'
 import {
   conditionHolds,
   EventDirector,
@@ -157,6 +158,7 @@ function plant(id: string, typeId: PlantAsset['typeId']): PlantAsset {
     phase: LifecyclePhase.Operating,
     phaseEndsTick: Number.MAX_SAFE_INTEGER,
     commissionedTick: 0,
+    designLifeYears: PLANT_TYPES[typeId].designLifeYears.value,
     conditionPct: 1,
     cumulativeRunHours: 0,
     cumulativeStarts: 0,

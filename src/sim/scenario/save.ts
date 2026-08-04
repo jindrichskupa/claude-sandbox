@@ -35,7 +35,7 @@ import type { ObjectiveProgress, ScenarioOutcome } from './objectives'
  * filling the gaps with defaults produces a game that looks fine and behaves subtly wrongly,
  * which is worse than a clear refusal — especially in a game where a run is measured in hours.
  */
-export const SAVE_VERSION = 1
+export const SAVE_VERSION = 2
 
 export interface ScheduledSpendData {
   ownerId: string
@@ -119,6 +119,14 @@ export function parseSaveFile(text: string): SaveFile {
   return file as SaveFile
 }
 
+/**
+ * Deliberately *not* versioned alongside `SAVE_VERSION`.
+ *
+ * One slot, always the same key, so a version bump lands the player on a clear "saved by a
+ * different version of the game" rather than on a silent empty slot that looks like their save
+ * was never written. Being told a save cannot be read is annoying; being shown no save at all
+ * when you know you wrote one is alarming.
+ */
 export const SAVE_STORAGE_KEY = 'powergrid-tycoon.save.v1'
 
 /**

@@ -29,7 +29,6 @@
  * special case, and the nodal duals come out for free.
  */
 
-import { ECONOMICS } from '@content/economics'
 import { FUELS } from '@content/fuels'
 import { HEAT_PIPE_TYPES, isPipeSize, pipeStandingLossMw } from '@content/heatPipeTypes'
 import { PLANT_TYPES } from '@content/plantTypes'
@@ -39,6 +38,7 @@ import type { Islands } from '../grid/islands'
 import { MinCostFlowSolver } from '../dispatch/minCostFlow'
 import { Param } from '../params/types'
 import type { Params } from '../params/Params'
+import { BASE_PRICES, type Prices } from '../tech/money'
 
 /** What a cogeneration unit's heat duty forces it to do on the electrical side. */
 export interface ChpCommitment {
@@ -91,6 +91,8 @@ export interface HeatDispatchInput {
    * steam — which is the entire reason the two commodities cannot be costed separately.
    */
   electricityPricePerMwh: number
+  /** Economy-wide prices in the money of the current year. See `tech/money.ts`. */
+  prices?: Prices
 }
 
 /** How an accumulator intends to spend this hour. */
@@ -424,7 +426,7 @@ export function dispatchHeat(input: HeatDispatchInput): HeatResult {
           source,
           node,
           plan.chargeMw,
-          ECONOMICS.forgoneChargePricePerMwh.value + costShift,
+          (input.prices ?? BASE_PRICES).forgoneChargePricePerMwh + costShift,
         )
         storeChargeDemand += plan.chargeMw
         storeArcs.push({ plantId: plant.id, dischargeArc: -1, chargeArc, forgoArc })
@@ -452,7 +454,7 @@ export function dispatchHeat(input: HeatDispatchInput): HeatResult {
     cityDemand += demand
     totalDemand += demand
     const serveArc = solver.addArc(node, sink, demand, 0)
-    const unservedArc = solver.addArc(source, node, demand, ECONOMICS.valueOfLostHeatPerMwh.value + costShift)
+    const unservedArc = solver.addArc(source, node, demand, (input.prices ?? BASE_PRICES).valueOfLostHeatPerMwh + costShift)
     demandArcs.push({ city, serveArc, unservedArc, demand })
   }
 
@@ -471,11 +473,11 @@ export function dispatchHeat(input: HeatDispatchInput): HeatResult {
     if (node === undefined) continue
     totalDemand += mw
     const serveArc = solver.addArc(node, sink, mw, 0)
-    const unservedArc = solver.addArc(source, node, mw, ECONOMICS.valueOfLostHeatPerMwh.value + costShift)
+    const unservedArc = solver.addArc(source, node, mw, (input.prices ?? BASE_PRICES).valueOfLostHeatPerMwh + costShift)
     lossArcs.push({ serveArc, unservedArc })
   }
 
-  const tieBreak = ECONOMICS.wheelingTieBreakPerMwh.value
+  const tieBreak = (input.prices ?? BASE_PRICES).wheelingTieBreakPerMwh
   const pipeArcs: Array<{ edgeId: string; fwd: number; rev: number }> = []
   for (const edge of heatEdges) {
     const a = indexOf.get(edge.from)

@@ -53,6 +53,17 @@ export interface PlantAsset {
    */
   commissionedTick: number
 
+  /**
+   * Design life in years for *this* machine, before any refurbishment extension.
+   *
+   * Stored on the asset rather than read from the type, because it depends on the machine's
+   * vintage: design lives lengthened over the game's span — twenty-year wind turbines became
+   * twenty-five, forty-year reactors became sixty — and the plant keeps whatever its year of
+   * construction was good for. Fixed at commissioning, exactly like the capacity uplift beside
+   * it, so nothing downstream has to know what year it is to ask how old a plant is getting.
+   */
+  designLifeYears: number
+
   /** Physical condition, 1 = as new. Falls with age and neglected maintenance. */
   conditionPct: number
   cumulativeRunHours: number

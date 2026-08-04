@@ -15,6 +15,7 @@ import { HEAT_PIPE_TYPES, PIPE_SIZES, type PipeSize } from '@content/heatPipeTyp
 import type { World } from '@sim/world'
 import { quotePlant, quoteTargetFor } from '@sim/build/commands'
 import { Param } from '@sim/params/types'
+import { realCapexFactor } from '@sim/tech/costs'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 
 const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
@@ -152,6 +153,24 @@ export class BuildPanel {
     )
 
     const year = this.world.date.year
+
+    // Where this technology's cost is going, in real terms, over the next decade.
+    //
+    // Shown because a capital decision in this game is a thirty-year commitment and the price on
+    // the row above is only today's. A player who cannot see that photovoltaics are falling by
+    // the year while a reactor building is getting dearer is being asked to make the central
+    // decision of the game blind — and *that* is the information the whole milestone exists to
+    // produce. Real terms, not nominal: nominal would show inflation carrying everything upward
+    // together, which is true and tells nobody anything.
+    const s = type.capexPerKw
+    const trend = realCapexFactor(typeId, year + 10, s.sourceYear) / realCapexFactor(typeId, year, s.sourceYear) - 1
+    if (Math.abs(trend) > 0.01) {
+      const arrow = trend < 0 ? '↓' : '↑'
+      const line = el('div', `build-trend ${trend < 0 ? 'good' : 'bad'}`)
+      line.textContent = `${arrow} ${Math.abs(trend * 100).toFixed(0)}% ${t('ui.perDecadeReal')}`
+      main.appendChild(line)
+    }
+
     const tooEarly = year < type.availableFromYear.value
     if (tooEarly) {
       main.appendChild(el('div', 'build-blocked', t('build.notYetAvailable', { year: type.availableFromYear.value })))

@@ -163,6 +163,16 @@ try {
   console.log('blocked options:', blocked)
   if (blocked.length === 0) throw new Error('Expected some technologies to be unavailable in 1995')
 
+  // Prices move with time, and the panel has to say which way. Without a visible trend the
+  // player is making a thirty-year capital decision on today's price alone.
+  const trends = await page.evaluate(() =>
+    [...document.querySelectorAll('#build-panel .build-trend')].map((n) => n.textContent),
+  )
+  console.log('cost trends shown:', trends)
+  if (trends.length === 0) throw new Error('No technology showed a cost trend')
+  if (!trends.some((s) => s.startsWith('↓'))) throw new Error('Nothing is getting cheaper')
+  if (!trends.some((s) => s.startsWith('↑'))) throw new Error('Nothing is getting dearer')
+
   await page.screenshot({ path: join(OUT, '06-build-panel.png') })
 
   // Place a gas turbine and wire it to the capital.

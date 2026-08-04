@@ -8,12 +8,12 @@
 import { LINE_TYPES, lineLossMw } from '@content/lineTypes'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { FUELS } from '@content/fuels'
-import { ECONOMICS } from '@content/economics'
 import type { Network, NodeId } from '../grid/network'
 import type { Islands } from '../grid/islands'
 import { isDispatchable, type CityAsset, type PlantAsset } from '../assets/types'
 import { Param } from '../params/types'
 import type { Params } from '../params/Params'
+import { BASE_PRICES, type Prices } from '../tech/money'
 import { MinCostFlowSolver } from './minCostFlow'
 import { isStorage, type StoragePlan } from './storage'
 import type { ChpCommitment } from '../heat/heat'
@@ -159,6 +159,11 @@ export interface DispatchInput {
    * pumps. Kept separate from `lossDemand` so it is never reported as a transmission loss.
    */
   auxDemand?: Map<NodeId, number>
+  /**
+   * Economy-wide prices in the money of the current year. Optional so solver tests, which care
+   * about the ordering these impose and not about what decade it is, can leave it out.
+   */
+  prices?: Prices
 }
 
 function build(input: DispatchInput): Built {
@@ -225,7 +230,7 @@ function build(input: DispatchInput): Built {
           source,
           node,
           plan.chargeMw,
-          ECONOMICS.forgoneChargePricePerMwh.value + costShift,
+          (input.prices ?? BASE_PRICES).forgoneChargePricePerMwh + costShift,
         )
         storageChargeDemand += plan.chargeMw
         storageArcs.push({ plantId: plant.id, dischargeArc: -1, chargeArc, forgoArc })
@@ -254,7 +259,7 @@ function build(input: DispatchInput): Built {
     const serveArc = solver.addArc(node, sink, demand, 0)
     // Last-resort arc. Using it means the lights went out, and its price is what makes
     // scarcity show up as a very high nodal price rather than an unsolvable problem.
-    const unservedArc = solver.addArc(source, node, demand, ECONOMICS.valueOfLostLoadPerMwh.value + costShift)
+    const unservedArc = solver.addArc(source, node, demand, (input.prices ?? BASE_PRICES).valueOfLostLoadPerMwh + costShift)
     cityArcs.push({ city, serveArc, unservedArc, demand })
   }
 
@@ -269,7 +274,7 @@ function build(input: DispatchInput): Built {
       if (node === undefined) continue
       totalDemand += mw
       const serveArc = solver.addArc(node, sink, mw, 0)
-      const unservedArc = solver.addArc(source, node, mw, ECONOMICS.valueOfLostLoadPerMwh.value + costShift)
+      const unservedArc = solver.addArc(source, node, mw, (input.prices ?? BASE_PRICES).valueOfLostLoadPerMwh + costShift)
       lossArcs.push({ serveArc, unservedArc })
     }
   }
@@ -284,12 +289,12 @@ function build(input: DispatchInput): Built {
       if (node === undefined) continue
       totalDemand += mw
       const serveArc = solver.addArc(node, sink, mw, 0)
-      const unservedArc = solver.addArc(source, node, mw, ECONOMICS.valueOfLostLoadPerMwh.value + costShift)
+      const unservedArc = solver.addArc(source, node, mw, (input.prices ?? BASE_PRICES).valueOfLostLoadPerMwh + costShift)
       auxArcs.push({ serveArc, unservedArc })
     }
   }
 
-  const tieBreak = ECONOMICS.wheelingTieBreakPerMwh.value
+  const tieBreak = (input.prices ?? BASE_PRICES).wheelingTieBreakPerMwh
   const lineArcs: Built['lineArcs'] = []
   for (const edge of electricEdges) {
     const a = indexOf.get(edge.from)

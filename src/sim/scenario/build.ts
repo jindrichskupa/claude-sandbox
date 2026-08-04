@@ -14,6 +14,7 @@ import { PLAYER, type GridEdge, type GridNode } from '../grid/network'
 import { routeLine, simplifyRoute } from '../grid/routing'
 import { LifecyclePhase, type CityAsset, type PlantAsset } from '../assets/types'
 import { expectedCondition } from '../assets/aging'
+import { designLifeFactor } from '../tech/costs'
 import { World, type ScenarioDef } from '../world'
 import type { SaveData } from './save'
 
@@ -122,6 +123,11 @@ export function buildWorld(content: ScenarioContent): World {
       phase: LifecyclePhase.Operating,
       phaseEndsTick: Number.MAX_SAFE_INTEGER,
       commissionedTick,
+      // What a machine of this vintage was built to last. An inherited unit from the 1960s does
+      // not get the design life the same technology reaches today.
+      designLifeYears:
+        type.designLifeYears.value *
+        designLifeFactor(spec.typeId, content.startYear - spec.ageYears, type.designLifeYears.sourceYear),
       conditionPct: 1,
       cumulativeRunHours: Math.round(spec.ageYears * TICKS_PER_YEAR * 0.6),
       cumulativeStarts: Math.round(spec.ageYears * 30),
@@ -170,7 +176,10 @@ export function buildWorld(content: ScenarioContent): World {
   for (const spec of content.cities) annualDemandMwh += spec.baseDemandMw * TICKS_PER_YEAR
   world.finances.trailingRevenue = annualDemandMwh * content.tariffPerMwh
 
-  // Prime the modifier layers and the first weather sample so tick 0 is already coherent.
+  // Prime the modifier layers and the first weather sample so tick 0 is already coherent. The
+  // tech layer especially: without it the build menu would quote every technology at its source
+  // year's price until the first year rolled over.
+  world.applyTechTrends()
   world.params.setTick(0)
   // And judge the objectives once, so the panel opens on a list rather than on nothing. Without
   // this the player would see an empty brief until the first year closed, which is the one point
