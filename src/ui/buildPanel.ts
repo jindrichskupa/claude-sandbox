@@ -8,9 +8,10 @@
  * neither.
  */
 
-import { formatMoney, formatMw, t } from '@i18n/index'
+import { formatMoney, formatMw, formatMwth, t } from '@i18n/index'
 import { PLANT_TYPES, PLANT_TYPE_IDS, type PlantTypeId } from '@content/plantTypes'
 import { LINE_TYPES, VOLTAGE_LEVELS, type VoltageLevel } from '@content/lineTypes'
+import { HEAT_PIPE_TYPES, PIPE_SIZES, type PipeSize } from '@content/heatPipeTypes'
 import type { World } from '@sim/world'
 import { quotePlant, quoteTargetFor } from '@sim/build/commands'
 import { Param } from '@sim/params/types'
@@ -21,6 +22,7 @@ const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 export type BuildSelection =
   | { kind: 'plant'; typeId: PlantTypeId }
   | { kind: 'line'; kv: VoltageLevel; circuits: number }
+  | { kind: 'pipe'; dn: PipeSize; pipes: number }
   | null
 
 export interface BuildPanelCallbacks {
@@ -107,6 +109,11 @@ export class BuildPanel {
     for (const kv of VOLTAGE_LEVELS) {
       this.list.appendChild(this.lineRow(kv))
     }
+
+    this.list.appendChild(el('div', 'build-group-title', t('ui.heatMains')))
+    for (const dn of PIPE_SIZES) {
+      this.list.appendChild(this.pipeRow(dn))
+    }
   }
 
   private plantRow(typeId: PlantTypeId): HTMLDivElement {
@@ -135,8 +142,13 @@ export class BuildPanel {
     const capex = this.world.params.get(target, Param.CapexPerKw) * capacity * 1000
     const months = Math.round(this.world.params.get(target, Param.BuildTimeMonths))
 
+    // Heat-only plant is rated in thermal megawatts, and saying so matters: a hundred thermal
+    // megawatts of boiler and a hundred electrical megawatts of gas turbine differ by a factor
+    // of six in price, and a unit label is the only thing that stops that reading as a bargain.
+    const rating = type.heatOnly ? formatMwth(capacity) : formatMw(capacity)
+    const heatSide = type.chp ? ` + ${formatMwth(type.chp.heatCapacityMwth.value)}` : ''
     main.appendChild(
-      el('div', 'build-meta', `${formatMw(capacity)} · ${formatMoney(capex)} · ${months} ${t('ui.months')}`),
+      el('div', 'build-meta', `${rating}${heatSide} · ${formatMoney(capex)} · ${months} ${t('ui.months')}`),
     )
 
     const year = this.world.date.year
@@ -189,6 +201,42 @@ export class BuildPanel {
     return row
   }
 
+  /**
+   * A heat main. The cost per kilometre is the headline here rather than the capacity, because
+   * that is the number that decides the answer: at one to two million euros a kilometre plus a
+   * standing heat loss for the life of the pipe, the question is never which size to use but
+   * whether the plant should be somewhere nearer instead.
+   */
+  private pipeRow(dn: PipeSize): HTMLDivElement {
+    const type = HEAT_PIPE_TYPES[dn]
+    const row = el('div', 'build-row')
+    const selected = this.selection?.kind === 'pipe' && this.selection.dn === dn
+    row.classList.toggle('selected', selected)
+
+    const swatch = el('span', 'build-swatch')
+    swatch.style.background = '#e8802a'
+    swatch.style.height = dn === 700 ? '5px' : dn === 400 ? '4px' : '3px'
+    row.appendChild(swatch)
+
+    const main = el('div', 'build-main')
+    main.appendChild(el('div', 'build-name', t(type.nameKey)))
+    main.appendChild(
+      el(
+        'div',
+        'build-meta',
+        `${formatMwth(type.capacityMwth.value)} · ${formatMoney(type.capexPerKm.value)}/km · ${t('ui.lossPerKm', {
+          mw: type.standingLossMwPerKm.value.toFixed(2),
+        })}`,
+      ),
+    )
+    row.appendChild(main)
+
+    row.addEventListener('click', () => {
+      this.select(selected ? null : { kind: 'pipe', dn, pipes: 1 })
+    })
+    return row
+  }
+
   /** A tile that is legal to build on, used only to produce a representative quote. */
   private legalProbe(): { x: number; y: number } | null {
     const terrain = this.world.terrain
@@ -216,4 +264,5 @@ const CATEGORY_COLOURS: Record<string, string> = {
   wind: '#63c8a8',
   solar: '#e0c04a',
   storage: '#9aa3b0',
+  heat: '#e8802a',
 }

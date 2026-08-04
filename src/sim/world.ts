@@ -10,7 +10,8 @@
 import { ECONOMICS } from '@content/economics'
 import { FUELS } from '@content/fuels'
 import { LINE_TYPES } from '@content/lineTypes'
-import { PLANT_TYPES } from '@content/plantTypes'
+import { heatCapacityOf, PLANT_TYPES } from '@content/plantTypes'
+import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
 import { RandomSource } from './core/rng'
 import { isMonthBoundary, isYearBoundary, TICKS_PER_YEAR, tickToDate, type GameDate } from './core/time'
 import { Network, PLAYER, type NodeId } from './grid/network'
@@ -25,10 +26,13 @@ import { WeatherModel, type ClimateDef, type Weather } from './weather/weather'
 import { weatherModifiers, WEATHER_SOURCE } from './weather/effects'
 import { generateTerrain, windSiteFactor, type TerrainMap } from './map/terrain'
 import { planStorage, settleStorage, isStorage, FORECAST_WINDOW_HOURS, type StoragePlan } from './dispatch/storage'
+import { dispatchHeat, isHeatStore, settleHeatStore, type HeatResult } from './heat/heat'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
 import {
   addLedger,
   chargeCapex,
+  chargeUnservedHeat,
+  creditHeatSales,
   chargeDecommissioning,
   creditRecycling,
   chargeFixedCosts,
@@ -74,6 +78,10 @@ export interface TickSnapshot {
   co2Tonnes: number
   /** MW generated per plant category, for the mix chart. */
   mixMw: Record<string, number>
+  /** District heat demanded by connected cities, MW thermal. */
+  heatDemandMw: number
+  heatSuppliedMw: number
+  heatUnservedMw: number
 }
 
 export interface ScenarioObjective {
@@ -94,6 +102,8 @@ export interface ScenarioDef {
   startingCash: number
   startingDebt: number
   tariffPerMwh: number
+  /** Price the utility is paid per MWh of district heat. */
+  heatTariffPerMwh: number
   carbonPricePerTonne: number
   objectives: ScenarioObjective[]
   /** Guaranteed price per MWh by technology, paid outside the market. */
@@ -125,6 +135,7 @@ export class World {
   readonly params: Params
   readonly rng: RandomSource
   readonly electricIslands: IslandCache
+  readonly heatIslands: IslandCache
 
   readonly state: WorldState
   readonly finances: Finances
@@ -146,6 +157,13 @@ export class World {
   private periodStartTick = 0
 
   lastDispatch: DispatchResult | null = null
+  lastHeat: HeatResult | null = null
+  /**
+   * Last hour's clearing price, which is what cogeneration heat is costed against. Held here
+   * rather than read back out of the history buffer so the heat solve does not depend on the
+   * charting layer existing.
+   */
+  private lastSystemPrice = 0
   lastStoragePlans: Map<string, StoragePlan> = new Map()
   /** Residual load for the coming hours, current hour first. Drives storage and the UI. */
   lastForecast: ForecastHour[] = []
@@ -161,6 +179,7 @@ export class World {
     this.terrain = generateTerrain(scenario.seed, scenario.mapWidth, scenario.mapHeight)
     this.weatherModel = new WeatherModel(this.rng, scenario.climate)
     this.electricIslands = new IslandCache(this.network, 'electric')
+    this.heatIslands = new IslandCache(this.network, 'heat')
 
     this.state = {
       policyRegimeId: 'baseline',
@@ -235,6 +254,8 @@ export class World {
           return FUELS[type.fuel].pricePerMwhThermal.value * this.state.fuelPriceIndex
         case Param.FeedInTariffPerMwh:
           return this.scenario.feedInTariffs[plant.typeId] ?? 0
+        case Param.HeatCapacityMwth:
+          return heatCapacityOf(plant.typeId)
         default:
           return undefined
       }
@@ -248,6 +269,9 @@ export class World {
     }
 
     const edge = this.network.getEdge(targetId)
+    if (edge && param === Param.PipeCapacityMwth && edge.dn !== undefined) {
+      return HEAT_PIPE_TYPES[edge.dn].capacityMwth.value * Math.max(1, edge.circuits)
+    }
     if (edge && param === Param.LineCapacityMw) {
       if (edge.kv === 110 || edge.kv === 220 || edge.kv === 400) {
         return LINE_TYPES[edge.kv].capacityMw.value * edge.circuits
@@ -258,6 +282,7 @@ export class World {
     if (targetId === 'world') {
       if (param === Param.CarbonPricePerTonne) return this.state.carbonPricePerTonne
       if (param === Param.TariffPerMwh) return this.scenario.tariffPerMwh
+      if (param === Param.HeatTariffPerMwh) return this.scenario.heatTariffPerMwh
     }
 
     return undefined
@@ -398,7 +423,23 @@ export class World {
     })
     this.lastStoragePlans = storagePlans
 
-    // 6. Dispatch.
+    // 6. Heat, before electricity and on purpose. A cogeneration unit's heat duty is not
+    //    negotiable — people have to be warm — so it is settled first and arrives at the
+    //    electrical dispatch as a constraint rather than an option. See `heat/heat.ts`.
+    const heat = dispatchHeat({
+      network: this.network,
+      islands: this.heatIslands.get(),
+      plants: this.plants,
+      cities: this.cities,
+      params: this.params,
+      carbonPrice: this.state.carbonPricePerTonne,
+      // Last hour's clearing price is the best estimate available of what the electricity a
+      // cogeneration unit gives up is worth. Using this hour's would be circular.
+      electricityPricePerMwh: this.lastSystemPrice,
+    })
+    this.lastHeat = heat
+
+    // 7. Dispatch.
     const result = dispatch({
       network: this.network,
       islands: this.electricIslands.get(),
@@ -407,33 +448,47 @@ export class World {
       params: this.params,
       carbonPrice: this.state.carbonPricePerTonne,
       storagePlans,
+      chpCommitments: heat.commitments,
+      auxDemand: heat.pumpingDemandMw,
     })
     this.lastDispatch = result
 
-    // 7. Money and wear from what actually ran.
+    // 8. Money and wear from what actually ran.
     const tariff = this.params.getOr('world', Param.TariffPerMwh, this.scenario.tariffPerMwh)
+    const heatTariff = this.params.getOr('world', Param.HeatTariffPerMwh, this.scenario.heatTariffPerMwh)
     for (const plant of this.plants) {
       const mw = result.generationMw.get(plant.id) ?? 0
+      const heatMw = heat.heatMw.get(plant.id) ?? 0
       if (isStorage(plant)) {
         settleStorage(plant, storagePlans.get(plant.id), mw)
         // Only the discharge burns variable cost; charging is bought energy, not fuel.
         chargeGeneration(this.openLedger, plant, Math.max(0, mw), this.params, this.state.carbonPricePerTonne)
         continue
       }
+      if (isHeatStore(plant)) {
+        settleHeatStore(plant, heatMw)
+        chargeGeneration(this.openLedger, plant, 0, this.params, this.state.carbonPricePerTonne, Math.max(0, heatMw))
+        continue
+      }
       if (mw > 0 && plant.outputMw <= 0) plant.cumulativeStarts++
       plant.outputMw = mw
-      chargeGeneration(this.openLedger, plant, mw, this.params, this.state.carbonPricePerTonne)
-      advanceCondition(plant, this.tick, mw > 0)
+      plant.heatOutputMw = heatMw
+      // One call, both commodities: a cogeneration unit's fuel bill cannot be split between
+      // them after the fact. See `thermalInputMwh`.
+      chargeGeneration(this.openLedger, plant, mw, this.params, this.state.carbonPricePerTonne, heatMw)
+      advanceCondition(plant, this.tick, mw > 0 || heatMw > 0)
     }
 
     let served = 0
     for (const city of this.cities) {
       const s = result.servedMw.get(city.id) ?? 0
       const u = result.unservedMw.get(city.id) ?? 0
+      const coldMw = heat.unservedHeatMw.get(city.id) ?? 0
       served += s
-      if (u > 0.01) {
+      if (u > 0.01 || coldMw > 0.01) {
         city.unservedTicksRecent++
-        city.satisfaction = Math.max(0, city.satisfaction - 0.02)
+        // A cold February is remembered longer than a dark evening, and the numbers say so.
+        city.satisfaction = Math.max(0, city.satisfaction - (coldMw > 0.01 ? 0.05 : 0.02))
       } else {
         city.satisfaction = Math.min(1, city.satisfaction + 0.0005)
       }
@@ -441,11 +496,17 @@ export class World {
     creditSales(this.openLedger, served, tariff)
     chargeUnserved(this.openLedger, result.totalUnservedMw)
 
-    // 8. Close the period if the month turned.
+    let heatServed = 0
+    for (const city of this.cities) heatServed += heat.servedHeatMw.get(city.id) ?? 0
+    creditHeatSales(this.openLedger, heatServed, heatTariff)
+    chargeUnservedHeat(this.openLedger, heat.totalUnservedHeatMw)
+
+    // 9. Close the period if the month turned.
     if (isMonthBoundary(this.tick)) this.closePeriod()
     if (isYearBoundary(this.tick)) this.closeYear()
 
-    const snapshot = this.makeSnapshot(date, result)
+    const snapshot = this.makeSnapshot(date, result, heat)
+    this.lastSystemPrice = snapshot.pricePerMwh
     this.priceWindow.push(snapshot.pricePerMwh)
     if (this.priceWindow.length > PRICE_WINDOW_TICKS) this.priceWindow.shift()
     this.history[this.historyCount % HISTORY_LENGTH] = snapshot
@@ -585,7 +646,7 @@ export class World {
     return Math.min(ECONOMICS.valueOfLostLoadPerMwh.value, weighted / weight)
   }
 
-  private makeSnapshot(date: GameDate, result: DispatchResult): TickSnapshot {
+  private makeSnapshot(date: GameDate, result: DispatchResult, heat: HeatResult): TickSnapshot {
     const mixMw: Record<string, number> = {}
     for (const plant of this.plants) {
       const mw = result.generationMw.get(plant.id) ?? 0
@@ -606,6 +667,9 @@ export class World {
       debt: this.finances.debt,
       co2Tonnes: this.openLedger.co2Tonnes,
       mixMw,
+      heatDemandMw: heat.totalHeatDemandMw,
+      heatSuppliedMw: heat.totalHeatSuppliedMw,
+      heatUnservedMw: heat.totalUnservedHeatMw,
     }
   }
 

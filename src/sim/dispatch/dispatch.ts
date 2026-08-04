@@ -16,6 +16,7 @@ import { Param } from '../params/types'
 import type { Params } from '../params/Params'
 import { MinCostFlowSolver } from './minCostFlow'
 import { isStorage, type StoragePlan } from './storage'
+import type { ChpCommitment } from '../heat/heat'
 
 export interface DispatchResult {
   /** MW generated per plant. Negative for storage that is charging. */
@@ -34,6 +35,8 @@ export interface DispatchResult {
   totalDemandMw: number
   totalGenerationMw: number
   totalLossMw: number
+  /** MW drawn by the heat network's pumps. Not a loss and not a city's demand. */
+  totalAuxDemandMw: number
   totalUnservedMw: number
   /** MW drawn by storage that was actually charging. */
   totalStorageChargeMw: number
@@ -73,8 +76,21 @@ export function marginalCostPerMwh(plant: PlantAsset, params: Params, carbonPric
   return fuelCost + carbonCost + varOpex - subsidy
 }
 
-/** Available output right now, after availability, ramp rate and minimum load. */
-export function availableRange(plant: PlantAsset, params: Params): { floor: number; ceiling: number } {
+/**
+ * Available output right now, after availability, ramp rate, minimum load — and any heat duty
+ * the plant has already been committed to.
+ *
+ * The cogeneration case is the interesting one, and it is the reason this function takes a
+ * commitment at all. A **backpressure** set has no electrical freedom left once its heat duty
+ * is fixed: floor and ceiling collapse onto the same number and the dispatch simply has to
+ * accept the injection. An **extraction** unit keeps its choice but loses ceiling, because the
+ * steam bled off for the town is steam that is not turning the low-pressure turbine.
+ */
+export function availableRange(
+  plant: PlantAsset,
+  params: Params,
+  commitment?: ChpCommitment,
+): { floor: number; ceiling: number } {
   const type = PLANT_TYPES[plant.typeId]
   const capacity = params.get(plant.id, Param.CapacityMw)
   const availability = params.get(plant.id, Param.Availability)
@@ -82,7 +98,18 @@ export function availableRange(plant: PlantAsset, params: Params): { floor: numb
 
   const maxByAvailability = capacity * availability
   const rampStep = capacity * ramp
-  const ceiling = Math.max(0, Math.min(maxByAvailability, plant.outputMw + rampStep))
+
+  // A backpressure unit heating a town in February is not participating in a market. The ramp
+  // limit is deliberately not applied: the heat load it follows moves over hours, not minutes,
+  // so the constraint would almost never bind — and where it did, the alternative on offer
+  // would be to stop heating the town, which is not a trade the dispatch gets to make.
+  if (commitment?.forcedOutputMw !== null && commitment?.forcedOutputMw !== undefined) {
+    const forced = Math.max(0, Math.min(maxByAvailability, commitment.forcedOutputMw))
+    return { floor: forced, ceiling: forced }
+  }
+
+  const derate = commitment?.capacityDerateMw ?? 0
+  const ceiling = Math.max(0, Math.min(maxByAvailability - derate, plant.outputMw + rampStep))
 
   // A unit that cannot ramp down fast enough is still producing next hour whether the
   // market wants it or not. That floor is what makes inflexible plant genuinely awkward.
@@ -102,6 +129,7 @@ interface Built {
   cityArcs: Array<{ city: CityAsset; serveArc: number; unservedArc: number; demand: number }>
   lineArcs: Array<{ edgeId: string; fwd: number; rev: number }>
   lossArcs: Array<{ serveArc: number; unservedArc: number }>
+  auxArcs: Array<{ serveArc: number; unservedArc: number }>
   storageArcs: Array<{ plantId: string; dischargeArc: number; chargeArc: number; forgoArc: number }>
   totalDemand: number
   /** Amount added to every injection arc so the solver sees only non-negative costs. */
@@ -119,10 +147,17 @@ export interface DispatchInput {
   lossDemand?: Map<NodeId, number>
   /** What each storage unit intends to do this hour. See `storage.ts`. */
   storagePlans?: Map<string, StoragePlan>
+  /** Heat duties already settled by the heat dispatch, which bound what cogeneration can do. */
+  chpCommitments?: Map<string, ChpCommitment>
+  /**
+   * Extra electrical demand per node that is not a city's: the heat network's circulating
+   * pumps. Kept separate from `lossDemand` so it is never reported as a transmission loss.
+   */
+  auxDemand?: Map<NodeId, number>
 }
 
 function build(input: DispatchInput): Built {
-  const { network, plants, cities, params, carbonPrice, lossDemand, storagePlans } = input
+  const { network, plants, cities, params, carbonPrice, lossDemand, storagePlans, chpCommitments, auxDemand } = input
   const nodeIds = network.nodeIds()
   const indexOf = new Map<NodeId, number>()
   nodeIds.forEach((id, i) => indexOf.set(id, i))
@@ -134,9 +169,9 @@ function build(input: DispatchInput): Built {
   const dispatchable = plants.filter(isDispatchable)
   const electricEdges = network.activeEdges('electric')
   // Two arcs per plant, three per storage unit, two per city, two per node carrying losses,
-  // two directions per line.
+  // two more per node carrying pump load, two directions per line.
   const maxEdges =
-    dispatchable.length * 3 + cities.length * 2 + electricEdges.length * 2 + nodeIds.length * 2 + 8
+    dispatchable.length * 3 + cities.length * 2 + electricEdges.length * 2 + nodeIds.length * 4 + 8
 
   const solver = new MinCostFlowSolver(nodeCount, maxEdges)
   solver.reset()
@@ -193,7 +228,7 @@ function build(input: DispatchInput): Built {
       continue
     }
 
-    const { floor, ceiling } = availableRange(plant, params)
+    const { floor, ceiling } = availableRange(plant, params, chpCommitments?.get(plant.id))
     const cost = marginalCostPerMwh(plant, params, carbonPrice)
 
     // The must-run floor is offered at zero cost: the fuel is being burnt regardless, so
@@ -234,6 +269,21 @@ function build(input: DispatchInput): Built {
     }
   }
 
+  // The heat network's pumps, drawn at the nodes where the pumping stations stand. Real
+  // demand like any other, and it can go unserved like any other.
+  const auxArcs: Built['auxArcs'] = []
+  if (auxDemand) {
+    for (const [nodeId, mw] of auxDemand) {
+      if (mw <= 1e-9) continue
+      const node = indexOf.get(nodeId)
+      if (node === undefined) continue
+      totalDemand += mw
+      const serveArc = solver.addArc(node, sink, mw, 0)
+      const unservedArc = solver.addArc(source, node, mw, ECONOMICS.valueOfLostLoadPerMwh.value + costShift)
+      auxArcs.push({ serveArc, unservedArc })
+    }
+  }
+
   const tieBreak = ECONOMICS.wheelingTieBreakPerMwh.value
   const lineArcs: Built['lineArcs'] = []
   for (const edge of electricEdges) {
@@ -255,6 +305,7 @@ function build(input: DispatchInput): Built {
     cityArcs,
     lineArcs,
     lossArcs,
+    auxArcs,
     storageArcs,
     totalDemand,
     costShift,
@@ -278,6 +329,7 @@ function solveOnce(input: DispatchInput): DispatchResult {
     cityArcs,
     lineArcs,
     lossArcs,
+    auxArcs,
     storageArcs,
     totalDemand,
     costShift,
@@ -355,6 +407,13 @@ function solveOnce(input: DispatchInput): DispatchResult {
     totalUnservedMw += shortfall
   }
 
+  let totalAuxDemandMw = 0
+  for (const { serveArc, unservedArc } of auxArcs) {
+    const shortfall = solver.flowOf(unservedArc)
+    totalAuxDemandMw += solver.flowOf(serveArc) - shortfall
+    totalUnservedMw += shortfall
+  }
+
   const nodalPrice = new Map<NodeId, number>()
   const sourcePotential = result.potential[source] ?? 0
   for (const [nodeId, idx] of indexOf) {
@@ -373,6 +432,7 @@ function solveOnce(input: DispatchInput): DispatchResult {
     totalDemandMw: cityDemandMw,
     totalGenerationMw,
     totalLossMw,
+    totalAuxDemandMw,
     totalUnservedMw,
     totalStorageChargeMw,
     totalStorageDischargeMw,

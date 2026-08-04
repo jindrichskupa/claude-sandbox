@@ -110,6 +110,44 @@ try {
   if (whySteps < 3) throw new Error('Modifier explanation did not render')
   await page.screenshot({ path: join(OUT, '03-plant-inspector.png') })
 
+  // --- District heating -------------------------------------------------
+  // The heat network has to be visibly running, not merely present in the data model.
+  const heat = await page.evaluate(() => {
+    const h = window.game.world.lastHeat
+    return {
+      demand: Math.round(h.totalHeatDemandMw),
+      supplied: Math.round(h.totalHeatSuppliedMw),
+      standingLoss: +h.totalHeatLossMw.toFixed(2),
+      unserved: +h.totalUnservedHeatMw.toFixed(2),
+      pipes: window.game.world.network.allEdges().filter((e) => e.commodity === 'heat').length,
+      backpressureForced: [...h.commitments.values()]
+        .filter((c) => c.mode === 'backpressure')
+        .map((c) => Math.round(c.forcedOutputMw)),
+    }
+  })
+  console.log('district heating:', heat)
+  if (heat.pipes === 0) throw new Error('No heat mains on the map')
+  if (heat.supplied <= 0) throw new Error('The heat network is not delivering anything')
+  if (heat.standingLoss <= 0) throw new Error('A buried main that loses no heat is not a buried main')
+
+  // The cogeneration plant, where the coupling between the two commodities is on show.
+  await page.evaluate(() => {
+    window.game.map.selectedNodeId = 'n_ironworks'
+    window.game.hud.selectNode('n_ironworks')
+  })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: join(OUT, '09-cogeneration.png') })
+
+  // Zoomed onto the heat plant, so the mains themselves are visible rather than a few pixels.
+  await page.evaluate(() => {
+    window.game.hud.selectNode(null)
+    window.game.map.camera.zoom = 2.2
+    window.game.map.camera.centerOn(13 * 32, 11 * 32)
+    window.game.map.applyCamera()
+  })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: join(OUT, '10-heat-main.png') })
+
   // --- Building ---------------------------------------------------------
   // The point of this milestone: the player can actually do something.
   await page.evaluate(() => window.game.hud.buildPanel.setOpen(true))

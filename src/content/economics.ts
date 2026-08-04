@@ -33,6 +33,21 @@ export interface EconomicsDef {
    * a battery always goes without before a city does.
    */
   forgoneChargePricePerMwh: Sourced<number>
+  /** What the utility is paid for a megawatt-hour of heat delivered to a district network. */
+  baseHeatTariffPerMwh: Sourced<number>
+  /**
+   * What a megawatt-hour of undelivered heat costs.
+   *
+   * Deliberately higher than the electrical value of lost load, and that is not a balance
+   * dial. A brownout is an expensive, dangerous, recoverable afternoon. A district heating
+   * network that loses pressure in February freezes and bursts the pipes inside the buildings
+   * it serves, and the town is uninhabitable for weeks. The asymmetry is real, and encoding it
+   * is what makes "heat first, electricity second" the player's conclusion rather than a rule
+   * imposed on them.
+   */
+  valueOfLostHeatPerMwh: Sourced<number>
+  /** Regulatory penalty per MWh of heat not delivered, on top of the lost revenue. */
+  unservedHeatPenaltyPerMwh: Sourced<number>
 }
 
 export const ECONOMICS: EconomicsDef = {
@@ -44,4 +59,7 @@ export const ECONOMICS: EconomicsDef = {
   wheelingTieBreakPerMwh: sourced(0.01, 'EUR/MWh', 'game-design', 2024, 'Numerical tie-break only'),
   unservedPenaltyPerMwh: sourced(300, 'EUR/MWh', 'game-design', 2024, 'Regulatory penalty for failing to supply'),
   forgoneChargePricePerMwh: sourced(600, 'EUR/MWh', 'game-design', 2024, 'Ordering only; not a real cost'),
+  baseHeatTariffPerMwh: sourced(45, 'EUR/MWh_th', 'euro-chp-practice', 2021, 'District heat sells for far less than electricity'),
+  valueOfLostHeatPerMwh: sourced(9000, 'EUR/MWh_th', 'euro-chp-practice', 2021, 'Frozen and burst pipes, not an inconvenient evening'),
+  unservedHeatPenaltyPerMwh: sourced(550, 'EUR/MWh_th', 'game-design', 2024, 'Same share of lost value as the electrical penalty'),
 }

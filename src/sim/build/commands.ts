@@ -13,6 +13,7 @@
 
 import { LINE_TYPES, type VoltageLevel } from '@content/lineTypes'
 import { PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
+import { HEAT_PIPE_TYPES, type PipeSize } from '@content/heatPipeTypes'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '../core/time'
 import { LifecyclePhase, type PlantAsset } from '../assets/types'
 import { lifeFraction } from '../assets/aging'
@@ -143,7 +144,9 @@ export function beginPlantConstruction(
     cumulativeRunHours: 0,
     cumulativeStarts: 0,
     outputMw: 0,
+    heatOutputMw: 0,
     storageMwh: 0,
+    heatStoredMwhth: 0,
     cyclesUsed: 0,
     online: false,
     capexPaid: 0,
@@ -219,6 +222,81 @@ export function beginLineConstruction(
     // longer, and it should lose more energy for it.
     lengthKm: quote.lengthKm ?? tileDistance(from, to) * world.scenario.kmPerTile,
     circuits,
+    energised: false,
+    builtTick: world.tick + quote.buildTicks,
+    ...(quote.route ? { route: quote.route } : {}),
+  }
+  world.network.addEdge(edge)
+  world.scheduleSpending(edgeId, quote.totalCost, quote.buildTicks, 'capex')
+  world.scheduleEnergising(edgeId, world.tick + quote.buildTicks)
+
+  return { ok: true, edgeId, quote }
+}
+
+// ---------------------------------------------------------------------------
+// Heat mains
+// ---------------------------------------------------------------------------
+
+/**
+ * What a district heating main would cost.
+ *
+ * Deliberately the same shape as `quoteLine`, because a pipe and a power line are the same
+ * object in the network — but the numbers behave completely differently, and the player should
+ * feel it. A heat main costs two to four times as much per kilometre as an overhead line and
+ * loses heat every hour of its life regardless of load, so the length shown in this quote is
+ * not a detail. Beyond twenty or thirty kilometres the answer is always to build the plant
+ * somewhere else instead.
+ */
+export function quoteHeatPipe(world: World, fromId: NodeId, toId: NodeId, dn: PipeSize, pipes = 1): Quote {
+  if (fromId === toId) return refuse('build.sameNode')
+  const from = world.network.getNode(fromId)
+  const to = world.network.getNode(toId)
+  if (!from || !to) return refuse('build.noSuchNode')
+
+  const duplicate = world.network
+    .edgesOf(fromId)
+    .map((id) => world.network.requireEdge(id))
+    .some((e) => e.commodity === 'heat' && (e.from === toId || e.to === toId))
+  if (duplicate) return refuse('build.alreadyConnected')
+
+  const route = routeLine(world.terrain, from.x, from.y, to.x, to.y)
+  const type = HEAT_PIPE_TYPES[dn]
+  const lengthKm = route.lengthTiles * world.scenario.kmPerTile
+  const weightedKm = route.weightedLengthTiles * world.scenario.kmPerTile
+
+  const totalCost = type.capexPerKm.value * weightedKm * pipes
+  const buildMonths = (type.buildTimeMonthsPer10Km.value * lengthKm) / 10
+  const buildTicks = Math.max(1, Math.round(Math.max(2, buildMonths) * TICKS_PER_MONTH))
+
+  if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
+  return { ok: true, totalCost, buildTicks, lengthKm, route: simplifyRoute(route) }
+}
+
+/** Start building a heat main. Like a power line, it carries nothing until it is finished. */
+export function beginHeatPipeConstruction(
+  world: World,
+  fromId: NodeId,
+  toId: NodeId,
+  dn: PipeSize,
+  pipes = 1,
+): { ok: boolean; edgeId?: string; quote: Quote } {
+  const quote = quoteHeatPipe(world, fromId, toId, dn, pipes)
+  if (!quote.ok) return { ok: false, quote }
+
+  const from = world.network.requireNode(fromId)
+  const to = world.network.requireNode(toId)
+  const edgeId = `h_built_${world.nextSerial()}`
+
+  const edge: GridEdge = {
+    id: edgeId,
+    commodity: 'heat',
+    ownerId: PLAYER,
+    from: fromId,
+    to: toId,
+    kv: 0,
+    dn,
+    lengthKm: quote.lengthKm ?? tileDistance(from, to) * world.scenario.kmPerTile,
+    circuits: pipes,
     energised: false,
     builtTick: world.tick + quote.buildTicks,
     ...(quote.route ? { route: quote.route } : {}),

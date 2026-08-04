@@ -62,7 +62,27 @@ describe('one year of operation', () => {
       const d = world.lastDispatch!
       let served = 0
       for (const city of world.cities) served += d.servedMw.get(city.id) ?? 0
-      expect(d.totalGenerationMw).toBeCloseTo(served + d.totalLossMw + d.totalStorageChargeMw, 3)
+      // Every sink on the electrical side, and there are four of them: the cities, the grid's
+      // own transmission losses, whatever storage was charging, and the district heating
+      // network's circulating pumps. A term missing from this sum is a term the simulation is
+      // creating or destroying energy with.
+      expect(d.totalGenerationMw).toBeCloseTo(
+        served + d.totalLossMw + d.totalStorageChargeMw + d.totalAuxDemandMw,
+        3,
+      )
+    }
+  })
+
+  it('conserves heat every hour: supply equals heat served plus standing losses', () => {
+    const world = buildWorld(FIRST_REGION)
+    for (let i = 0; i < 2000; i++) {
+      world.step()
+      const h = world.lastHeat!
+      let served = 0
+      for (const city of world.cities) served += h.servedHeatMw.get(city.id) ?? 0
+      let charged = 0
+      for (const mw of h.heatMw.values()) if (mw < 0) charged += -mw
+      expect(h.totalHeatSuppliedMw).toBeCloseTo(served + h.totalHeatLossMw + charged, 3)
     }
   })
 

@@ -17,6 +17,8 @@ import { incursFixedCost, LifecyclePhase, type PlantAsset } from '../assets/type
 
 export interface PeriodLedger {
   revenue: number
+  /** Revenue from district heat, kept separate because it is a different business. */
+  heatRevenue: number
   fuelCost: number
   carbonCost: number
   varOpex: number
@@ -31,6 +33,10 @@ export interface PeriodLedger {
   energySoldMwh: number
   /** Energy not delivered, MWh. */
   energyUnservedMwh: number
+  /** Heat sold, MWh thermal. */
+  heatSoldMwh: number
+  /** Heat not delivered, MWh thermal. */
+  heatUnservedMwh: number
   /** Tonnes of CO2 emitted. */
   co2Tonnes: number
 }
@@ -38,6 +44,7 @@ export interface PeriodLedger {
 export function emptyLedger(): PeriodLedger {
   return {
     revenue: 0,
+    heatRevenue: 0,
     fuelCost: 0,
     carbonCost: 0,
     varOpex: 0,
@@ -49,6 +56,8 @@ export function emptyLedger(): PeriodLedger {
     recyclingIncome: 0,
     energySoldMwh: 0,
     energyUnservedMwh: 0,
+    heatSoldMwh: 0,
+    heatUnservedMwh: 0,
     co2Tonnes: 0,
   }
 }
@@ -56,6 +65,7 @@ export function emptyLedger(): PeriodLedger {
 export function ledgerProfit(l: PeriodLedger): number {
   return (
     l.revenue +
+    l.heatRevenue +
     l.recyclingIncome -
     l.fuelCost -
     l.carbonCost -
@@ -70,6 +80,7 @@ export function ledgerProfit(l: PeriodLedger): number {
 
 export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.revenue += from.revenue
+  into.heatRevenue += from.heatRevenue
   into.fuelCost += from.fuelCost
   into.carbonCost += from.carbonCost
   into.varOpex += from.varOpex
@@ -81,6 +92,8 @@ export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.recyclingIncome += from.recyclingIncome
   into.energySoldMwh += from.energySoldMwh
   into.energyUnservedMwh += from.energyUnservedMwh
+  into.heatSoldMwh += from.heatSoldMwh
+  into.heatUnservedMwh += from.heatUnservedMwh
   into.co2Tonnes += from.co2Tonnes
 }
 
@@ -93,8 +106,53 @@ export interface Finances {
 }
 
 /**
- * Charge one hour of generation: fuel burnt, carbon emitted, variable operating cost.
- * Returns the emissions so the caller can also record them against policy targets.
+ * Fuel burnt in one hour, in MWh thermal.
+ *
+ * The cogeneration cases are not the electrical formula with a correction bolted on; they are
+ * different formulas, and each one is the one that matches how that machine's heat was priced
+ * in the merit order. Getting this wrong is the classic cogeneration accounting error — it
+ * shows up as a plant that appears to make heat out of nothing, or one whose fuel bill falls
+ * when it takes on more work.
+ *
+ *   **Extraction** (power loss method). Bleeding steam for heat does not change how much fuel
+ *   goes into the boiler; it changes what comes out of the turbine. So the fuel follows the
+ *   electricity the unit *would* have made, `Pel + cv·Q`, at the electrical efficiency.
+ *
+ *   **Backpressure.** Power and heat come out of the same steam in a fixed ratio, so the fuel
+ *   follows their sum at the total efficiency.
+ *
+ *   **Boiler.** Heat divided by the boiler's efficiency, and nothing else.
+ */
+export function thermalInputMwh(
+  plant: PlantAsset,
+  electricMwh: number,
+  heatMwh: number,
+  params: Params,
+): number {
+  const type = PLANT_TYPES[plant.typeId]
+  if (type.fuel === 'none') return 0
+  const efficiency = Math.max(0.01, params.get(plant.id, Param.Efficiency))
+
+  if (type.heatOnly) return heatMwh > 0 ? heatMwh / efficiency : 0
+
+  if (type.chp) {
+    if (type.chp.mode === 'backpressure') {
+      const total = Math.max(0, electricMwh) + Math.max(0, heatMwh)
+      return total / Math.max(0.01, type.chp.totalEfficiency.value)
+    }
+    const equivalent = Math.max(0, electricMwh) + Math.max(0, heatMwh) * type.chp.powerLossPerHeat.value
+    return equivalent / efficiency
+  }
+
+  return Math.max(0, electricMwh) / efficiency
+}
+
+/**
+ * Charge one hour of a plant's operation: fuel burnt, carbon emitted, variable operating cost.
+ *
+ * Heat and electricity are charged together because for a cogeneration unit they cannot be
+ * separated — see `thermalInputMwh`. Passing only one of them would understate the fuel bill
+ * of a machine that is doing both jobs.
  */
 export function chargeGeneration(
   ledger: PeriodLedger,
@@ -102,16 +160,16 @@ export function chargeGeneration(
   mwh: number,
   params: Params,
   carbonPrice: number,
+  heatMwh = 0,
 ): void {
-  if (mwh <= 0) return
+  if (mwh <= 0 && heatMwh <= 0) return
   const type = PLANT_TYPES[plant.typeId]
-  const efficiency = params.get(plant.id, Param.Efficiency)
   const varOpex = params.get(plant.id, Param.VarOpexPerMwh)
 
-  ledger.varOpex += mwh * varOpex
+  ledger.varOpex += (Math.max(0, mwh) + Math.max(0, heatMwh)) * varOpex
 
   if (type.fuel !== 'none') {
-    const thermalMwh = mwh / Math.max(0.01, efficiency)
+    const thermalMwh = thermalInputMwh(plant, mwh, heatMwh, params)
     const fuelPrice = params.get(plant.id, Param.FuelPricePerMwhThermal)
     ledger.fuelCost += thermalMwh * fuelPrice
 
@@ -119,6 +177,23 @@ export function chargeGeneration(
     ledger.co2Tonnes += co2
     ledger.carbonCost += co2 * carbonPrice
   }
+}
+
+/** Credit one hour of heat sales, which are billed separately and far more cheaply. */
+export function creditHeatSales(ledger: PeriodLedger, mwh: number, tariffPerMwh: number): void {
+  if (mwh <= 0) return
+  ledger.heatRevenue += mwh * tariffPerMwh
+  ledger.heatSoldMwh += mwh
+}
+
+/**
+ * Charge one hour of failing to deliver heat. Priced far above the electrical equivalent,
+ * because the consequence is not an inconvenient evening — see `valueOfLostHeatPerMwh`.
+ */
+export function chargeUnservedHeat(ledger: PeriodLedger, mwh: number): void {
+  if (mwh <= 0) return
+  ledger.heatUnservedMwh += mwh
+  ledger.unservedPenalty += mwh * ECONOMICS.unservedHeatPenaltyPerMwh.value
 }
 
 /** Credit one hour of sales. */

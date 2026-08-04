@@ -54,6 +54,19 @@ export function formatMw(mw: number): string {
   return `${mw.toFixed(0)} MW`
 }
 
+/**
+ * Thermal megawatts, always labelled as such.
+ *
+ * A separate formatter rather than a parameter, because the whole point is that the suffix can
+ * never be left off by accident. Electrical and thermal megawatts are the same unit measuring
+ * two things that cost, behave and sell completely differently, and a figure without the `th`
+ * invites the reader to compare them directly.
+ */
+export function formatMwth(mw: number): string {
+  if (Math.abs(mw) >= 1000) return `${(mw / 1000).toFixed(2)} GWth`
+  return `${mw.toFixed(0)} MWth`
+}
+
 export function formatPct(fraction: number): string {
   return `${(fraction * 100).toFixed(1)}%`
 }

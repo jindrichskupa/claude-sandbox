@@ -29,6 +29,7 @@ export function toScenarioDef(content: ScenarioContent): ScenarioDef {
     startingCash: content.startingCash,
     startingDebt: content.startingDebt,
     tariffPerMwh: content.tariffPerMwh,
+    heatTariffPerMwh: content.heatTariffPerMwh,
     carbonPricePerTonne: content.carbonPricePerTonne,
     objectives: content.objectives,
     feedInTariffs: content.feedInTariffs ?? {},
@@ -71,6 +72,28 @@ export function buildWorld(content: ScenarioContent): World {
     world.network.addEdge(edge)
   }
 
+  // Heat mains. Same graph as the power lines, and routed the same way — a buried pipe follows
+  // the ground just as an overhead line does, and rather more expensively.
+  for (const spec of content.heatPipes) {
+    const from = world.network.requireNode(spec.from)
+    const to = world.network.requireNode(spec.to)
+    const route = routeLine(world.terrain, from.x, from.y, to.x, to.y)
+    world.network.addEdge({
+      id: spec.id,
+      commodity: 'heat',
+      ownerId: PLAYER,
+      from: spec.from,
+      to: spec.to,
+      kv: 0,
+      dn: spec.dn,
+      lengthKm: route.lengthTiles * content.kmPerTile,
+      circuits: spec.pipes,
+      energised: true,
+      builtTick: -1,
+      route: simplifyRoute(route),
+    })
+  }
+
   for (const spec of content.cities) {
     const city: CityAsset = {
       id: spec.id,
@@ -100,7 +123,9 @@ export function buildWorld(content: ScenarioContent): World {
       cumulativeRunHours: Math.round(spec.ageYears * TICKS_PER_YEAR * 0.6),
       cumulativeStarts: Math.round(spec.ageYears * 30),
       outputMw: 0,
+      heatOutputMw: 0,
       storageMwh: 0,
+      heatStoredMwhth: 0,
       cyclesUsed: 0,
       online: true,
       capexPaid: type.capexPerKw.value * type.capacityMw.value * 1000,

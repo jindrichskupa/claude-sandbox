@@ -7,7 +7,7 @@
  * game — which is exactly the sort of thing that is nearly free now and miserable later.
  */
 
-import type { PlantTypeId } from '@content/plantTypes'
+import { isHeatOnlyType, isHeatSourceType, type PlantTypeId } from '@content/plantTypes'
 import type { NodeId, OwnerId } from '../grid/network'
 
 /**
@@ -60,8 +60,17 @@ export interface PlantAsset {
 
   /** Output in the last completed tick, in MW. Storage uses negative for charging. */
   outputMw: number
+  /**
+   * Heat delivered to the district heating network in the last completed tick, in MW thermal.
+   * Negative for an accumulator that is being charged. Zero for anything without a heat side.
+   */
+  heatOutputMw: number
   /** Stored energy for storage assets. */
   storageMwh: number
+  /** Stored heat for an accumulator, in MWh thermal. Kept apart from `storageMwh` on purpose:
+   *  thermal and electrical megawatt-hours are not interchangeable and should not share a
+   *  field that lets them be added together by accident. */
+  heatStoredMwhth: number
   /**
    * Equivalent full cycles a store has delivered. One cycle is its whole usable energy
    * discharged once, whether in an hour or over a week.
@@ -100,9 +109,21 @@ export interface CityAsset {
   unservedTicksRecent: number
 }
 
-/** Whether a plant can generate at all right now. */
+/**
+ * Whether a plant can generate *electricity* right now.
+ *
+ * Heat-only plant is excluded here rather than at each call site, which is what keeps a
+ * boiler's thermal megawatts from quietly appearing in the electrical merit order, the
+ * capacity headline or the generation mix. For those, `capacityMw` is a thermal rating, and
+ * one forgotten filter would put it on the wrong side of the energy balance.
+ */
 export function isDispatchable(p: PlantAsset): boolean {
-  return p.phase === LifecyclePhase.Operating && p.online
+  return p.phase === LifecyclePhase.Operating && p.online && !isHeatOnlyType(p.typeId)
+}
+
+/** Whether a plant can put heat into a district heating network right now. */
+export function isHeatDispatchable(p: PlantAsset): boolean {
+  return p.phase === LifecyclePhase.Operating && p.online && isHeatSourceType(p.typeId)
 }
 
 /** Whether a plant still costs its owner fixed money. Mothballed units cost less but not nothing. */

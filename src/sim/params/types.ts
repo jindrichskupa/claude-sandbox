@@ -57,9 +57,15 @@ export enum Param {
    * tariff or a contract for difference. Zero for everything unsubsidised.
    */
   FeedInTariffPerMwh,
+  /** Rated heat output of a cogeneration unit, boiler or accumulator. */
+  HeatCapacityMwth,
+  /** Heat the district network can carry along one main. */
+  PipeCapacityMwth,
+  /** Price the utility receives per MWh of heat sold. */
+  HeatTariffPerMwh,
 }
 
-export const PARAM_COUNT = 15
+export const PARAM_COUNT = 18
 
 /** Stable display keys, used by the inspector and by tests. */
 export const PARAM_KEYS: Record<Param, string> = {
@@ -78,6 +84,9 @@ export const PARAM_KEYS: Record<Param, string> = {
   [Param.CarbonPricePerTonne]: 'param.carbonPrice',
   [Param.TariffPerMwh]: 'param.tariff',
   [Param.FeedInTariffPerMwh]: 'param.feedInTariff',
+  [Param.HeatCapacityMwth]: 'param.heatCapacity',
+  [Param.PipeCapacityMwth]: 'param.pipeCapacity',
+  [Param.HeatTariffPerMwh]: 'param.heatTariff',
 }
 
 /**
@@ -101,6 +110,9 @@ export const PARAM_BOUNDS: Record<Param, { min: number; max: number }> = {
   [Param.CarbonPricePerTonne]: { min: 0, max: Infinity },
   [Param.TariffPerMwh]: { min: 0, max: Infinity },
   [Param.FeedInTariffPerMwh]: { min: 0, max: Infinity },
+  [Param.HeatCapacityMwth]: { min: 0, max: Infinity },
+  [Param.PipeCapacityMwth]: { min: 0, max: Infinity },
+  [Param.HeatTariffPerMwh]: { min: 0, max: Infinity },
 }
 
 /**

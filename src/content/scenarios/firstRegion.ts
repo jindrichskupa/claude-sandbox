@@ -12,6 +12,7 @@
 import { TEMPERATE_CLIMATE } from '../../sim/weather/weather'
 import type { PlantTypeId } from '../plantTypes'
 import type { VoltageLevel } from '../lineTypes'
+import type { PipeSize } from '../heatPipeTypes'
 
 export interface NodeSpec {
   id: string
@@ -48,6 +49,19 @@ export interface LineSpec {
   circuits: number
 }
 
+/**
+ * A district heating main. Same graph, same island finder, same save format as a power line —
+ * which is what the `commodity` field on every edge was put there for in the first milestone.
+ */
+export interface HeatPipeSpec {
+  id: string
+  from: string
+  to: string
+  dn: PipeSize
+  /** Parallel mains. Doubles both the capacity and the standing loss. */
+  pipes: number
+}
+
 export interface ScenarioContent {
   id: string
   nameKey: string
@@ -60,12 +74,14 @@ export interface ScenarioContent {
   startingCash: number
   startingDebt: number
   tariffPerMwh: number
+  heatTariffPerMwh: number
   carbonPricePerTonne: number
   climate: typeof TEMPERATE_CLIMATE
   nodes: NodeSpec[]
   cities: CitySpec[]
   plants: PlantSpec[]
   lines: LineSpec[]
+  heatPipes: HeatPipeSpec[]
   objectives: Array<{ id: string; descriptionKey: string }>
   /**
    * Guaranteed price per MWh paid to a technology regardless of the market, by type.
@@ -90,6 +106,7 @@ export const FIRST_REGION: ScenarioContent = {
   startingCash: 400_000_000,
   startingDebt: 250_000_000,
   tariffPerMwh: 85,
+  heatTariffPerMwh: 45,
   carbonPricePerTonne: 0,
   climate: TEMPERATE_CLIMATE,
 
@@ -106,6 +123,10 @@ export const FIRST_REGION: ScenarioContent = {
     { id: 'n_gorge', kind: 'plant', x: 16, y: 3, name: 'Gorge' },
     { id: 'n_eastfield', kind: 'plant', x: 24, y: 18, name: 'Eastfield' },
     { id: 'n_millbrook', kind: 'plant', x: 27, y: 21, name: 'Millbrook' },
+    // The two municipal heating plants. Both stand on the edge of the town they heat, because
+    // a heat main loses too much to run any further than that.
+    { id: 'n_ironworks', kind: 'plant', x: 14, y: 12, name: 'Ironworks' },
+    { id: 'n_quayside', kind: 'plant', x: 30, y: 24, name: 'Quayside' },
 
     // Switching stations.
     { id: 'n_central', kind: 'substation', x: 20, y: 15, name: 'Central' },
@@ -119,7 +140,7 @@ export const FIRST_REGION: ScenarioContent = {
       name: 'Rivermouth',
       population: 900,
       baseDemandMw: 380,
-      baseHeatDemandMwth: 320,
+      baseHeatDemandMwth: 190,
     },
     {
       id: 'c_ironvale',
@@ -127,7 +148,7 @@ export const FIRST_REGION: ScenarioContent = {
       name: 'Ironvale',
       population: 400,
       baseDemandMw: 255,
-      baseHeatDemandMwth: 190,
+      baseHeatDemandMwth: 130,
     },
     {
       id: 'c_northgate',
@@ -159,6 +180,24 @@ export const FIRST_REGION: ScenarioContent = {
     { id: 'p_eastfield', nodeId: 'n_eastfield', typeId: 'ccgt', name: 'Eastfield', ageYears: 12 },
     // Expensive to run, but right next to the load.
     { id: 'p_millbrook', nodeId: 'n_millbrook', typeId: 'ocgt', name: 'Millbrook', ageYears: 18 },
+
+    // The inherited district heating. Ironworks is the awkward one: a backpressure coal set,
+    // so on the coldest evenings of the year it is 110 MW the dispatch cannot refuse — and in
+    // April it is nearly idle no matter what the electricity is worth. Quayside is a modern
+    // extraction unit that keeps its choice, which is exactly the contrast worth having on one
+    // map. Both are old enough that the player will have to decide what replaces them.
+    { id: 'p_ironworks', nodeId: 'n_ironworks', typeId: 'coal_chp', name: 'Ironworks', ageYears: 31 },
+    { id: 'p_quayside', nodeId: 'n_quayside', typeId: 'gas_chp', name: 'Quayside', ageYears: 9 },
+    // The peak boilers nobody thinks about until February. A cogeneration unit is sized for the
+    // load it can run on economically all winter, never for the coldest hundred hours — those
+    // are covered by boilers that cost a tenth as much per kilowatt and stand idle most of the
+    // year. Every real heat network is built this way, and a player who retires them to save
+    // the fixed cost will find out why in the first hard frost.
+    { id: 'p_quayside_boiler_a', nodeId: 'n_quayside', typeId: 'heat_boiler', name: 'Quayside Boiler A', ageYears: 14 },
+    { id: 'p_quayside_boiler_b', nodeId: 'n_quayside', typeId: 'heat_boiler', name: 'Quayside Boiler B', ageYears: 14 },
+    { id: 'p_quayside_boiler_c', nodeId: 'n_quayside', typeId: 'heat_boiler', name: 'Quayside Boiler C', ageYears: 19 },
+    { id: 'p_ironworks_boiler_a', nodeId: 'n_ironworks', typeId: 'heat_boiler', name: 'Ironworks Boiler A', ageYears: 22 },
+    { id: 'p_ironworks_boiler_b', nodeId: 'n_ironworks', typeId: 'heat_boiler', name: 'Ironworks Boiler B', ageYears: 22 },
   ],
 
   lines: [
@@ -179,7 +218,16 @@ export const FIRST_REGION: ScenarioContent = {
     { id: 'l_eastfield_rivermouth', from: 'n_eastfield', to: 'n_rivermouth', kv: 220, circuits: 1 },
     { id: 'l_oldharbour_rivermouth', from: 'n_oldharbour', to: 'n_rivermouth', kv: 220, circuits: 1 },
     { id: 'l_millbrook_rivermouth', from: 'n_millbrook', to: 'n_rivermouth', kv: 110, circuits: 1 },
+    { id: 'l_quayside_rivermouth', from: 'n_quayside', to: 'n_rivermouth', kv: 110, circuits: 1 },
+    { id: 'l_ironworks_ironvale', from: 'n_ironworks', to: 'n_ironvale', kv: 110, circuits: 1 },
     { id: 'l_rivermouth_southbay', from: 'n_rivermouth', to: 'n_southbay', kv: 110, circuits: 2 },
+  ],
+
+  // Short and fat, as every real heat main is: Ironworks is one tile from Ironvale, Quayside
+  // two from Rivermouth. Anything longer would lose more to the ground than it delivered.
+  heatPipes: [
+    { id: 'h_ironworks_ironvale', from: 'n_ironworks', to: 'n_ironvale', dn: 700, pipes: 1 },
+    { id: 'h_quayside_rivermouth', from: 'n_quayside', to: 'n_rivermouth', dn: 700, pipes: 1 },
   ],
 
   feedInTariffs: {},
@@ -188,5 +236,6 @@ export const FIRST_REGION: ScenarioContent = {
     { id: 'keep-lights-on', descriptionKey: 'objective.keepLightsOn' },
     { id: 'stay-solvent', descriptionKey: 'objective.staySolvent' },
     { id: 'replace-old-harbour', descriptionKey: 'objective.replaceOldHarbour' },
+    { id: 'keep-the-heat-on', descriptionKey: 'objective.keepTheHeatOn' },
   ],
 }

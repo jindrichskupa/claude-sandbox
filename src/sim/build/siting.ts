@@ -53,6 +53,16 @@ export const SITING = {
   pumpedHeadDrop: sourced(0.18, 'fraction', 'engineering-standard', 2023, 'Needs a hill and somewhere below it'),
   /** Drainage a lignite station needs nearby, standing in for a mine. */
   ligniteFuelRadius: sourced(4, 'count', 'game-design', 2024, 'Lignite is not transportable; it burns at its mine'),
+  /**
+   * How far a heat plant may stand from the town it heats, in tiles.
+   *
+   * This is the sharpest siting rule in the game, and it comes straight from the physics in
+   * `heatPipeTypes.ts`: a buried main loses heat per kilometre whether it is carrying anything
+   * or not, so distance costs energy continuously rather than only under load. Electricity can
+   * be sent two hundred kilometres and arrive; heat cannot. A power station picks its site from
+   * the whole map, a heat plant from the edge of one town.
+   */
+  heatSourceCityDistance: sourced(3, 'count', 'euro-chp-practice', 2021, 'Around 30 km; the longest real transmission mains reach about this'),
 } as const satisfies Record<string, Sourced<number>>
 
 function distanceToNearestCity(context: SiteContext): number {
@@ -150,6 +160,17 @@ export function judgeSite(typeId: PlantTypeId, context: SiteContext): SiteVerdic
       const seam = 1 - waterAvailability(terrain, x, y, SITING.ligniteFuelRadius.value)
       if (seam < 0.35) return reject('build.noLigniteSeam')
       return accept(seam)
+    }
+
+    case 'coal_chp':
+    case 'gas_chp':
+    case 'heat_boiler':
+    case 'heat_accumulator': {
+      const distance = distanceToNearestCity(context)
+      const limit = SITING.heatSourceCityDistance.value
+      if (distance > limit) return reject('build.tooFarFromHeatLoad', { tiles: limit })
+      // Closer is strictly better: less pipe to buy and less heat left in the ground.
+      return accept(1 - distance / (limit + 1))
     }
 
     default:

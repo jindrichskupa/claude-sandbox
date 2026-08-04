@@ -23,9 +23,15 @@ export interface Sourced<T> {
 export type Unit =
   | 'MW'
   | 'MWh'
+  /** Thermal megawatts. Distinguished from electrical MW because confusing them is the
+   *  classic cogeneration mistake, and a unit field that cannot tell them apart invites it. */
+  | 'MWth'
+  | 'MWh_th'
   | 'EUR'
   | 'EUR/kW'
+  | 'EUR/kWth'
   | 'EUR/kW/yr'
+  | 'EUR/kWth/yr'
   | 'EUR/MWh'
   | 'EUR/MWh_th'
   | 't/MWh_th'

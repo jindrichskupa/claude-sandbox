@@ -23,8 +23,11 @@ export type PlantTypeId =
   | 'solar'
   | 'battery'
   | 'gas_chp'
+  | 'coal_chp'
+  | 'heat_boiler'
+  | 'heat_accumulator'
 
-export type PlantCategory = 'thermal' | 'nuclear' | 'hydro' | 'wind' | 'solar' | 'storage'
+export type PlantCategory = 'thermal' | 'nuclear' | 'hydro' | 'wind' | 'solar' | 'storage' | 'heat'
 
 /** What the plant's output depends on in the weather model. */
 export type WeatherDependence = 'none' | 'wind' | 'solar' | 'riverflow'
@@ -36,7 +39,37 @@ export type WeatherDependence = 'none' | 'wind' | 'solar' | 'riverflow'
  */
 export type CoolingType = 'none' | 'water' | 'air'
 
-/** Electricity/heat coupling for cogeneration. Used from the heat milestone onward. */
+/**
+ * Electricity/heat coupling for cogeneration.
+ *
+ * A cogeneration unit is not a power station with a heat exchanger bolted on; the two outputs
+ * come out of the same steam and are bound together. Two couplings cover almost every real
+ * machine, and they behave completely differently to operate:
+ *
+ *   **Extraction.** Steam is bled from the turbine before it has finished expanding. Every
+ *   megawatt of heat taken costs `powerLossPerHeat` megawatts of electricity, but the unit can
+ *   still run on electricity alone. It is a normal generator with a ceiling that drops as the
+ *   heat load rises.
+ *
+ *       Pel_max = Pel_rated · availability − cv · Q
+ *
+ *   **Backpressure.** The turbine exhausts straight into the heat network, so the steam that
+ *   makes the electricity is the same steam that heats the town. Power and heat are locked in
+ *   a fixed ratio and neither can be chosen independently:
+ *
+ *       Pel = cm · Q
+ *
+ *   That is the interesting one, and the reason it is in this game. A backpressure unit
+ *   serving a cold city is a *fixed injection* the electrical dispatch cannot decline — it
+ *   generates because people need to be warm, whatever the market price is doing. Real systems
+ *   with large cogeneration fleets clear at strange prices on cold nights for exactly this
+ *   reason, and no amount of merit-order reasoning makes it go away.
+ *
+ * Neither coupling touches the flow solver, because both reduce to bounds on one arc. Solving
+ * heat and electricity together as a single optimisation would be theoretically better by a
+ * percent or two and would destroy the network structure that makes nodal prices fall out for
+ * free. Heat-led sequencing is also how these plants are really run.
+ */
 export interface ChpSpec {
   /** `extraction` trades heat against power; `backpressure` fixes their ratio. */
   mode: 'extraction' | 'backpressure'
@@ -46,6 +79,37 @@ export interface ChpSpec {
   powerLossPerHeat: Sourced<number>
   /** MW of electricity per MW of heat (backpressure units). */
   powerPerHeat: Sourced<number>
+  /**
+   * Total fuel-to-useful-energy efficiency, electricity and heat together. Far higher than the
+   * electrical efficiency alone, and the entire economic case for cogeneration: the heat would
+   * otherwise go up a cooling tower.
+   */
+  totalEfficiency: Sourced<number>
+}
+
+/**
+ * A plant that makes heat and no electricity.
+ *
+ * These are cheap, and that matters. A peak boiler costs a small fraction of a cogeneration
+ * unit per kilowatt and covers the coldest few hundred hours a year, which is precisely the
+ * load nobody wants to size expensive plant for. A heat accumulator is a large insulated tank
+ * of hot water — nearly free compared with a battery of comparable energy, because water in a
+ * tank is not lithium in a rack — and it is the real reason cogeneration fleets have any
+ * flexibility at all: it lets the unit make heat when electricity is worth money and store it
+ * for when the town needs it.
+ *
+ * For these types the electrical fields are inert and `capacityMw` carries the *thermal*
+ * rating, with the units on each figure saying so. `isDispatchable` excludes them from the
+ * electrical merit order, so they cannot leak into the power system by accident.
+ */
+export interface HeatOnlySpec {
+  kind: 'boiler' | 'accumulator'
+  /** Fuel to heat, for boilers. Round-trip charge-to-discharge, for accumulators. */
+  thermalEfficiency: Sourced<number>
+  /** Usable stored heat. Accumulators only. */
+  storageMwhth: Sourced<number> | null
+  /** Fraction of stored heat lost per hour through the insulation. Accumulators only. */
+  standingLossPerHour: Sourced<number> | null
 }
 
 export interface StorageSpec {
@@ -138,6 +202,26 @@ export interface PlantTypeDef {
 
   chp: ChpSpec | null
   storage: StorageSpec | null
+  heatOnly: HeatOnlySpec | null
+}
+
+/** Whether this technology makes heat and no electricity. */
+export function isHeatOnlyType(id: PlantTypeId): boolean {
+  return PLANT_TYPES[id].heatOnly !== null
+}
+
+/** Whether this technology can put heat into a district heating network. */
+export function isHeatSourceType(id: PlantTypeId): boolean {
+  const type = PLANT_TYPES[id]
+  return type.chp !== null || type.heatOnly !== null
+}
+
+/** Rated heat output, whatever kind of heat plant it is. Zero for everything else. */
+export function heatCapacityOf(id: PlantTypeId): number {
+  const type = PLANT_TYPES[id]
+  if (type.chp) return type.chp.heatCapacityMwth.value
+  if (type.heatOnly) return type.capacityMw.value
+  return 0
 }
 
 /** Reference year for the cost figures below. */
@@ -174,6 +258,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.02, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
+    heatOnly: null,
   },
 
   lignite: {
@@ -206,6 +291,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.02, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
+    heatOnly: null,
   },
 
   ccgt: {
@@ -238,6 +324,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.08, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
+    heatOnly: null,
   },
 
   ocgt: {
@@ -270,6 +357,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.08, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
+    heatOnly: null,
   },
 
   nuclear: {
@@ -302,6 +390,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.05, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
+    heatOnly: null,
   },
 
   hydro: {
@@ -334,6 +423,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.1, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
+    heatOnly: null,
   },
 
   pumped: {
@@ -372,6 +462,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
       cycleLife: null,
       capacityFadeOverLife: null,
     },
+    heatOnly: null,
   },
 
   wind: {
@@ -404,6 +495,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.25, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
+    heatOnly: null,
   },
 
   solar: {
@@ -436,6 +528,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.3, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
+    heatOnly: null,
   },
 
   battery: {
@@ -473,6 +566,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
       cycleLife: sourced(5000, 'count', 'nrel-atb', 2023, 'Equivalent full cycles to end of warranty'),
       capacityFadeOverLife: sourced(0.2, 'fraction', 'nrel-atb', 2023, 'Typical warranty floor is 80% of new'),
     },
+    heatOnly: null,
   },
 
   gas_chp: {
@@ -505,11 +599,139 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishCapacityGain: sourced(0.06, 'fraction', 'engineering-standard', 2023),
     chp: {
       mode: 'extraction',
-      heatCapacityMwth: sourced(150, 'MW', 'euro-chp-practice', 2021),
+      heatCapacityMwth: sourced(150, 'MWth', 'euro-chp-practice', 2021),
       powerLossPerHeat: sourced(0.18, 'fraction', 'euro-chp-practice', 2021, 'Typical cv factor 0.15-0.25'),
       powerPerHeat: sourced(0.55, 'fraction', 'euro-chp-practice', 2021, 'Only used by backpressure units'),
+      totalEfficiency: sourced(0.85, 'fraction', 'euro-chp-practice', 2021, 'Electricity plus useful heat'),
     },
     storage: null,
+    heatOnly: null,
+  },
+
+  /**
+   * The inherited district heating plant: an old coal unit exhausting straight into the town's
+   * heat mains.
+   *
+   * Backpressure is what makes it awkward and what makes it worth having in the game. It cannot
+   * choose to make less electricity while still heating the town, and it cannot choose to heat
+   * the town without making electricity. On the coldest evening of the year it is a 100 MW
+   * injection the dispatch has no say over; in April it is nearly idle whatever the market
+   * would pay. Every real system with a large cogeneration fleet has this problem, and the only
+   * ways out of it are an accumulator, a boiler, or a different machine.
+   */
+  coal_chp: {
+    id: 'coal_chp',
+    nameKey: 'plant.coal_chp',
+    category: 'thermal',
+    fuel: 'coal',
+    capacityMw: sourced(110, 'MW', 'euro-chp-practice', 2021, 'Backpressure set matched to a town heat load'),
+    capexPerKw: sourced(2200, 'EUR/kW', 'euro-chp-practice', 2021, 'Per electrical kW; the heat side is most of the plant'),
+    fixedOpexPerKwYear: sourced(75, 'EUR/kW/yr', 'euro-chp-practice', 2021),
+    varOpexPerMwh: sourced(5, 'EUR/MWh', 'euro-chp-practice', 2021),
+    efficiency: sourced(0.29, 'fraction', 'euro-chp-practice', 2021, 'Electrical only; low because the steam is not fully expanded'),
+    rampRatePerHour: sourced(0.3, 'fraction/h', 'engineering-standard', Y),
+    minLoadFraction: sourced(0.4, 'fraction', 'engineering-standard', Y),
+    buildTimeMonths: sourced(42, 'months', 'euro-chp-practice', 2021),
+    designLifeYears: sourced(45, 'years', 'engineering-standard', Y),
+    decommissionCostPerKw: sourced(210, 'EUR/kW', 'engineering-standard', Y),
+    decommissionYears: sourced(4, 'years', 'engineering-standard', Y),
+    remediationYears: sourced(5, 'years', 'engineering-standard', Y),
+    recyclingRecoveryPerKw: sourced(25, 'EUR/kW', 'engineering-standard', Y),
+    annualEfficiencyDecay: sourced(0.002, 'fraction', 'engineering-standard', Y),
+    forcedOutageRate: sourced(0.08, 'fraction', 'entsoe-factsheet', 2022),
+    weatherDependence: 'none',
+    cooling: 'water',
+    availableFromYear: sourced(1950, 'count', 'engineering-standard', 2023, 'The classic municipal heating plant'),
+    refurbishCostFraction: sourced(0.35, 'fraction', 'engineering-standard', 2023),
+    refurbishLifeExtension: sourced(0.5, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(22, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.03, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.02, 'fraction', 'engineering-standard', 2023),
+    chp: {
+      mode: 'backpressure',
+      heatCapacityMwth: sourced(245, 'MWth', 'euro-chp-practice', 2021),
+      powerLossPerHeat: sourced(0.18, 'fraction', 'euro-chp-practice', 2021, 'Only used by extraction units'),
+      powerPerHeat: sourced(0.45, 'fraction', 'euro-chp-practice', 2021, 'Typical cm factor for a coal backpressure set'),
+      totalEfficiency: sourced(0.82, 'fraction', 'euro-chp-practice', 2021),
+    },
+    storage: null,
+    heatOnly: null,
+  },
+
+  heat_boiler: {
+    id: 'heat_boiler',
+    nameKey: 'plant.heat_boiler',
+    category: 'heat',
+    fuel: 'gas',
+    capacityMw: sourced(100, 'MWth', 'euro-chp-practice', 2021, 'Thermal rating; this plant makes no electricity'),
+    capexPerKw: sourced(90, 'EUR/kWth', 'euro-chp-practice', 2021, 'A fraction of any generating plant per kW'),
+    fixedOpexPerKwYear: sourced(3, 'EUR/kWth/yr', 'euro-chp-practice', 2021),
+    varOpexPerMwh: sourced(1.5, 'EUR/MWh_th', 'euro-chp-practice', 2021),
+    efficiency: sourced(0.92, 'fraction', 'euro-chp-practice', 2021, 'Fuel to heat'),
+    rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y, 'Minutes from cold'),
+    minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    buildTimeMonths: sourced(10, 'months', 'euro-chp-practice', 2021),
+    designLifeYears: sourced(30, 'years', 'engineering-standard', Y),
+    decommissionCostPerKw: sourced(8, 'EUR/kWth', 'engineering-standard', Y),
+    decommissionYears: sourced(1, 'years', 'engineering-standard', Y),
+    remediationYears: sourced(0, 'years', 'engineering-standard', Y),
+    recyclingRecoveryPerKw: sourced(4, 'EUR/kWth', 'engineering-standard', Y),
+    annualEfficiencyDecay: sourced(0.001, 'fraction', 'engineering-standard', Y),
+    forcedOutageRate: sourced(0.02, 'fraction', 'euro-chp-practice', 2021),
+    weatherDependence: 'none',
+    cooling: 'none',
+    availableFromYear: sourced(1900, 'count', 'engineering-standard', 2023),
+    refurbishCostFraction: sourced(0.3, 'fraction', 'engineering-standard', 2023),
+    refurbishLifeExtension: sourced(0.6, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(4, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.03, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.0, 'fraction', 'engineering-standard', 2023),
+    chp: null,
+    storage: null,
+    heatOnly: {
+      kind: 'boiler',
+      thermalEfficiency: sourced(0.92, 'fraction', 'euro-chp-practice', 2021),
+      storageMwhth: null,
+      standingLossPerHour: null,
+    },
+  },
+
+  heat_accumulator: {
+    id: 'heat_accumulator',
+    nameKey: 'plant.heat_accumulator',
+    category: 'heat',
+    fuel: 'none',
+    capacityMw: sourced(120, 'MWth', 'euro-chp-practice', 2021, 'Charge and discharge rating'),
+    capexPerKw: sourced(35, 'EUR/kWth', 'euro-chp-practice', 2021, 'A tank of hot water is not a battery, and the price says so'),
+    fixedOpexPerKwYear: sourced(1, 'EUR/kWth/yr', 'euro-chp-practice', 2021),
+    varOpexPerMwh: sourced(0.2, 'EUR/MWh_th', 'euro-chp-practice', 2021),
+    efficiency: sourced(0.98, 'fraction', 'euro-chp-practice', 2021),
+    rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y),
+    minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    buildTimeMonths: sourced(12, 'months', 'euro-chp-practice', 2021),
+    designLifeYears: sourced(40, 'years', 'engineering-standard', Y),
+    decommissionCostPerKw: sourced(5, 'EUR/kWth', 'engineering-standard', Y),
+    decommissionYears: sourced(1, 'years', 'engineering-standard', Y),
+    remediationYears: sourced(0, 'years', 'engineering-standard', Y),
+    recyclingRecoveryPerKw: sourced(3, 'EUR/kWth', 'engineering-standard', Y),
+    annualEfficiencyDecay: sourced(0.0005, 'fraction', 'engineering-standard', Y),
+    forcedOutageRate: sourced(0.01, 'fraction', 'engineering-standard', Y),
+    weatherDependence: 'none',
+    cooling: 'none',
+    availableFromYear: sourced(1970, 'count', 'engineering-standard', 2023),
+    refurbishCostFraction: sourced(0.25, 'fraction', 'engineering-standard', 2023),
+    refurbishLifeExtension: sourced(0.6, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(4, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.0, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.0, 'fraction', 'engineering-standard', 2023),
+    chp: null,
+    storage: null,
+    heatOnly: {
+      kind: 'accumulator',
+      thermalEfficiency: sourced(0.97, 'fraction', 'euro-chp-practice', 2021, 'Charge and discharge losses are small'),
+      storageMwhth: sourced(1400, 'MWh_th', 'euro-chp-practice', 2021, 'Around twelve hours at rated output'),
+      standingLossPerHour: sourced(0.002, 'fraction', 'euro-chp-practice', 2021, 'Tank cools slowly; a day of storage is realistic'),
+    },
   },
 }
 

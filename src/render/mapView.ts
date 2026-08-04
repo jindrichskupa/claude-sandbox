@@ -11,6 +11,7 @@
 
 import { Application, Container, Graphics, Sprite, Text, TextStyle, TilingSprite } from 'pixi.js'
 import { LINE_TYPES } from '@content/lineTypes'
+import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
 import { PLANT_TYPES } from '@content/plantTypes'
 import type { World } from '@sim/world'
 import type { GridEdge, GridNode } from '@sim/grid/network'
@@ -38,6 +39,29 @@ const CATEGORY_COLOURS: Record<string, number> = {
   wind: 0x63c8a8,
   solar: 0xe0c04a,
   storage: 0x9aa3b0,
+}
+
+/**
+ * Shift a path sideways by a fixed distance.
+ *
+ * Each point moves along the normal of the segments meeting at it, so a bent route stays bent
+ * and the offset copy does not cross itself at the corners. Purely cosmetic — the simulation
+ * knows nothing about it.
+ */
+function offsetPath(
+  path: Array<{ x: number; y: number }>,
+  distance: number,
+): Array<{ x: number; y: number }> {
+  if (path.length < 2) return path
+  return path.map((point, i) => {
+    const before = path[Math.max(0, i - 1)]!
+    const after = path[Math.min(path.length - 1, i + 1)]!
+    const dx = after.x - before.x
+    const dy = after.y - before.y
+    const length = Math.hypot(dx, dy)
+    if (length < 1e-6) return point
+    return { x: point.x + (-dy / length) * distance, y: point.y + (dx / length) * distance }
+  })
 }
 
 function lerpColour(a: number, b: number, t: number): number {
@@ -68,12 +92,14 @@ export interface MapViewCallbacks {
 export type BuildMode =
   | { kind: 'plant'; typeId: string }
   | { kind: 'line'; kv: 110 | 220 | 400; circuits: number; fromNodeId: string | null }
+  | { kind: 'pipe'; dn: 200 | 400 | 700; pipes: number; fromNodeId: string | null }
   | null
 
 export class MapView {
   readonly camera: Camera
   private readonly root = new Container()
   private readonly terrainLayer = new Container()
+  private readonly heatLayer = new Graphics()
   private readonly lineLayer = new Graphics()
   private readonly particleLayer = new Container()
   private readonly pylonLayer = new Container()
@@ -112,6 +138,9 @@ export class MapView {
 
     this.root.addChild(
       this.terrainLayer,
+      // Under the power lines: a heat main is buried, and where the two share a corridor the
+      // conductor should read as the thing overhead.
+      this.heatLayer,
       this.lineLayer,
       this.pylonLayer,
       this.particleLayer,
@@ -286,6 +315,7 @@ export class MapView {
       this.particles = []
       this.particleLayer.removeChildren()
     }
+    this.drawHeatPipes()
     this.drawLines()
     this.drawNodes()
     this.syncParticles()
@@ -328,6 +358,50 @@ export class MapView {
       remaining -= segment
     }
     return path[path.length - 1]!
+  }
+
+  /**
+   * District heating mains.
+   *
+   * Drawn as a thick warm band rather than a thin conductor, because that is what they are:
+   * a pair of half-metre steel pipes in a trench, not a wire in the air. The colour runs from
+   * a dull ember when the main is idle to a bright orange when it is full, so a network at its
+   * limit reads at a glance — and since a heat main loses the same heat whether it is loaded or
+   * not, an idle one being dull is exactly the wrong intuition to encourage, which is why even
+   * an empty pipe is drawn solid.
+   */
+  private drawHeatPipes(): void {
+    const g = this.heatLayer
+    g.clear()
+    const heat = this.world.lastHeat
+
+    for (const edge of this.world.network.allEdges()) {
+      if (edge.commodity !== 'heat') continue
+      // Offset sideways from the corridor centre. A heat main and a power line between the same
+      // two places take the same route, and drawn on the same centreline the pipe vanishes
+      // under the conductor — which is exactly where the player most needs to see both.
+      const path = offsetPath(this.edgePath(edge), TILE_PX * 0.22)
+      const capacity =
+        edge.dn === undefined ? 0 : HEAT_PIPE_TYPES[edge.dn].capacityMwth.value * Math.max(1, edge.circuits)
+      const flow = Math.abs(heat?.pipeFlowMw.get(edge.id) ?? 0)
+      const loading = capacity > 0 ? Math.min(1, flow / capacity) : 0
+
+      const width = edge.dn === 700 ? 5 : edge.dn === 400 ? 4 : 3
+      const colour = lerpColour(0x6b4634, 0xe8802a, loading)
+
+      const stroke = (style: { width: number; color: number; alpha?: number }) => {
+        g.moveTo(path[0]!.x, path[0]!.y)
+        for (let i = 1; i < path.length; i++) g.lineTo(path[i]!.x, path[i]!.y)
+        g.stroke(style)
+      }
+
+      if (!edge.energised) {
+        drawDashedPath(g, path, 8, 6, { width, color: 0xe8802a, alpha: 0.45 })
+        continue
+      }
+      stroke({ width: width + 2, color: 0x160e08, alpha: 0.65 })
+      stroke({ width, color: colour, alpha: 0.9 })
+    }
   }
 
   private drawLines(): void {
@@ -572,8 +646,8 @@ export class MapView {
       return
     }
 
-    // Line mode: highlight the nodes that can be connected, and rubber-band from the one
-    // already chosen to the cursor.
+    // Line and pipe mode: highlight the nodes that can be connected, and rubber-band from the
+    // one already chosen to the cursor.
     for (const node of this.world.network.allNodes()) {
       const cx = node.x * TILE_PX + TILE_PX / 2
       const cy = node.y * TILE_PX + TILE_PX / 2
@@ -596,9 +670,20 @@ export class MapView {
           x: p.x * TILE_PX + TILE_PX / 2,
           y: p.y * TILE_PX + TILE_PX / 2,
         }))
+        const heatMode = mode.kind === 'pipe'
         drawDashedPath(g, path, 10, 7, {
-          width: mode.kv === 400 ? 3 : mode.kv === 220 ? 2 : 1.5,
-          color: colour,
+          width: heatMode
+            ? mode.dn === 700
+              ? 5
+              : mode.dn === 400
+                ? 4
+                : 3
+            : mode.kv === 400
+              ? 3
+              : mode.kv === 220
+                ? 2
+                : 1.5,
+          color: heatMode && this.hoverValid ? 0xe8802a : colour,
           alpha: 0.85,
         })
       }

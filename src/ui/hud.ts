@@ -8,9 +8,10 @@
  * a localisation layer stays honest.
  */
 
-import { formatDate, formatMoney, formatMw, formatPct, t } from '@i18n/index'
+import { formatDate, formatMoney, formatMw, formatMwth, formatPct, t } from '@i18n/index'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { LINE_TYPES } from '@content/lineTypes'
+import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
 import type { World } from '@sim/world'
 import { LIFECYCLE_KEYS, LifecyclePhase, isDispatchable } from '@sim/assets/types'
 import { ageYears } from '@sim/assets/aging'
@@ -82,6 +83,7 @@ export class Hud {
       ['generation', 'ui.generation'],
       ['losses', 'ui.losses'],
       ['price', 'ui.price'],
+      ['heat', 'ui.heat'],
       ['temperature', 'ui.temperature'],
       ['monthProfit', 'ui.monthProfit'],
       ['opinion', 'ui.opinion'],
@@ -223,9 +225,26 @@ export class Hud {
       this.stats.price!.className = `stat-value ${snap.pricePerMwh > 200 ? 'warn' : ''}`
       this.stats.temperature!.textContent = `${snap.weather.tempC.toFixed(1)}°C`
 
+      // Heat gets its own headline because it fails differently. Electricity that is short for
+      // an hour is a brownout; heat that is short for an hour in February is burst pipework,
+      // so a shortfall of any size is shown in red rather than as a percentage of anything.
+      // The town's demand, not what the plants put in: the two differ by the standing losses
+      // in the ground, and a headline reading "200 supplied / 194 demanded" invites the reader
+      // to think something has gone wrong when nothing has.
+      this.stats.heat!.textContent =
+        snap.heatDemandMw > 0.01
+          ? snap.heatUnservedMw > 0.01
+            ? `${formatMwth(snap.heatDemandMw)} (−${formatMwth(snap.heatUnservedMw)})`
+            : formatMwth(snap.heatDemandMw)
+          : t('ui.noHeatNetwork')
+      this.stats.heat!.className = `stat-value ${snap.heatUnservedMw > 0.01 ? 'bad' : ''}`
+
       const unserved = snap.unservedMw
-      this.banner.classList.toggle('visible', unserved > 0.01)
-      if (unserved > 0.01) {
+      const cold = snap.heatUnservedMw
+      this.banner.classList.toggle('visible', unserved > 0.01 || cold > 0.01)
+      if (cold > 0.01) {
+        this.banner.textContent = `${t('ui.heatFailure')}: ${formatMwth(cold)}`
+      } else if (unserved > 0.01) {
         this.banner.textContent = `${t('ui.blackout')}: ${formatMw(unserved)}`
       }
     }
@@ -293,6 +312,14 @@ export class Hud {
       const price = dispatch?.nodalPrice.get(nodeId) ?? 0
       block.appendChild(this.kv(t('ui.price'), `€${price.toFixed(1)}/MWh`))
       block.appendChild(this.explainBlock(this.world.params.explain(city.id, Param.DemandMw), 'MW'))
+
+      const heat = this.world.lastHeat
+      const heatServed = heat?.servedHeatMw.get(city.id) ?? 0
+      const heatShort = heat?.unservedHeatMw.get(city.id) ?? 0
+      if (heatServed + heatShort > 0.01) {
+        block.appendChild(this.kv(t('ui.heatDemand'), formatMwth(heatServed + heatShort)))
+        if (heatShort > 0.01) block.appendChild(this.kv(t('ui.heatUnserved'), formatMwth(heatShort)))
+      }
       this.inspector.appendChild(block)
     }
 
@@ -374,6 +401,35 @@ export class Hud {
         }
       }
 
+      // The heat side. For a cogeneration unit this is the more important half of the panel:
+      // it is what explains an electrical output the player did not ask for and cannot change.
+      const heatOut = plant.heatOutputMw
+      if (type.chp || type.heatOnly) {
+        const heatCapacity = type.chp ? type.chp.heatCapacityMwth.value : capacity
+        const heatBar = el('div', 'bar')
+        const heatFill = el('div')
+        heatFill.style.width = `${Math.min(100, (Math.abs(heatOut) / Math.max(1, heatCapacity)) * 100)}%`
+        heatFill.style.background = '#e8802a'
+        heatBar.appendChild(heatFill)
+        block.appendChild(heatBar)
+        block.appendChild(
+          this.kv(t('ui.heatOutput'), `${formatMwth(heatOut)} / ${formatMwth(heatCapacity)}`),
+        )
+      }
+      if (type.chp) {
+        block.appendChild(
+          this.kv('', t(type.chp.mode === 'backpressure' ? 'ui.chpBackpressure' : 'ui.chpExtraction')),
+        )
+      }
+      if (type.heatOnly?.storageMwhth) {
+        block.appendChild(
+          this.kv(
+            t('ui.heatStored'),
+            `${plant.heatStoredMwhth.toFixed(0)} / ${type.heatOnly.storageMwhth.value.toFixed(0)} MWh`,
+          ),
+        )
+      }
+
       // Two chains worth showing: why the output is limited, and why the fuel bill is what it is.
       block.appendChild(this.explainBlock(this.world.params.explain(plant.id, Param.Availability), '', true))
       block.appendChild(this.explainBlock(this.world.params.explain(plant.id, Param.Efficiency), '', true))
@@ -385,6 +441,29 @@ export class Hud {
     if (!city && plants.length === 0 && lines.length > 0) {
       for (const edgeId of lines) {
         const edge = this.world.network.requireEdge(edgeId)
+        if (edge.commodity === 'heat' && edge.dn !== undefined) {
+          const pipe = HEAT_PIPE_TYPES[edge.dn]
+          const capacity = pipe.capacityMwth.value * Math.max(1, edge.circuits)
+          const flow = Math.abs(this.world.lastHeat?.pipeFlowMw.get(edgeId) ?? 0)
+          const block = el('div', 'asset')
+          block.appendChild(
+            el('div', 'asset-name', `${t(pipe.nameKey)} → ${edge.from === nodeId ? edge.to : edge.from}`),
+          )
+          const bar = el('div', 'bar')
+          const fill = el('div')
+          fill.style.width = `${Math.min(100, (flow / capacity) * 100)}%`
+          fill.style.background = '#e8802a'
+          bar.appendChild(fill)
+          block.appendChild(bar)
+          block.appendChild(this.kv(t('ui.output'), `${formatMwth(flow)} / ${formatMwth(capacity)}`))
+          // Constant, and shown as such: this is the number that decides where a heat plant
+          // can stand, and it does not fall when the pipe is idle.
+          block.appendChild(
+            this.kv(t('ui.losses'), formatMwth(pipe.standingLossMwPerKm.value * edge.lengthKm * edge.circuits)),
+          )
+          this.inspector.appendChild(block)
+          continue
+        }
         if (edge.kv === 0) continue
         const capacity = LINE_TYPES[edge.kv].capacityMw.value * edge.circuits
         const flow = Math.abs(dispatch?.lineFlowMw.get(edgeId) ?? 0)

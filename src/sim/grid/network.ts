@@ -13,6 +13,7 @@
  */
 
 import type { VoltageLevel } from '@content/lineTypes'
+import type { PipeSize } from '@content/heatPipeTypes'
 
 export type NodeId = string
 export type EdgeId = string
@@ -50,8 +51,16 @@ export interface GridEdge {
   to: NodeId
   /** Voltage level for electric edges. Heat edges carry 0. */
   kv: VoltageLevel | 0
+  /**
+   * Nominal bore for heat edges. Undefined on electric ones.
+   *
+   * A separate field rather than reusing `kv`, deliberately: DN400 pipe and 400 kV line would
+   * be the same number, and a size that silently means two different things in two different
+   * commodities is the kind of ambiguity that produces a bug nobody can find.
+   */
+  dn?: PipeSize
   lengthKm: number
-  /** Number of parallel circuits; capacity and resistance scale with it. */
+  /** Number of parallel circuits, or parallel mains for a heat edge. */
   circuits: number
   /** False while under construction or after a fault. */
   energised: boolean

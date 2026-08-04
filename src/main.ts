@@ -15,9 +15,11 @@ import { Hud, type Speed } from '@ui/hud'
 import type { BuildSelection } from '@ui/buildPanel'
 import { setLocale, t } from '@i18n/index'
 import {
+  beginHeatPipeConstruction,
   beginLineConstruction,
   beginPlantConstruction,
   mothballPlant,
+  quoteHeatPipe,
   quoteLine,
   quotePlant,
   reactivatePlant,
@@ -61,6 +63,9 @@ async function main(): Promise<void> {
     if (selection.kind === 'plant') {
       map.buildMode = { kind: 'plant', typeId: selection.typeId }
       hud.setHint(t('ui.buildHint'))
+    } else if (selection.kind === 'pipe') {
+      map.buildMode = { kind: 'pipe', dn: selection.dn, pipes: selection.pipes, fromNodeId: null }
+      hud.setHint(t('ui.pipeHint'))
     } else {
       map.buildMode = { kind: 'line', kv: selection.kv, circuits: selection.circuits, fromNodeId: null }
       hud.setHint(t('ui.lineHint'))
@@ -141,7 +146,11 @@ async function main(): Promise<void> {
     } else if (mode.fromNodeId) {
       const worldPoint = map.camera.screenToWorld(clientX - rect.left, clientY - rect.top)
       const target = map.nodeAtWorld(worldPoint.x, worldPoint.y, TILE_PX)
-      map.hoverValid = target ? quoteLine(world, mode.fromNodeId, target.id, mode.kv, mode.circuits).ok : false
+      map.hoverValid = target
+        ? mode.kind === 'pipe'
+          ? quoteHeatPipe(world, mode.fromNodeId, target.id, mode.dn, mode.pipes).ok
+          : quoteLine(world, mode.fromNodeId, target.id, mode.kv, mode.circuits).ok
+        : false
     } else {
       map.hoverValid = true
     }
@@ -190,11 +199,14 @@ async function main(): Promise<void> {
 
     if (!mode.fromNodeId) {
       mode.fromNodeId = node.id
-      hud.setHint(t('ui.lineHint'))
+      hud.setHint(t(mode.kind === 'pipe' ? 'ui.pipeHint' : 'ui.lineHint'))
       return true
     }
 
-    const result = beginLineConstruction(world, mode.fromNodeId, node.id, mode.kv, mode.circuits)
+    const result =
+      mode.kind === 'pipe'
+        ? beginHeatPipeConstruction(world, mode.fromNodeId, node.id, mode.dn, mode.pipes)
+        : beginLineConstruction(world, mode.fromNodeId, node.id, mode.kv, mode.circuits)
     if (result.ok) {
       hud.setHint(t('build.placed'))
       cancelBuild()
@@ -307,7 +319,15 @@ async function main(): Promise<void> {
     world,
     map,
     hud,
-    build: { beginPlantConstruction, beginLineConstruction, retirePlant, quotePlant, quoteLine },
+    build: {
+      beginPlantConstruction,
+      beginLineConstruction,
+      beginHeatPipeConstruction,
+      retirePlant,
+      quotePlant,
+      quoteLine,
+      quoteHeatPipe,
+    },
   }
 }
 

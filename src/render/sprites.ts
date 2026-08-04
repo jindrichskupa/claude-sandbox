@@ -91,6 +91,18 @@ function chimney(ctx: CanvasRenderingContext2D, x: number, baseY: number, height
 
 type SpritePainter = (ctx: CanvasRenderingContext2D) => void
 
+/**
+ * A lagged heat main leaving the building.
+ *
+ * The visual signature of every district heating plant, and the reason these sprites are worth
+ * drawing separately at all: a power station sends its output away invisibly on wires, a heat
+ * plant sends it away in a fat insulated pipe you can see from the road.
+ */
+function heatPipeStub(ctx: CanvasRenderingContext2D, x: number, y: number, width: number): void {
+  rect(ctx, x, y, width, 2, PALETTE.ember)
+  rect(ctx, x, y, width, 1, PALETTE.emberLight)
+}
+
 const PLANT_PAINTERS: Partial<Record<PlantTypeId, SpritePainter>> = {
   coal: (ctx) => {
     shadedBox(ctx, 2, 9, 12, 6, PALETTE.concrete, PALETTE.concreteDark, PALETTE.rockDark)
@@ -212,6 +224,40 @@ const PLANT_PAINTERS: Partial<Record<PlantTypeId, SpritePainter>> = {
     px(ctx, 12, 7, PALETTE.ember)
     px(ctx, 3, 11, PALETTE.window)
     px(ctx, 6, 11, PALETTE.window)
+    heatPipeStub(ctx, 0, 13, 3)
+  },
+
+  coal_chp: (ctx) => {
+    // The municipal heating plant: two stubby stacks over a low hall, and a fat lagged main
+    // leaving for the town. Deliberately more industrial and less tidy than the gas unit.
+    shadedBox(ctx, 2, 8, 11, 7, PALETTE.concrete, PALETTE.concreteDark, PALETTE.rockDark)
+    chimney(ctx, 4, 8, 8)
+    chimney(ctx, 7, 8, 6)
+    px(ctx, 10, 11, PALETTE.window)
+    px(ctx, 10, 13, PALETTE.windowDim)
+    heatPipeStub(ctx, 0, 12, 3)
+  },
+
+  heat_boiler: (ctx) => {
+    // Squat and unglamorous, because that is exactly what it is: a shed with two flues that
+    // earns its keep on twenty days a year.
+    shadedBox(ctx, 3, 10, 9, 5, PALETTE.steelLight, PALETTE.steel, PALETTE.steelDark)
+    chimney(ctx, 5, 10, 4)
+    chimney(ctx, 9, 10, 4)
+    heatPipeStub(ctx, 0, 13, 4)
+  },
+
+  heat_accumulator: (ctx) => {
+    // A tall cylinder of hot water, with a warm band to say what is inside it.
+    for (let row = 0; row < 10; row++) {
+      rect(ctx, 5, 14 - row, 6, 1, row > 6 ? PALETTE.steelLight : PALETTE.steel)
+      px(ctx, 5, 14 - row, PALETTE.steelLight)
+      px(ctx, 10, 14 - row, PALETTE.steelDark)
+    }
+    rect(ctx, 5, 4, 6, 1, PALETTE.steelLight)
+    rect(ctx, 6, 9, 4, 2, PALETTE.ember)
+    rect(ctx, 6, 9, 4, 1, PALETTE.emberLight)
+    heatPipeStub(ctx, 0, 13, 5)
   },
 }
 
@@ -316,6 +362,7 @@ export function buildSprites(): SpriteSet {
     ['hydro', 'hydro'],
     ['wind', 'wind'],
     ['solar', 'solar'],
+    ['heat', 'heat_boiler'],
     ['storage', 'battery'],
   ]
   for (const [category, typeId] of fallbacks) {
