@@ -18,12 +18,17 @@ import { LifecyclePhase, type CityAsset, type PlantAsset } from '@sim/assets/typ
 import { PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
 import { LINE_TYPES } from '@content/lineTypes'
 import {
+  cycleLifeUsed,
   energyCapacityMwh,
+  isCycleExhausted,
   isStorage,
   onewayEfficiency,
   planStorage,
+  ratedEnergyMwh,
   settleStorage,
 } from '@sim/dispatch/storage'
+import { lifeFraction } from '@sim/assets/aging'
+import { TICKS_PER_YEAR } from '@sim/core/time'
 
 function node(id: string, kind: GridNode['kind'], x = 0, y = 0): GridNode {
   return { id, kind, ownerId: PLAYER, x, y }
@@ -58,8 +63,13 @@ function plant(id: string, nodeId: string, typeId: PlantTypeId, storageMwh = 0):
     cumulativeStarts: 0,
     outputMw: 0,
     storageMwh,
+    cyclesUsed: 0,
     online: true,
     capexPaid: 0,
+    refurbishments: 0,
+    lifeExtension: 0,
+    efficiencyUplift: 0,
+    capacityUplift: 0,
   }
 }
 
@@ -310,5 +320,66 @@ describe('storage bookkeeping', () => {
     expect(isStorage(plant('b', 'site', 'pumped'))).toBe(true)
     expect(isStorage(plant('c', 'site', 'ccgt'))).toBe(false)
     expect(isStorage(plant('d', 'site', 'hydro'))).toBe(false)
+  })
+})
+
+describe('cycle life', () => {
+  const discharge = (p: PlantAsset, mwh: number) =>
+    settleStorage(
+      p,
+      { plantId: p.id, mode: 'discharging', chargeMw: 0, dischargeCeilingMw: mwh, offerPricePerMwh: 0 },
+      mwh,
+    )
+
+  it('counts cycles by energy through the store, not by times emptied', () => {
+    const rated = PLANT_TYPES.battery.storage!.energyMwh.value
+    const eta = onewayEfficiency(plant('a', 'site', 'battery'))
+
+    // One full discharge.
+    const whole = plant('a', 'site', 'battery', rated)
+    discharge(whole, rated * eta)
+
+    // The same energy taken in four quarters.
+    const quarters = plant('b', 'site', 'battery', rated)
+    for (let i = 0; i < 4; i++) discharge(quarters, (rated * eta) / 4)
+
+    expect(whole.cyclesUsed).toBeCloseTo(1, 3)
+    expect(quarters.cyclesUsed).toBeCloseTo(whole.cyclesUsed, 3)
+  })
+
+  it('fades capacity as cycles are spent', () => {
+    const battery = plant('a', 'site', 'battery', 0)
+    const rated = ratedEnergyMwh(battery)
+    expect(energyCapacityMwh(battery)).toBeCloseTo(rated, 6)
+
+    battery.cyclesUsed = PLANT_TYPES.battery.storage!.cycleLife!.value
+    const fade = PLANT_TYPES.battery.storage!.capacityFadeOverLife!.value
+    expect(energyCapacityMwh(battery)).toBeCloseTo(rated * (1 - fade), 6)
+    expect(cycleLifeUsed(battery)).toBeCloseTo(1, 6)
+    expect(isCycleExhausted(battery)).toBe(true)
+  })
+
+  it('makes cycling, not the calendar, the binding constraint on a hard-worked battery', () => {
+    const battery = plant('a', 'site', 'battery', 0)
+    // Five years old — a third of its calendar life — but cycled almost to its limit.
+    const fiveYears = 5 * TICKS_PER_YEAR
+    battery.commissionedTick = 0
+    battery.cyclesUsed = PLANT_TYPES.battery.storage!.cycleLife!.value * 0.9
+
+    const calendarOnly = 5 / PLANT_TYPES.battery.designLifeYears.value
+    expect(lifeFraction(battery, fiveYears)).toBeCloseTo(0.9, 2)
+    expect(lifeFraction(battery, fiveYears)).toBeGreaterThan(calendarOnly)
+  })
+
+  it('leaves pumped storage unworn by cycling', () => {
+    const pumped = plant('a', 'site', 'pumped', 1800)
+    expect(cycleLifeUsed(pumped)).toBeNull()
+    expect(isCycleExhausted(pumped)).toBe(false)
+
+    discharge(pumped, 1000)
+    expect(pumped.cyclesUsed).toBeGreaterThan(0)
+    // Cycles are counted for every store, but only some are worn out by them.
+    expect(energyCapacityMwh(pumped)).toBeCloseTo(ratedEnergyMwh(pumped), 6)
+    expect(lifeFraction(pumped, TICKS_PER_YEAR * 5)).toBeCloseTo(5 / 80, 3)
   })
 })

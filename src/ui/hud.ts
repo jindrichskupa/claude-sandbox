@@ -17,8 +17,9 @@ import { ageYears } from '@sim/assets/aging'
 import { Layer, LAYER_KEYS, Op, Param, PARAM_KEYS, type Explanation } from '@sim/params/types'
 import { drawLoadCurve, drawMix, drawPrice } from './charts'
 import { nodeLabel } from '@render/mapView'
+import { quoteRefurbishment, refurbishmentGains } from '@sim/build/commands'
 import { BuildPanel, type BuildSelection } from './buildPanel'
-import { energyCapacityMwh, isStorage } from '@sim/dispatch/storage'
+import { cycleLifeUsed, energyCapacityMwh, isStorage, ratedEnergyMwh } from '@sim/dispatch/storage'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 
 const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
@@ -30,6 +31,7 @@ export interface HudCallbacks {
   onSelectBuild: (selection: BuildSelection) => void
   onRetire: (plantId: string) => void
   onMothball: (plantId: string, mothball: boolean) => void
+  onRefurbish: (plantId: string) => void
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -318,6 +320,11 @@ export class Hud {
         this.kv(t('ui.age'), `${ageYears(plant, this.world.tick).toFixed(0)} ${t('ui.years')} / ${type.designLifeYears.value}`),
       )
       block.appendChild(this.kv(t('ui.condition'), formatPct(plant.conditionPct)))
+      if (plant.refurbishments > 0) {
+        block.appendChild(
+          this.kv(t('ui.refurbished'), t('ui.refurbishedTimes', { times: plant.refurbishments })),
+        )
+      }
 
       // A unit can be nominally "operating" and still not be generating, because it has
       // tripped. Saying "Operating" in that case would be true and useless.
@@ -329,7 +336,11 @@ export class Hud {
 
       // Anything with a countdown gets a progress bar, because "under construction" without
       // a date is not information the player can plan around.
-      if (plant.phase === LifecyclePhase.Building || plant.phase === LifecyclePhase.Decommissioning) {
+      if (
+        plant.phase === LifecyclePhase.Building ||
+        plant.phase === LifecyclePhase.Decommissioning ||
+        plant.phase === LifecyclePhase.Refurbishing
+      ) {
         const remaining = Math.max(0, plant.phaseEndsTick - this.world.tick)
         const months = Math.ceil(remaining / TICKS_PER_MONTH)
         block.appendChild(this.kv(t('ui.buildProgress'), t('ui.completesIn', { months })))
@@ -346,6 +357,17 @@ export class Hud {
         block.appendChild(
           this.kv(t('ui.storage'), `${plant.storageMwh.toFixed(0)} / ${capacityMwh.toFixed(0)} MWh`),
         )
+
+        // Where a store's life is measured in cycles, that is the number that matters, and
+        // the faded capacity is the visible consequence of having spent them.
+        const used = cycleLifeUsed(plant)
+        if (used !== null) {
+          block.appendChild(this.kv(t('ui.cycleLife'), `${formatPct(used)} ${t('ui.used')}`))
+          const rated = ratedEnergyMwh(plant)
+          if (capacityMwh < rated - 0.5) {
+            block.appendChild(this.kv(t('ui.capacityFade'), `${formatPct(1 - capacityMwh / rated)}`))
+          }
+        }
         const plan = this.world.lastStoragePlans.get(plant.id)
         if (plan && plan.mode !== 'idle') {
           block.appendChild(this.kv('', t(plan.mode === 'charging' ? 'ui.charging' : 'ui.discharging')))
@@ -385,6 +407,24 @@ export class Hud {
   /** Retire and mothball, offered only where they actually apply. */
   private plantActions(plant: { id: string; phase: LifecyclePhase }): HTMLDivElement {
     const row = el('div', 'asset-actions')
+
+    // Refurbishment is offered only where it is actually available, and with what it would
+    // buy, because "overhaul" without a number is not a decision the player can make.
+    const refurbQuote = quoteRefurbishment(this.world, plant.id)
+    if (refurbQuote.ok) {
+      const gains = refurbishmentGains(this.world, plant.id)
+      const refurbish = el('button', undefined, t('ui.refurbish'))
+      if (gains) {
+        refurbish.title = t('ui.refurbishGains', {
+          years: gains.lifeYears.toFixed(0),
+          cost: formatMoney(refurbQuote.totalCost),
+          months: Math.round(refurbQuote.buildTicks / TICKS_PER_MONTH),
+        })
+      }
+      refurbish.addEventListener('click', () => this.callbacks.onRefurbish(plant.id))
+      row.appendChild(refurbish)
+    }
+
     if (plant.phase === LifecyclePhase.Operating) {
       const mothball = el('button', undefined, t('ui.mothball'))
       mothball.addEventListener('click', () => this.callbacks.onMothball(plant.id, true))

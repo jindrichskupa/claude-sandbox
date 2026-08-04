@@ -52,9 +52,14 @@ export enum Param {
   CarbonPricePerTonne,
   /** Price the utility receives per MWh sold. */
   TariffPerMwh,
+  /**
+   * Guaranteed price a plant is paid per MWh regardless of the market, as under a feed-in
+   * tariff or a contract for difference. Zero for everything unsubsidised.
+   */
+  FeedInTariffPerMwh,
 }
 
-export const PARAM_COUNT = 14
+export const PARAM_COUNT = 15
 
 /** Stable display keys, used by the inspector and by tests. */
 export const PARAM_KEYS: Record<Param, string> = {
@@ -72,6 +77,7 @@ export const PARAM_KEYS: Record<Param, string> = {
   [Param.LineCapacityMw]: 'param.lineCapacity',
   [Param.CarbonPricePerTonne]: 'param.carbonPrice',
   [Param.TariffPerMwh]: 'param.tariff',
+  [Param.FeedInTariffPerMwh]: 'param.feedInTariff',
 }
 
 /**
@@ -94,6 +100,7 @@ export const PARAM_BOUNDS: Record<Param, { min: number; max: number }> = {
   [Param.LineCapacityMw]: { min: 0, max: Infinity },
   [Param.CarbonPricePerTonne]: { min: 0, max: Infinity },
   [Param.TariffPerMwh]: { min: 0, max: Infinity },
+  [Param.FeedInTariffPerMwh]: { min: 0, max: Infinity },
 }
 
 /**

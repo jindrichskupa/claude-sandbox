@@ -14,7 +14,27 @@ npm test           # unit and scenario tests
 npm run smoke      # launch the built game in a browser and screenshot it
 ```
 
-## What exists today (milestones 1-2)
+## What exists today (milestones 1-3)
+
+- **The map is a constraint.** Each technology is sited by what it physically needs: a
+  run-of-river station wants a river, a steam plant wants cooling water within reach, a
+  nuclear station wants distance from population, panels want flat ground, turbines want an
+  exposed ridge, and a lignite plant is built on top of its own seam. The placement overlay
+  shades what is refused and tints what is good, so a merely legal site can be told from a
+  worthwhile one before committing.
+- **Storage plans forward.** Weather is a pure function of the tick, so the simulation
+  forecasts residual load 36 hours out and each store claims exactly as many of the slackest
+  and tightest hours as its duration allows. That is what separates a two-hour battery from a
+  six-hour pumped station rather than a single "storage" stereotype.
+- **Batteries wear out by cycling.** Life is whichever of calendar and cycle count runs out
+  first, capacity fades as cycles are spent, and working a store hard for arbitrage revenue
+  visibly shortens it.
+- **Prices can go below zero.** A generator on a guaranteed tariff forfeits it by being
+  curtailed, so it bids negative to stay on — which is why real markets with subsidised
+  renewables clear below zero.
+- **Plants can be overhauled.** Mid-life refurbishment restores condition, extends life and
+  usually leaves the machine better than new, at a fraction of a rebuild and with the unit out
+  of service meanwhile. Diminishing returns, and two rebuilds is the limit.
 
 - **You can build.** Place power stations on legal ground, string transmission lines between
   substations, and retire or mothball what you have inherited. Capital is spent across the
@@ -73,19 +93,19 @@ the sequence of anything that already exists.
 src/
   sim/          simulation core — pure TypeScript, no renderer, no DOM
     grid/       network topology and island detection
-    dispatch/   min-cost flow solver, hourly dispatch, storage policy
-    build/      construction, retirement, and the quotes behind them
+    dispatch/   min-cost flow solver, hourly dispatch, forecast, storage policy
+    build/      construction, refurbishment, retirement, siting rules
     weather/    seeded weather and its parameter effects
     assets/     lifecycle and ageing
     params/     the modifier pipeline — the spine of the whole model
     economy/    costs, revenue, settlement
-    map/        terrain, siting rules and route costs
+    map/        terrain, rivers, wind exposure and route costs
   content/      data with provenance: technologies, fuels, lines, scenarios
   render/       PixiJS map, camera, flow animation
   ui/           HTML overlay: panels, charts, build menu, the explanation inspector
   i18n/         t() and the English dictionary
 tests/          Vitest
-scripts/        probe.ts (balance diagnostics), smoke.mjs (browser test)
+scripts/        probe.ts and storageCompare.ts (diagnostics), smoke.mjs (browser test)
 ```
 
 ## Controls
@@ -94,33 +114,45 @@ Drag to pan, scroll to zoom, click a node to inspect it. `B` opens the build pan
 technology, then click a site; for a line, click the two substations in turn. Right-click or
 `Esc` abandons a placement. Space pauses; `1` `2` `3` set speed.
 
+## Measuring this simulation
+
+A note that cost real work to learn, recorded so the next person does not repeat it.
+
+Unserved energy in this scenario is driven by rare coincidences of forced outages, and it is
+**wildly noisy**: across seeds its standard deviation is roughly equal to its mean, and two
+runs of the identical configuration can differ by an order of magnitude. An earlier version of
+this README stated, from a single-run comparison, that a 50 MW battery made unserved energy
+worse than having no storage at all. That claim was wrong — the difference it rested on was
+far inside the noise. Repeated properly, paired across twelve seeds and five years, the
+battery *reduces* unserved energy by about 7% (−1223 ± 560 MWh), and the effect of pumped
+storage still cannot be resolved at that sample size.
+
+So: `scripts/storageCompare.ts` runs every arm on the same seeds, reports the paired
+difference with its standard error, and labels anything inside two standard errors as noise.
+Single-run comparisons of this quantity mean nothing.
+
 ## Known gaps
 
 Stated plainly, because they are the difference between what the simulation looks like it
 models and what it actually models:
 
-- **Siting is one rule for every technology.** Water and mountains are refused and that is
-  all. A hydro station does not need a river, a nuclear station does not need cooling water
-  or distance from a city, and a lignite plant does not need a mine.
-- **Storage decides reactively, not by looking ahead.** The policy reads the recent price
-  distribution, so it chases small spreads and can be empty when the expensive hour arrives.
-  Measured over two years, a 50 MW battery makes unserved energy *worse* than having no
-  storage at all, while 300 MW of pumped storage more than halves it. Anticipation, not a
-  better threshold, is the fix.
-- **Battery life is calendar-only.** Real cells wear out by cycles, and the current policy
-  runs about 370 full cycles a year — enough that cycle life, not the 15-year figure, would
-  bind first.
 - **Lines are drawn substation to substation as straight lines.** No route drawing, no
   pylons, no following terrain.
-- **Refurbishment does not exist.** `LifecyclePhase.Refurbishing` is declared and never used,
-  so the only answers to an ageing plant are "run it into the ground" or "replace it".
-- **Graphics are placeholder.** Coloured squares and circles.
+- **Graphics are placeholder.** Coloured squares and circles; pixel art is the intent.
+- **Costs do not move with time.** A technology built in 2020 costs what its source year says
+  it cost, so `availableFromYear` prevents the obvious absurdities but a learning curve is
+  what would actually make the timeline honest.
+- **Solar geometry has no latitude.** Day length, sunrise, sunset, peak elevation and panel
+  temperature all vary through the year, but latitude is not a scenario parameter and there
+  is no true solar azimuth, panel tilt or tracking.
+- **Feed-in tariffs are a flat scenario setting.** The mechanism behind negative prices is
+  real, but tariffs do not yet arrive, change, or get withdrawn — that is the policy
+  milestone, and the withdrawal is the interesting half.
 
 ## Roadmap
 
 | Milestone | Content |
 |---|---|
-| M3 | Forecast-driven storage; per-technology siting rules; battery cycle life; refurbishment and uprating |
 | M4 | Pixel-art tileset; route-drawn transmission lines with pylons |
 | M5 | District heating and cogeneration; the event and disaster system |
 | M6 | Subsidies and their withdrawal, taxes, carbon pricing, elections, fuel geopolitics |
@@ -132,17 +164,6 @@ The data model already carries the hooks these need — `ownerId` on every asset
 `commodity` tag on every edge, the full weather struct, and lifecycle fields — so they are
 additions rather than rewrites.
 
-### Notes on the next few
-
-**Siting** wants a per-technology predicate rather than one global `isBuildable`: adjacency to
-water for cooling and for hydro, the terrain's existing `windIndex` for wind, flat open ground
-for solar, distance from population for nuclear, a fuel source for lignite. The terrain layer
-already carries elevation and a wind index; what is missing is rivers and a rule table.
-
-**Solar geometry** is already better than "day or night": day length, sunrise, sunset and peak
-elevation all vary through the year, and panel output falls as cells heat up. What it does not
-have is latitude as a scenario parameter, a real solar azimuth, or panel tilt and tracking.
-
-**Storage variety** beyond lithium and pumped hydro — flow batteries, compressed air, hydrogen,
-thermal — is mostly a content question once duration and round-trip efficiency drive the
-choice, which they now do. `StorageSpec` already carries both.
+**Storage variety** beyond lithium and pumped hydro — flow batteries, compressed air,
+hydrogen, thermal — is now mostly a content question, since duration, round-trip efficiency
+and cycle life all drive the choice. `StorageSpec` carries all three.

@@ -30,6 +30,7 @@ export function toScenarioDef(content: ScenarioContent): ScenarioDef {
     tariffPerMwh: content.tariffPerMwh,
     carbonPricePerTonne: content.carbonPricePerTonne,
     objectives: content.objectives,
+    feedInTariffs: content.feedInTariffs ?? {},
   }
 }
 
@@ -96,8 +97,13 @@ export function buildWorld(content: ScenarioContent): World {
       cumulativeStarts: Math.round(spec.ageYears * 30),
       outputMw: 0,
       storageMwh: 0,
+      cyclesUsed: 0,
       online: true,
       capexPaid: type.capexPerKw.value * type.capacityMw.value * 1000,
+      refurbishments: 0,
+      lifeExtension: 0,
+      efficiencyUplift: 0,
+      capacityUplift: 0,
     }
     // Start on the ageing curve rather than pristine — these units have a history.
     plant.conditionPct = expectedCondition(plant, 0)

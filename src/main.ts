@@ -21,6 +21,7 @@ import {
   quoteLine,
   quotePlant,
   reactivatePlant,
+  refurbishPlant,
   retirePlant,
 } from '@sim/build/commands'
 
@@ -81,6 +82,11 @@ async function main(): Promise<void> {
     onRetire: (plantId) => {
       const result = retirePlant(world, plantId)
       hud.setHint(result.ok ? t('build.retiring') : t(result.quote.reasonKey ?? 'build.notRetirable'))
+      hud.update()
+    },
+    onRefurbish: (plantId) => {
+      const result = refurbishPlant(world, plantId)
+      hud.setHint(result.ok ? t('build.refurbishing') : t(result.quote.reasonKey ?? 'build.notRefurbishable'))
       hud.update()
     },
     onMothball: (plantId, mothball) => {

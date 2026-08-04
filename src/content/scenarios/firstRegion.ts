@@ -67,6 +67,15 @@ export interface ScenarioContent {
   plants: PlantSpec[]
   lines: LineSpec[]
   objectives: Array<{ id: string; descriptionKey: string }>
+  /**
+   * Guaranteed price per MWh paid to a technology regardless of the market, by type.
+   *
+   * This is the mechanism behind negative prices: a plant on a guaranteed tariff forfeits it
+   * by being curtailed, so it will bid below zero to stay on. Here it is a flat scenario
+   * setting; the policy milestone will make it something that arrives, changes and gets
+   * withdrawn, which is what makes it interesting.
+   */
+  feedInTariffs?: Partial<Record<PlantTypeId, number>>
 }
 
 export const FIRST_REGION: ScenarioContent = {
@@ -172,6 +181,8 @@ export const FIRST_REGION: ScenarioContent = {
     { id: 'l_millbrook_rivermouth', from: 'n_millbrook', to: 'n_rivermouth', kv: 110, circuits: 1 },
     { id: 'l_rivermouth_southbay', from: 'n_rivermouth', to: 'n_southbay', kv: 110, circuits: 2 },
   ],
+
+  feedInTariffs: {},
 
   objectives: [
     { id: 'keep-lights-on', descriptionKey: 'objective.keepLightsOn' },

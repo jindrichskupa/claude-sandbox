@@ -13,21 +13,32 @@ import {
   mothballPlant,
   quoteLine,
   quotePlant,
+  quoteRefurbishment,
   reactivatePlant,
+  refurbishPlant,
   retirePlant,
 } from '@sim/build/commands'
 import { isBuildable, routeCostFactor } from '@sim/map/terrain'
+import { judgeSite } from '@sim/build/siting'
+import { lifeFraction } from '@sim/assets/aging'
+import { Param } from '@sim/params/types'
 import { PLANT_TYPES } from '@content/plantTypes'
 
 const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 
-/** Find somewhere the scenario will actually accept a station. */
-function freeSite(world: ReturnType<typeof buildWorld>): { x: number; y: number } {
+/** Find somewhere the scenario will actually accept a station of this type. */
+function freeSite(world: ReturnType<typeof buildWorld>, typeId: 'ccgt' | 'ocgt' | 'nuclear' = 'ccgt') {
   for (let y = 0; y < world.scenario.mapHeight; y++) {
     for (let x = 0; x < world.scenario.mapWidth; x++) {
-      if (!isBuildable(world.terrain, x, y)) continue
       if (world.nodeNear(x, y, 1.5)) continue
-      return { x, y }
+      const verdict = judgeSite(typeId, {
+        terrain: world.terrain,
+        network: world.network,
+        cities: world.cities,
+        x,
+        y,
+      })
+      if (verdict.ok) return { x, y }
     }
   }
   throw new Error('the scenario has nowhere to build, which is itself a bug')
@@ -137,7 +148,7 @@ describe('building a plant', () => {
     const world = buildWorld(FIRST_REGION)
     world.finances.cash = 1_000_000
     world.finances.trailingRevenue = 0
-    const site = freeSite(world)
+    const site = freeSite(world, 'nuclear')
     const quote = quotePlant(world, 'nuclear', site.x, site.y)
     expect(quote.ok).toBe(false)
     expect(quote.reasonKey).toBe('build.cannotAfford')
@@ -277,5 +288,103 @@ describe('a built plant actually helps', () => {
     const result = beginPlantConstruction(world, 'ccgt', site.x, site.y)
     const months = result.quote.buildTicks / TICKS_PER_MONTH
     expect(months).toBeCloseTo(PLANT_TYPES.ccgt.buildTimeMonths.value, 0)
+  })
+})
+
+describe('refurbishment', () => {
+  it('refuses a plant that is too new to be worth overhauling', () => {
+    const world = buildWorld(FIRST_REGION)
+    // Eastfield is twelve years into a thirty-year life.
+    const quote = quoteRefurbishment(world, 'p_eastfield')
+    expect(quote.ok).toBe(false)
+    expect(quote.reasonKey).toBe('build.tooNewToRefurbish')
+  })
+
+  it('offers an overhaul on a worn-out plant, and takes it out of service meanwhile', () => {
+    const world = buildWorld(FIRST_REGION)
+    const plant = world.getPlant('p_oldharbour')!
+    const quote = quoteRefurbishment(world, plant.id)
+    expect(quote.ok).toBe(true)
+    // Cheaper than building new, which is the whole point.
+    const newBuild = PLANT_TYPES.coal.capexPerKw.value * PLANT_TYPES.coal.capacityMw.value * 1000
+    expect(quote.totalCost).toBeLessThan(newBuild * 0.6)
+
+    const result = refurbishPlant(world, plant.id)
+    expect(result.ok).toBe(true)
+    expect(plant.phase).toBe(LifecyclePhase.Refurbishing)
+
+    world.step()
+    expect(world.lastDispatch!.generationMw.get(plant.id) ?? 0).toBeCloseTo(0, 6)
+    expect(world.openLedger.capex).toBeGreaterThan(0)
+  })
+
+  it('returns the plant better than it was, and with more life left', () => {
+    const world = buildWorld(FIRST_REGION)
+    const plant = world.getPlant('p_oldharbour')!
+
+    const conditionBefore = plant.conditionPct
+    const efficiencyBefore = world.params.get(plant.id, Param.Efficiency)
+    const capacityBefore = world.params.get(plant.id, Param.CapacityMw)
+    const lifeBefore = lifeFraction(plant, world.tick)
+
+    const result = refurbishPlant(world, plant.id)
+    for (let i = 0; i < result.quote.buildTicks; i++) world.step()
+
+    expect(plant.phase).toBe(LifecyclePhase.Operating)
+    expect(plant.online).toBe(true)
+    expect(plant.refurbishments).toBe(1)
+    expect(plant.conditionPct).toBeGreaterThan(conditionBefore)
+    expect(world.params.get(plant.id, Param.Efficiency)).toBeGreaterThan(efficiencyBefore)
+    expect(world.params.get(plant.id, Param.CapacityMw)).toBeGreaterThan(capacityBefore)
+    // Older in years, but a smaller fraction of a life that is now longer.
+    expect(lifeFraction(plant, world.tick)).toBeLessThan(lifeBefore)
+  })
+
+  it('gives diminishing returns and eventually refuses a third rebuild', () => {
+    const world = buildWorld(FIRST_REGION)
+    const plant = world.getPlant('p_oldharbour')!
+
+    const first = refurbishPlant(world, plant.id)
+    for (let i = 0; i < first.quote.buildTicks; i++) world.step()
+    const firstGain = plant.lifeExtension
+
+    // Age it back into refurbishable territory.
+    plant.conditionPct = 0.4
+    plant.commissionedTick -= TICKS_PER_YEAR * 30
+
+    const second = refurbishPlant(world, plant.id)
+    expect(second.ok).toBe(true)
+    // The second overhaul costs more than the first.
+    expect(second.quote.totalCost).toBeGreaterThan(first.quote.totalCost)
+    for (let i = 0; i < second.quote.buildTicks; i++) world.step()
+
+    // ...and buys less.
+    expect(plant.lifeExtension - firstGain).toBeLessThan(firstGain)
+    expect(plant.refurbishments).toBe(2)
+
+    plant.commissionedTick -= TICKS_PER_YEAR * 30
+    const third = refurbishPlant(world, plant.id)
+    expect(third.ok).toBe(false)
+    expect(third.quote.reasonKey).toBe('build.alreadyRebuilt')
+  })
+
+  it('gives a battery a fresh set of cells', () => {
+    const world = buildWorld({ ...FIRST_REGION, startYear: 2020 })
+    const site = freeSite(world)
+    const built = beginPlantConstruction(world, 'battery', site.x, site.y)
+    expect(built.ok).toBe(true)
+    const plant = world.getPlant(built.plantId!)!
+    for (let i = 0; i < built.quote.buildTicks; i++) world.step()
+
+    // Worked most of the way through its cycle life.
+    plant.cyclesUsed = PLANT_TYPES.battery.storage!.cycleLife!.value * 0.85
+    expect(lifeFraction(plant, world.tick)).toBeGreaterThan(0.8)
+
+    const result = refurbishPlant(world, plant.id)
+    expect(result.ok).toBe(true)
+    for (let i = 0; i < result.quote.buildTicks; i++) world.step()
+
+    expect(plant.cyclesUsed).toBe(0)
+    expect(lifeFraction(plant, world.tick)).toBeLessThan(0.2)
   })
 })

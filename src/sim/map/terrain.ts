@@ -24,6 +24,12 @@ export interface TerrainMap {
   elevation: Float32Array
   /** Wind exposure 0..1, driven by elevation and openness. */
   windIndex: Float32Array
+  /**
+   * Flow accumulation, 0..1. Rivers are where it is high. Storing the continuous field
+   * rather than a boolean lets a big river and a stream be different things: a run-of-river
+   * station wants the former, a cooling tower will settle for the latter.
+   */
+  riverIndex: Float32Array
 }
 
 function valueNoise2D(seed: number, x: number, y: number): number {
@@ -68,6 +74,7 @@ export function generateTerrain(seed: number, width: number, height: number): Te
   const tiles = new Uint8Array(width * height)
   const elevation = new Float32Array(width * height)
   const windIndex = new Float32Array(width * height)
+  const riverIndex = new Float32Array(width * height)
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -86,12 +93,147 @@ export function generateTerrain(seed: number, width: number, height: number): Te
       else tile = Tile.Mountain
       tiles[i] = tile
 
-      // Exposed high ground catches more wind; valleys and forests less.
-      windIndex[i] = Math.max(0, Math.min(1, e * 0.8 + fbm(base + 104729, x / 17, y / 17) * 0.35))
+      // Wind exposure is filled in below, once the whole elevation field exists.
     }
   }
 
-  return { width, height, tiles, elevation, windIndex }
+  computeWindExposure(base, width, height, elevation, tiles, windIndex)
+  carveRivers(width, height, elevation, tiles, riverIndex)
+  return { width, height, tiles, elevation, windIndex, riverIndex }
+}
+
+/**
+ * Wind exposure.
+ *
+ * The first version of this used absolute elevation, which was wrong and — worse — produced
+ * an index so narrow (0.34 to 0.85, clustered near the middle) that no threshold could
+ * separate a good site from a bad one. What matters is not how high the ground is but how
+ * high it stands *relative to what surrounds it*: a ridge is exposed, and a valley floor at
+ * the same altitude is sheltered by the hills on either side. Prominence captures that, and
+ * it gives the contrast a siting rule needs to mean anything.
+ */
+function computeWindExposure(
+  seed: number,
+  width: number,
+  height: number,
+  elevation: Float32Array,
+  tiles: Uint8Array,
+  windIndex: Float32Array,
+): void {
+  const radius = 3
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x
+      const here = elevation[i]!
+
+      let sum = 0
+      let n = 0
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+          sum += elevation[ny * width + nx]!
+          n++
+        }
+      }
+      const prominence = here - sum / Math.max(1, n)
+
+      // Trees take the energy out of the lowest hundred metres of the atmosphere.
+      const forestPenalty = tiles[i] === Tile.Forest ? 0.14 : 0
+      // A little noise so identical terrain is not identically rated.
+      const roughness = (fbm(seed + 104729, x / 19, y / 19) - 0.5) * 0.16
+
+      windIndex[i] = Math.max(0, Math.min(1, 0.5 + prominence * 4.5 - forestPenalty + roughness))
+    }
+  }
+}
+
+/**
+ * Water runs downhill and gathers. Each tile sends its flow to its lowest neighbour, and
+ * repeating that from the highest ground down accumulates a drainage network — so rivers end
+ * up in the valleys where they belong instead of being scattered noise, and they get larger
+ * as they descend.
+ */
+function carveRivers(
+  width: number,
+  height: number,
+  elevation: Float32Array,
+  tiles: Uint8Array,
+  riverIndex: Float32Array,
+): void {
+  const flow = new Float32Array(width * height).fill(1)
+
+  // Highest first, so a tile's own inflow is final before it passes anything on.
+  const order = Array.from({ length: width * height }, (_, i) => i).sort(
+    (a, b) => elevation[b]! - elevation[a]!,
+  )
+
+  for (const i of order) {
+    const x = i % width
+    const y = (i / width) | 0
+    if (tiles[i] === Tile.Water) continue
+
+    let lowest = -1
+    let lowestElevation = elevation[i]!
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue
+        const nx = x + dx
+        const ny = y + dy
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+        const n = ny * width + nx
+        if (elevation[n]! < lowestElevation) {
+          lowestElevation = elevation[n]!
+          lowest = n
+        }
+      }
+    }
+    if (lowest >= 0) flow[lowest]! += flow[i]!
+  }
+
+  // Compress: drainage is extremely skewed, so a log scale is what makes it legible.
+  let maxFlow = 1
+  for (const f of flow) maxFlow = Math.max(maxFlow, f)
+  const denominator = Math.log(1 + maxFlow)
+  for (let i = 0; i < flow.length; i++) {
+    riverIndex[i] = tiles[i] === Tile.Water ? 1 : Math.log(1 + flow[i]!) / denominator
+  }
+}
+
+/** Drainage at a tile, 0..1. Anything above about 0.55 reads as a river. */
+export function riverIndexAt(map: TerrainMap, x: number, y: number): number {
+  return map.riverIndex[indexAt(map, x, y)] ?? 0
+}
+
+/** How much water is available within `radius` tiles: the best of the neighbourhood. */
+export function waterAvailability(map: TerrainMap, x: number, y: number, radius = 2): number {
+  let best = 0
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (Math.hypot(dx, dy) > radius) continue
+      best = Math.max(best, riverIndexAt(map, x + dx, y + dy))
+    }
+  }
+  return best
+}
+
+/** Flatness of the ground around a site, 0..1, where 1 is a billiard table. */
+export function flatness(map: TerrainMap, x: number, y: number, radius = 1): number {
+  const centre = elevationAt(map, x, y)
+  let worst = 0
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      worst = Math.max(worst, Math.abs(elevationAt(map, x + dx, y + dy) - centre))
+    }
+  }
+  return Math.max(0, 1 - worst * 8)
+}
+
+function indexAt(map: TerrainMap, x: number, y: number): number {
+  const cx = Math.max(0, Math.min(map.width - 1, Math.round(x)))
+  const cy = Math.max(0, Math.min(map.height - 1, Math.round(y)))
+  return cy * map.width + cx
 }
 
 export function tileAt(map: TerrainMap, x: number, y: number): Tile {
@@ -103,12 +245,6 @@ export function tileAt(map: TerrainMap, x: number, y: number): Tile {
 export function isBuildable(map: TerrainMap, x: number, y: number): boolean {
   const t = tileAt(map, x, y)
   return t !== Tile.Water && t !== Tile.Mountain
-}
-
-function indexAt(map: TerrainMap, x: number, y: number): number {
-  const cx = Math.max(0, Math.min(map.width - 1, Math.round(x)))
-  const cy = Math.max(0, Math.min(map.height - 1, Math.round(y)))
-  return cy * map.width + cx
 }
 
 /** Wind exposure of a site, 0..1. */

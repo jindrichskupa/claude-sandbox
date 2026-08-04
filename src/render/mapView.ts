@@ -15,7 +15,9 @@ import { PLANT_TYPES } from '@content/plantTypes'
 import type { World } from '@sim/world'
 import type { GridEdge, GridNode } from '@sim/grid/network'
 import { isDispatchable } from '@sim/assets/types'
-import { isBuildable, Tile, type TerrainMap } from '@sim/map/terrain'
+import { Tile, type TerrainMap } from '@sim/map/terrain'
+import { judgeSite } from '@sim/build/siting'
+import type { PlantTypeId } from '@content/plantTypes'
 import { Camera } from './camera'
 import { t } from '@i18n/index'
 
@@ -85,6 +87,9 @@ export class MapView {
   selectedNodeId: string | null = null
 
   buildMode: BuildMode = null
+  /** Per-tile suitability for whatever is being placed. Recomputed only when that changes. */
+  private siteMask: Float32Array | null = null
+  private siteMaskFor: string | null = null
   /** Tile under the cursor, in tile coordinates. */
   hoverTile: { x: number; y: number } | null = null
   /** Set by the UI so the ghost can show whether the placement would be accepted. */
@@ -358,12 +363,21 @@ export class MapView {
     if (!mode) return
 
     if (mode.kind === 'plant') {
-      // Shade the ground that cannot take a station, so the rule is visible rather than
-      // discovered by having a click refused.
+      // Shade what this particular technology cannot use, and tint what it can by how well it
+      // suits — a legal site and a good site are different things, and the player should be
+      // able to see which is which before committing eight years and a billion euros.
+      const mask = this.siteMaskForType(mode.typeId as PlantTypeId)
       for (let y = 0; y < this.terrain.height; y++) {
         for (let x = 0; x < this.terrain.width; x++) {
-          if (isBuildable(this.terrain, x, y)) continue
-          g.rect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX).fill({ color: 0x000000, alpha: 0.35 })
+          const quality = mask[y * this.terrain.width + x]!
+          if (quality < 0) {
+            g.rect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX).fill({ color: 0x000000, alpha: 0.45 })
+          } else if (quality > 0.05) {
+            g.rect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX).fill({
+              color: 0x5fc27e,
+              alpha: 0.08 + quality * 0.28,
+            })
+          }
         }
       }
       const hover = this.hoverTile
@@ -371,8 +385,8 @@ export class MapView {
         const cx = hover.x * TILE_PX + TILE_PX / 2
         const cy = hover.y * TILE_PX + TILE_PX / 2
         const colour = this.hoverValid ? 0x5fc27e : 0xe2483d
-        g.rect(hover.x * TILE_PX, hover.y * TILE_PX, TILE_PX, TILE_PX).fill({ color: colour, alpha: 0.3 })
-        g.circle(cx, cy, 16).stroke({ width: 2, color: colour, alpha: 0.9 })
+        g.rect(hover.x * TILE_PX, hover.y * TILE_PX, TILE_PX, TILE_PX).fill({ color: colour, alpha: 0.35 })
+        g.circle(cx, cy, 16).stroke({ width: 2, color: colour, alpha: 0.95 })
       }
       return
     }
@@ -406,6 +420,34 @@ export class MapView {
         )
       }
     }
+  }
+
+  /**
+   * Suitability of every tile for a technology: negative where it cannot be built, otherwise
+   * the site quality. Cached, because judging twelve hundred tiles every frame would be
+   * wasteful when the answer only changes when the player picks a different technology or
+   * builds something.
+   */
+  private siteMaskForType(typeId: PlantTypeId): Float32Array {
+    const key = `${typeId}|${this.world.network.topologyEpoch}`
+    if (this.siteMask && this.siteMaskFor === key) return this.siteMask
+
+    const mask = new Float32Array(this.terrain.width * this.terrain.height)
+    for (let y = 0; y < this.terrain.height; y++) {
+      for (let x = 0; x < this.terrain.width; x++) {
+        const verdict = judgeSite(typeId, {
+          terrain: this.terrain,
+          network: this.world.network,
+          cities: this.world.cities,
+          x,
+          y,
+        })
+        mask[y * this.terrain.width + x] = verdict.ok ? verdict.quality : -1
+      }
+    }
+    this.siteMask = mask
+    this.siteMaskFor = key
+    return mask
   }
 
   /** Tile coordinates under a screen point. */

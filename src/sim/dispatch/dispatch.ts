@@ -57,13 +57,20 @@ export function marginalCostPerMwh(plant: PlantAsset, params: Params, carbonPric
   const varOpex = params.get(plant.id, Param.VarOpexPerMwh)
   const fuel = FUELS[type.fuel]
 
-  if (type.fuel === 'none') return varOpex
+  // A guaranteed price paid outside the market changes what a plant is willing to bid, not
+  // what it costs to run. A unit on a feed-in tariff of 80 with a variable cost of 1 will pay
+  // up to 79 to stay on rather than be curtailed, because being curtailed forfeits the
+  // tariff. That is why real markets with subsidised renewables clear below zero, and it is
+  // the mechanism, not a special case.
+  const subsidy = params.getOr(plant.id, Param.FeedInTariffPerMwh, 0)
+
+  if (type.fuel === 'none') return varOpex - subsidy
 
   const fuelPrice = params.get(plant.id, Param.FuelPricePerMwhThermal)
   const thermalPerElectric = 1 / Math.max(0.01, efficiency)
   const fuelCost = fuelPrice * thermalPerElectric
   const carbonCost = carbonPrice * fuel.co2PerMwhThermal.value * thermalPerElectric
-  return fuelCost + carbonCost + varOpex
+  return fuelCost + carbonCost + varOpex - subsidy
 }
 
 /** Available output right now, after availability, ramp rate and minimum load. */
@@ -97,6 +104,8 @@ interface Built {
   lossArcs: Array<{ serveArc: number; unservedArc: number }>
   storageArcs: Array<{ plantId: string; dischargeArc: number; chargeArc: number; forgoArc: number }>
   totalDemand: number
+  /** Amount added to every injection arc so the solver sees only non-negative costs. */
+  costShift: number
 }
 
 export interface DispatchInput {
@@ -132,6 +141,24 @@ function build(input: DispatchInput): Built {
   const solver = new MinCostFlowSolver(nodeCount, maxEdges)
   solver.reset()
 
+  /**
+   * Shortest-path costing needs non-negative arc costs, but a subsidised generator bids
+   * below zero on purpose. Adding a constant to *every* arc leaving the source fixes that
+   * without changing anything: each unit of flow crosses exactly one such arc, so the total
+   * cost rises by a constant and the cheapest solution is still the cheapest solution. The
+   * node potentials all shift by the same amount, so subtracting it afterwards recovers the
+   * true prices — including negative ones.
+   */
+  let minBid = 0
+  for (const plant of dispatchable) {
+    if (isStorage(plant)) continue
+    minBid = Math.min(minBid, marginalCostPerMwh(plant, params, carbonPrice))
+  }
+  for (const plan of storagePlans?.values() ?? []) {
+    if (plan.mode === 'discharging') minBid = Math.min(minBid, plan.offerPricePerMwh)
+  }
+  const costShift = minBid < 0 ? -minBid : 0
+
   const plantArcs: Built['plantArcs'] = []
   const storageArcs: Built['storageArcs'] = []
   let storageChargeDemand = 0
@@ -147,14 +174,19 @@ function build(input: DispatchInput): Built {
       if (!plan || plan.mode === 'idle') continue
 
       if (plan.mode === 'discharging' && plan.dischargeCeilingMw > 0) {
-        const dischargeArc = solver.addArc(source, node, plan.dischargeCeilingMw, plan.offerPricePerMwh)
+        const dischargeArc = solver.addArc(source, node, plan.dischargeCeilingMw, plan.offerPricePerMwh + costShift)
         storageArcs.push({ plantId: plant.id, dischargeArc, chargeArc: -1, forgoArc: -1 })
       } else if (plan.mode === 'charging' && plan.chargeMw > 0) {
         // Charging is real demand, but curtailable: if the system turns out to be short, the
         // battery goes without rather than a city going dark. The forgo arc is what lets the
         // solver make that trade, priced above any generator but far below lost load.
         const chargeArc = solver.addArc(node, sink, plan.chargeMw, 0)
-        const forgoArc = solver.addArc(source, node, plan.chargeMw, ECONOMICS.forgoneChargePricePerMwh.value)
+        const forgoArc = solver.addArc(
+          source,
+          node,
+          plan.chargeMw,
+          ECONOMICS.forgoneChargePricePerMwh.value + costShift,
+        )
         storageChargeDemand += plan.chargeMw
         storageArcs.push({ plantId: plant.id, dischargeArc: -1, chargeArc, forgoArc })
       }
@@ -166,9 +198,9 @@ function build(input: DispatchInput): Built {
 
     // The must-run floor is offered at zero cost: the fuel is being burnt regardless, so
     // from this hour's point of view that energy is already paid for.
-    const floorArc = floor > 0 ? solver.addArc(source, node, floor, 0) : -1
+    const floorArc = floor > 0 ? solver.addArc(source, node, floor, costShift) : -1
     const above = Math.max(0, ceiling - floor)
-    const costArc = above > 0 ? solver.addArc(source, node, above, cost) : -1
+    const costArc = above > 0 ? solver.addArc(source, node, above, cost + costShift) : -1
     plantArcs.push({ plant, floorArc, costArc, cost })
   }
 
@@ -182,7 +214,7 @@ function build(input: DispatchInput): Built {
     const serveArc = solver.addArc(node, sink, demand, 0)
     // Last-resort arc. Using it means the lights went out, and its price is what makes
     // scarcity show up as a very high nodal price rather than an unsolvable problem.
-    const unservedArc = solver.addArc(source, node, demand, ECONOMICS.valueOfLostLoadPerMwh.value)
+    const unservedArc = solver.addArc(source, node, demand, ECONOMICS.valueOfLostLoadPerMwh.value + costShift)
     cityArcs.push({ city, serveArc, unservedArc, demand })
   }
 
@@ -197,7 +229,7 @@ function build(input: DispatchInput): Built {
       if (node === undefined) continue
       totalDemand += mw
       const serveArc = solver.addArc(node, sink, mw, 0)
-      const unservedArc = solver.addArc(source, node, mw, ECONOMICS.valueOfLostLoadPerMwh.value)
+      const unservedArc = solver.addArc(source, node, mw, ECONOMICS.valueOfLostLoadPerMwh.value + costShift)
       lossArcs.push({ serveArc, unservedArc })
     }
   }
@@ -214,7 +246,19 @@ function build(input: DispatchInput): Built {
     lineArcs.push({ edgeId: edge.id, fwd, rev })
   }
 
-  return { solver, source, sink, indexOf, plantArcs, cityArcs, lineArcs, lossArcs, storageArcs, totalDemand }
+  return {
+    solver,
+    source,
+    sink,
+    indexOf,
+    plantArcs,
+    cityArcs,
+    lineArcs,
+    lossArcs,
+    storageArcs,
+    totalDemand,
+    costShift,
+  }
 }
 
 function lineCapacityOf(kv: number, circuits: number): number {
@@ -225,8 +269,19 @@ function lineCapacityOf(kv: number, circuits: number): number {
 /** One pass of the flow problem, with no loss feedback. */
 function solveOnce(input: DispatchInput): DispatchResult {
   const built = build(input)
-  const { solver, source, sink, indexOf, plantArcs, cityArcs, lineArcs, lossArcs, storageArcs, totalDemand } =
-    built
+  const {
+    solver,
+    source,
+    sink,
+    indexOf,
+    plantArcs,
+    cityArcs,
+    lineArcs,
+    lossArcs,
+    storageArcs,
+    totalDemand,
+    costShift,
+  } = built
   const result = solver.solve(source, sink, totalDemand)
 
   const generationMw = new Map<string, number>()
@@ -304,7 +359,8 @@ function solveOnce(input: DispatchInput): DispatchResult {
   const sourcePotential = result.potential[source] ?? 0
   for (const [nodeId, idx] of indexOf) {
     const p = result.potential[idx]
-    nodalPrice.set(nodeId, Number.isFinite(p) ? (p as number) - sourcePotential : 0)
+    // Undo the shift, which is what lets a price come out below zero.
+    nodalPrice.set(nodeId, Number.isFinite(p) ? (p as number) - sourcePotential - costShift : 0)
   }
 
   return {

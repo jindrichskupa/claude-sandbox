@@ -24,7 +24,8 @@ import { dispatch, type DispatchResult } from './dispatch/dispatch'
 import { WeatherModel, type ClimateDef, type Weather } from './weather/weather'
 import { weatherModifiers, WEATHER_SOURCE } from './weather/effects'
 import { generateTerrain, windSiteFactor, type TerrainMap } from './map/terrain'
-import { planStorage, settleStorage, isStorage, type StoragePlan } from './dispatch/storage'
+import { planStorage, settleStorage, isStorage, FORECAST_WINDOW_HOURS, type StoragePlan } from './dispatch/storage'
+import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
 import {
   addLedger,
   chargeCapex,
@@ -95,6 +96,8 @@ export interface ScenarioDef {
   tariffPerMwh: number
   carbonPricePerTonne: number
   objectives: ScenarioObjective[]
+  /** Guaranteed price per MWh by technology, paid outside the market. */
+  feedInTariffs: Partial<Record<string, number>>
 }
 
 const HISTORY_LENGTH = TICKS_PER_YEAR
@@ -144,6 +147,8 @@ export class World {
 
   lastDispatch: DispatchResult | null = null
   lastStoragePlans: Map<string, StoragePlan> = new Map()
+  /** Residual load for the coming hours, current hour first. Drives storage and the UI. */
+  lastForecast: ForecastHour[] = []
 
   /** Recent prices, feeding the storage arbitrage policy. */
   private readonly priceWindow: number[] = []
@@ -209,9 +214,11 @@ export class World {
       const type = PLANT_TYPES[plant.typeId]
       switch (param) {
         case Param.CapacityMw:
-          return type.capacityMw.value
+          // Uprating during an overhaul is permanent, so it belongs in the base value rather
+          // than as a modifier — it changed what the machine is, not what is happening to it.
+          return type.capacityMw.value * (1 + plant.capacityUplift)
         case Param.Efficiency:
-          return type.efficiency.value
+          return type.efficiency.value * (1 + plant.efficiencyUplift)
         case Param.Availability:
           return 1 - type.forcedOutageRate.value
         case Param.VarOpexPerMwh:
@@ -226,6 +233,8 @@ export class World {
           return type.rampRatePerHour.value
         case Param.FuelPricePerMwhThermal:
           return FUELS[type.fuel].pricePerMwhThermal.value * this.state.fuelPriceIndex
+        case Param.FeedInTariffPerMwh:
+          return this.scenario.feedInTariffs[plant.typeId] ?? 0
         default:
           return undefined
       }
@@ -363,12 +372,29 @@ export class World {
     this.advanceLifecycles()
     this.payInstalments()
 
-    // 5. Storage decides before the flow problem is posed. See `dispatch/storage.ts` for why.
+    // 5. Storage decides before the flow problem is posed, and it plans forward rather than
+    //    reacting to the recent past. See `dispatch/storage.ts` for why that matters.
+    this.lastForecast = forecastResidualLoad({
+      weatherModel: this.weatherModel,
+      plants: this.plants,
+      cities: this.cities,
+      params: this.params,
+      // One tick back, so the window starts with the hour being solved.
+      fromTick: this.tick - 1,
+      snowpackMm: this.weather.snowpackMm,
+      hours: FORECAST_WINDOW_HOURS,
+      siteWindFactor: (plant) => {
+        const node = this.network.getNode(plant.nodeId)
+        return node ? windSiteFactor(this.terrain, node.x, node.y) : 1
+      },
+    })
+
     const storagePlans = planStorage({
       plants: this.plants,
       params: this.params,
       priceHistory: this.priceWindow,
       recentShortage: (this.lastDispatch?.totalUnservedMw ?? 0) > 0.01,
+      forecast: this.lastForecast,
     })
     this.lastStoragePlans = storagePlans
 
@@ -454,6 +480,20 @@ export class World {
         plant.conditionPct = 1
         plant.online = true
         plant.capexPaid = this.params.get(plant.id, Param.CapexPerKw) * this.params.get(plant.id, Param.CapacityMw) * 1000
+      } else if (plant.phase === LifecyclePhase.Refurbishing && this.tick >= plant.phaseEndsTick) {
+        const type = PLANT_TYPES[plant.typeId]
+        // Diminishing returns: each overhaul buys less than the one before.
+        const escalation = 1 / (1 + plant.refurbishments * 0.5)
+        plant.refurbishments++
+        plant.lifeExtension += type.refurbishLifeExtension.value * escalation
+        plant.efficiencyUplift += type.refurbishEfficiencyGain.value * escalation
+        plant.capacityUplift += type.refurbishCapacityGain.value * escalation
+        // Worn parts are gone, but the shell and the foundations are still the old ones.
+        plant.conditionPct = Math.min(1, plant.conditionPct + 0.55 * escalation)
+        // Replacing the cells is replacing the thing that wears out.
+        if (PLANT_TYPES[plant.typeId].storage?.cycleLife) plant.cyclesUsed = 0
+        plant.phase = LifecyclePhase.Operating
+        plant.online = true
       } else if (plant.phase === LifecyclePhase.Decommissioning && this.tick >= plant.phaseEndsTick) {
         const type = PLANT_TYPES[plant.typeId]
         plant.phase = LifecyclePhase.Remediating
@@ -539,7 +579,10 @@ export class World {
       weight += demand
     }
     if (weight <= 0) return 0
-    return Math.max(0, Math.min(ECONOMICS.valueOfLostLoadPerMwh.value, weighted / weight))
+    // Deliberately not floored at zero. A market with subsidised must-take generation really
+    // does clear below zero, and clamping it away would hide the single clearest signal that
+    // there is more generation than the system can use.
+    return Math.min(ECONOMICS.valueOfLostLoadPerMwh.value, weighted / weight)
   }
 
   private makeSnapshot(date: GameDate, result: DispatchResult): TickSnapshot {

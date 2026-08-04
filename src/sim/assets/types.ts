@@ -62,11 +62,25 @@ export interface PlantAsset {
   outputMw: number
   /** Stored energy for storage assets. */
   storageMwh: number
+  /**
+   * Equivalent full cycles a store has delivered. One cycle is its whole usable energy
+   * discharged once, whether in an hour or over a week.
+   */
+  cyclesUsed: number
   /** False during a forced outage. */
   online: boolean
 
   /** Capital cost actually paid, for accounting and for resale value. */
   capexPaid: number
+
+  /** How many times this unit has been refurbished. */
+  refurbishments: number
+  /** Extra design life bought by refurbishment, as a fraction of the original. */
+  lifeExtension: number
+  /** Efficiency gained by refurbishment, as a fraction. */
+  efficiencyUplift: number
+  /** Capacity gained by uprating, as a fraction. */
+  capacityUplift: number
 }
 
 export interface CityAsset {

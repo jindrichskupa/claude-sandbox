@@ -39,8 +39,13 @@ function plant(id: string, nodeId: string, typeId: PlantTypeId): PlantAsset {
     cumulativeStarts: 0,
     outputMw: 0,
     storageMwh: 0,
+    cyclesUsed: 0,
     online: true,
     capexPaid: 0,
+    refurbishments: 0,
+    lifeExtension: 0,
+    efficiencyUplift: 0,
+    capacityUplift: 0,
   }
 }
 
@@ -58,7 +63,12 @@ function city(id: string, nodeId: string, demandMw: number): CityAsset {
 }
 
 /** A params instance backed directly by content, with no modifiers. */
-function makeParams(plants: PlantAsset[], cities: CityAsset[], network: Network): Params {
+function makeParams(
+  plants: PlantAsset[],
+  cities: CityAsset[],
+  network: Network,
+  subsidies?: Map<string, number>,
+): Params {
   const registry = new ModifierRegistry()
   const byId = new Map(plants.map((p) => [p.id, p]))
   const cityById = new Map(cities.map((c) => [c.id, c]))
@@ -79,6 +89,8 @@ function makeParams(plants: PlantAsset[], cities: CityAsset[], network: Network)
           return 1
         case Param.FuelPricePerMwhThermal:
           return type.fuel === 'none' ? 0 : 30
+        case Param.FeedInTariffPerMwh:
+          return subsidies?.get(targetId) ?? 0
         default:
           return undefined
       }
@@ -93,8 +105,8 @@ function makeParams(plants: PlantAsset[], cities: CityAsset[], network: Network)
   })
 }
 
-function run(network: Network, plants: PlantAsset[], cities: CityAsset[]) {
-  const params = makeParams(plants, cities, network)
+function run(network: Network, plants: PlantAsset[], cities: CityAsset[], subsidies?: Map<string, number>) {
+  const params = makeParams(plants, cities, network, subsidies)
   params.setTick(1)
   return dispatch({
     network,
@@ -227,5 +239,57 @@ describe('dispatch', () => {
       return run(n, [plant('p1', 'gen', 'ccgt')], [city('c1', 'town', 140)])
     }
     expect(build(400).totalLossMw).toBeLessThan(build(110).totalLossMw)
+  })
+})
+
+describe('negative prices', () => {
+  /**
+   * A generator on a guaranteed tariff is paid whether or not the market wants its output,
+   * so being curtailed costs it the tariff. It will therefore bid below zero to stay on, and
+   * when there is more such generation than demand it sets a negative clearing price. This is
+   * routine in real markets with subsidised renewables, and the flow solver has to cope with
+   * it despite shortest-path costing requiring non-negative arcs.
+   */
+  it('clears below zero when subsidised generation exceeds demand', () => {
+    const n = new Network()
+    n.addNode(node('farm', 'plant'))
+    n.addNode(node('town', 'city', 1, 0))
+    n.addEdge(edge('l1', 'farm', 'town', 400, 2))
+
+    // 450 MW of gas, guaranteed 80/MWh, against 100 MW of demand.
+    const plants = [plant('subsidised', 'farm', 'ccgt')]
+    const cities = [city('c1', 'town', 100)]
+    const subsidies = new Map([['subsidised', 80]])
+
+    const r = run(n, plants, cities, subsidies)
+    expect(r.totalUnservedMw).toBeCloseTo(0, 3)
+    expect(r.nodalPrice.get('town')!).toBeLessThan(0)
+  })
+
+  it('still dispatches correctly when bids are negative', () => {
+    const n = new Network()
+    n.addNode(node('farm', 'plant'))
+    n.addNode(node('gas', 'plant', 0, 1))
+    n.addNode(node('town', 'city', 1, 0))
+    n.addEdge(edge('l1', 'farm', 'town', 400, 2))
+    n.addEdge(edge('l2', 'gas', 'town', 400, 2))
+
+    // The subsidised unit should run first even though its unsubsidised cost is identical.
+    const plants = [plant('subsidised', 'farm', 'ccgt'), plant('plain', 'gas', 'ccgt')]
+    const cities = [city('c1', 'town', 300)]
+    const r = run(n, plants, cities, new Map([['subsidised', 80]]))
+
+    expect(r.generationMw.get('subsidised')!).toBeGreaterThan(290)
+    expect(r.generationMw.get('plain')!).toBeLessThan(15)
+    expect(r.totalUnservedMw).toBeCloseTo(0, 3)
+  })
+
+  it('keeps prices positive when nothing is subsidised', () => {
+    const n = new Network()
+    n.addNode(node('gen', 'plant'))
+    n.addNode(node('town', 'city', 1, 0))
+    n.addEdge(edge('l1', 'gen', 'town', 400, 2))
+    const r = run(n, [plant('p1', 'gen', 'ccgt')], [city('c1', 'town', 200)])
+    expect(r.nodalPrice.get('town')!).toBeGreaterThan(0)
   })
 })

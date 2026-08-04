@@ -9,6 +9,7 @@
 
 import { PLANT_TYPES } from '@content/plantTypes'
 import { TICKS_PER_YEAR } from '../core/time'
+import { cycleLifeUsed } from '../dispatch/storage'
 import { Layer, Op, Param, type Modifier } from '../params/types'
 import { LifecyclePhase, type PlantAsset } from './types'
 
@@ -19,10 +20,21 @@ export function ageYears(plant: PlantAsset, tick: number): number {
   return Math.max(0, (tick - plant.commissionedTick) / TICKS_PER_YEAR)
 }
 
-/** How far through its design life the plant is, where 1 means it has reached design life. */
+/**
+ * How far through its life the plant is, where 1 means it has reached the end of it.
+ *
+ * For most machines that is simply age. For a battery it is whichever of age and cycling
+ * runs out first, and in practice cycling usually does: a store worked hard for arbitrage
+ * revenue reaches its cycle limit years before its calendar warranty. Taking the maximum
+ * here means every consequence of ageing — falling condition, rising maintenance, more
+ * outages — becomes cycle-aware without a single special case downstream.
+ */
 export function lifeFraction(plant: PlantAsset, tick: number): number {
-  const life = PLANT_TYPES[plant.typeId].designLifeYears.value
-  return ageYears(plant, tick) / Math.max(1, life)
+  // Refurbishment buys extra design life, so the same age is a smaller fraction of it.
+  const life = PLANT_TYPES[plant.typeId].designLifeYears.value * (1 + plant.lifeExtension)
+  const calendar = ageYears(plant, tick) / Math.max(1, life)
+  const cycles = cycleLifeUsed(plant)
+  return cycles === null ? calendar : Math.max(calendar, cycles)
 }
 
 /**

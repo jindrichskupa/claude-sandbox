@@ -53,6 +53,19 @@ export interface StorageSpec {
   energyMwh: Sourced<number>
   /** Round-trip efficiency. */
   roundTripEfficiency: Sourced<number>
+  /**
+   * Equivalent full cycles the store can deliver before it is worn out, or null for
+   * technologies whose life is not measured that way.
+   *
+   * This is the constraint that actually binds a battery. A lithium system rated for fifteen
+   * calendar years but only a few thousand cycles is finished in eight if it is worked hard,
+   * and that trade-off — cycle it aggressively for revenue, or gently for longevity — is the
+   * decision the player is really making. Pumped storage has no equivalent: water and steel
+   * do not care how many times they have been moved.
+   */
+  cycleLife: Sourced<number> | null
+  /** Fraction of capacity lost over the whole cycle life. */
+  capacityFadeOverLife: Sourced<number> | null
 }
 
 export interface PlantTypeDef {
@@ -105,6 +118,24 @@ export interface PlantTypeDef {
    */
   availableFromYear: Sourced<number>
 
+  /**
+   * Mid-life refurbishment: strip the machine back, replace what has worn, and put it back
+   * into service. Costs a fraction of building new and buys a fraction of a new life, which
+   * is what makes it a genuine third option rather than a cheaper rebuild.
+   */
+  refurbishCostFraction: Sourced<number>
+  /** Extra design life bought, as a fraction of the original. */
+  refurbishLifeExtension: Sourced<number>
+  refurbishMonths: Sourced<number>
+  /**
+   * Efficiency gained by fitting current technology to an old machine. Steam plant gains
+   * little; anything with a gas turbine in it gains a great deal, because the turbines
+   * themselves improved so much.
+   */
+  refurbishEfficiencyGain: Sourced<number>
+  /** Capacity gained by uprating, as a fraction. */
+  refurbishCapacityGain: Sourced<number>
+
   chp: ChpSpec | null
   storage: StorageSpec | null
 }
@@ -136,6 +167,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'none',
     cooling: 'water',
     availableFromYear: sourced(1900, 'count', 'engineering-standard', 2023, 'Mature long before the game begins'),
+    refurbishCostFraction: sourced(0.35, 'fraction', 'engineering-standard', 2023, 'Boiler and turbine overhaul; steam plant gains little efficiency'),
+    refurbishLifeExtension: sourced(0.5, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(24, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.03, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.02, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
   },
@@ -163,6 +199,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'none',
     cooling: 'water',
     availableFromYear: sourced(1900, 'count', 'engineering-standard', 2023, 'Mature long before the game begins'),
+    refurbishCostFraction: sourced(0.35, 'fraction', 'engineering-standard', 2023, 'As hard coal'),
+    refurbishLifeExtension: sourced(0.5, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(24, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.03, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.02, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
   },
@@ -190,6 +231,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'none',
     cooling: 'water',
     availableFromYear: sourced(1985, 'count', 'engineering-standard', 2023, 'Combined cycle became the default choice in the late 1980s'),
+    refurbishCostFraction: sourced(0.28, 'fraction', 'engineering-standard', 2023, 'A modern gas turbine in an old shell is a large gain'),
+    refurbishLifeExtension: sourced(0.6, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(14, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.06, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.08, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
   },
@@ -217,6 +263,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'none',
     cooling: 'air',
     availableFromYear: sourced(1960, 'count', 'engineering-standard', 2023, 'Mature'),
+    refurbishCostFraction: sourced(0.25, 'fraction', 'engineering-standard', 2023, 'Turbine replacement'),
+    refurbishLifeExtension: sourced(0.6, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(9, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.06, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.08, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
   },
@@ -244,6 +295,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'none',
     cooling: 'water',
     availableFromYear: sourced(1970, 'count', 'engineering-standard', 2023, 'Commercial fleet build-out'),
+    refurbishCostFraction: sourced(0.45, 'fraction', 'engineering-standard', 2023, 'Long-term operation programme; steam generators and controls'),
+    refurbishLifeExtension: sourced(0.4, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(36, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.02, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.05, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
   },
@@ -271,6 +327,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'riverflow',
     cooling: 'none',
     availableFromYear: sourced(1900, 'count', 'engineering-standard', 2023, 'The oldest of them all'),
+    refurbishCostFraction: sourced(0.2, 'fraction', 'engineering-standard', 2023, 'Civil works outlive several sets of machinery'),
+    refurbishLifeExtension: sourced(0.6, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(18, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.04, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.1, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
   },
@@ -298,10 +359,18 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'none',
     cooling: 'none',
     availableFromYear: sourced(1960, 'count', 'engineering-standard', 2023, 'Widely built from the 1960s'),
+    refurbishCostFraction: sourced(0.2, 'fraction', 'engineering-standard', 2023, 'As hydro'),
+    refurbishLifeExtension: sourced(0.6, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(18, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.04, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.1, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: {
       energyMwh: sourced(1800, 'MWh', 'engineering-standard', Y, 'About 6 hours at rated power'),
       roundTripEfficiency: sourced(0.78, 'fraction', 'irena-costs', 2022),
+      // Pumping water uphill does not wear the mountain out.
+      cycleLife: null,
+      capacityFadeOverLife: null,
     },
   },
 
@@ -328,6 +397,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'wind',
     cooling: 'none',
     availableFromYear: sourced(1995, 'count', 'engineering-standard', 2023, 'Utility-scale onshore wind became commercially routine in the mid 1990s'),
+    refurbishCostFraction: sourced(0.55, 'fraction', 'engineering-standard', 2023, 'Repowering: new machines on existing foundations and grid connection'),
+    refurbishLifeExtension: sourced(0.7, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(8, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.05, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.25, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
   },
@@ -355,6 +429,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'solar',
     cooling: 'none',
     availableFromYear: sourced(2008, 'count', 'engineering-standard', 2023, 'Utility-scale photovoltaics only became affordable in the late 2000s'),
+    refurbishCostFraction: sourced(0.4, 'fraction', 'engineering-standard', 2023, 'New panels on existing mounting and connection'),
+    refurbishLifeExtension: sourced(0.8, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(6, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.02, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.3, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
   },
@@ -382,10 +461,17 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'none',
     cooling: 'none',
     availableFromYear: sourced(2015, 'count', 'engineering-standard', 2023, 'Grid-scale lithium storage'),
+    refurbishCostFraction: sourced(0.6, 'fraction', 'engineering-standard', 2023, 'Cell replacement; effectively a new store in an existing building'),
+    refurbishLifeExtension: sourced(1.0, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(6, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.0, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.0, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: {
       energyMwh: sourced(100, 'MWh', 'nrel-atb', 2023, '2 hours at rated power'),
       roundTripEfficiency: sourced(0.88, 'fraction', 'nrel-atb', 2023),
+      cycleLife: sourced(5000, 'count', 'nrel-atb', 2023, 'Equivalent full cycles to end of warranty'),
+      capacityFadeOverLife: sourced(0.2, 'fraction', 'nrel-atb', 2023, 'Typical warranty floor is 80% of new'),
     },
   },
 
@@ -412,6 +498,11 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     weatherDependence: 'none',
     cooling: 'water',
     availableFromYear: sourced(1980, 'count', 'engineering-standard', 2023, 'Mature'),
+    refurbishCostFraction: sourced(0.28, 'fraction', 'engineering-standard', 2023, 'As combined cycle'),
+    refurbishLifeExtension: sourced(0.6, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(16, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.05, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.06, 'fraction', 'engineering-standard', 2023),
     chp: {
       mode: 'extraction',
       heatCapacityMwth: sourced(150, 'MW', 'euro-chp-practice', 2021),
