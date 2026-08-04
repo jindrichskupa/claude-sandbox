@@ -59,6 +59,11 @@ the document tries to fetch anything.
   because load and price are correlated and a summer night is not equal evidence to a December
   evening. With the scarcity hours put back, a crippled fleet's tariff is 22× a healthy one's and
   twelve years end with €151bn in the bank; with them removed it is 1.4×.
+- **You can build the network, not just fill in the one you were given.** A line used to join
+  only nodes the scenario had already placed, so there was no way to make a junction, split a long
+  corridor, or put a hub where the player wanted one — while the opening scenario contained two
+  substations they could only look at. Substations are now buildable at each voltage, priced at
+  the switchgear that level actually needs.
 - **You can see what a decision costs before you take it.** Hovering a placement shows the
   price, the length, the lead time and the site quality, or the reason it is refused — because
   choosing a corridor is a comparison, and until those were on screen the most expensive decision
@@ -289,7 +294,11 @@ Stated plainly, because they are the difference between what the simulation look
 models and what it actually models:
 
 - **Routes cannot be drawn by hand.** The router picks the corridor; the player cannot drag
-  one tile by tile the way a Transport Tycoon player lays track.
+  one tile by tile the way a Transport Tycoon player lays track. Deliberate: the game is about
+  where to run a corridor, not which tiles it crosses.
+- **A substation is a place, not an asset.** It can be built, but it has no condition, no ageing,
+  no failure mode and nothing to inspect — where every plant and line has all four. Real
+  substations fail, and a busbar fault takes everything connected to it out at once.
 - **World deployment is a fixed exponential.** Learning is driven by an exogenous path per
   technology — a 1995 total compounding at a published growth rate — so the world's build-out
   is the same in every playthrough and cannot respond to anything. That is deliberate for

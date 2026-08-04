@@ -24,6 +24,7 @@ export type BuildSelection =
   | { kind: 'plant'; typeId: PlantTypeId }
   | { kind: 'line'; kv: VoltageLevel; circuits: number }
   | { kind: 'pipe'; dn: PipeSize; pipes: number }
+  | { kind: 'substation'; kv: VoltageLevel }
   | null
 
 export interface BuildPanelCallbacks {
@@ -139,6 +140,11 @@ export class BuildPanel {
       this.list.appendChild(this.lineRow(kv))
     }
 
+    this.list.appendChild(el('div', 'build-group-title', t('ui.substations')))
+    for (const kv of VOLTAGE_LEVELS) {
+      this.list.appendChild(this.substationRow(kv))
+    }
+
     this.list.appendChild(el('div', 'build-group-title', t('ui.heatMains')))
     for (const dn of PIPE_SIZES) {
       this.list.appendChild(this.pipeRow(dn))
@@ -215,6 +221,41 @@ export class BuildPanel {
         this.select(selected ? null : { kind: 'plant', typeId })
       })
     }
+    return row
+  }
+
+  /**
+   * A switching station on its own, which is the piece that was missing.
+   *
+   * Without it a line could only join nodes the scenario had already placed, so the player could
+   * wire up what they were given and nothing else — no junction, no way to split a long corridor,
+   * no hub of their own.
+   */
+  private substationRow(kv: VoltageLevel): HTMLDivElement {
+    const type = LINE_TYPES[kv]
+    const row = el('div', 'build-row')
+    const selected = this.selection?.kind === 'substation' && this.selection.kv === kv
+    row.classList.toggle('selected', selected)
+
+    const swatch = el('span', 'build-swatch')
+    swatch.style.background = '#7fd4ff'
+    row.appendChild(swatch)
+
+    const main = el('div', 'build-main')
+    main.appendChild(el('div', 'build-name', t('ui.substationAt', { kv })))
+    main.appendChild(
+      el(
+        'div',
+        'build-meta',
+        `${formatMoney(type.substationCapex.value)} · ${type.substationBuildMonths.value} ${t('ui.months')}`,
+      ),
+    )
+    main.appendChild(el('div', 'build-note', t('ui.substationNote')))
+    row.appendChild(main)
+
+    row.addEventListener('click', () => {
+      this.select(selected ? null : { kind: 'substation', kv })
+    })
     return row
   }
 

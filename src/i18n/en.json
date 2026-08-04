@@ -328,5 +328,9 @@
   "notable.blackout": "Demand is going unserved",
   "notable.objectives": "An objective has changed",
   "notable.bankrupt": "The utility is out of money",
-  "notable.timeLimit": "A quiet year — nothing happened"
+  "notable.timeLimit": "A quiet year — nothing happened",
+  "ui.substations": "Substations",
+  "ui.substationAt": "{kv} kV substation",
+  "ui.substationNote": "A place for lines to meet. Useless until one reaches it.",
+  "ui.substationHint": "Click a site to place the substation. Right-click or Esc to cancel."
 }

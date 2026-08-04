@@ -30,6 +30,8 @@ import {
   beginHeatPipeConstruction,
   beginLineConstruction,
   beginPlantConstruction,
+  beginSubstationConstruction,
+  quoteSubstation,
   mothballPlant,
   quoteHeatPipe,
   quoteLine,
@@ -104,6 +106,9 @@ async function main(): Promise<void> {
     if (selection.kind === 'plant') {
       map.buildMode = { kind: 'plant', typeId: selection.typeId }
       hud.setHint(t('ui.buildHint'))
+    } else if (selection.kind === 'substation') {
+      map.buildMode = { kind: 'substation', kv: selection.kv }
+      hud.setHint(t('ui.substationHint'))
     } else if (selection.kind === 'pipe') {
       map.buildMode = { kind: 'pipe', dn: selection.dn, pipes: selection.pipes, fromNodeId: null }
       hud.setHint(t('ui.pipeHint'))
@@ -296,6 +301,10 @@ async function main(): Promise<void> {
       const quote = quotePlant(world, mode.typeId as never, tile.x, tile.y)
       map.hoverValid = quote.ok
       hud.setHint(quoteText(quote, t(PLANT_TYPES[mode.typeId as PlantTypeId].nameKey)))
+    } else if (mode.kind === 'substation') {
+      const quote = quoteSubstation(world, mode.kv as never, tile.x, tile.y)
+      map.hoverValid = quote.ok
+      hud.setHint(quoteText(quote, t('ui.substationAt', { kv: mode.kv })))
     } else if (mode.fromNodeId) {
       const worldPoint = map.camera.screenToWorld(clientX - rect.left, clientY - rect.top)
       const target = map.nodeAtWorld(worldPoint.x, worldPoint.y, TILE_PX)
@@ -336,6 +345,19 @@ async function main(): Promise<void> {
 
     const rect = canvas.getBoundingClientRect()
     const tile = map.tileAtScreen(clientX - rect.left, clientY - rect.top)
+
+    if (mode.kind === 'substation') {
+      const result = beginSubstationConstruction(world, mode.kv as never, tile.x, tile.y)
+      if (result.ok) {
+        hud.setHint(t('build.placed'))
+        cancelBuild()
+        map.syncToWorld()
+      } else {
+        hud.setHint(t(result.quote.reasonKey ?? 'build.unsuitableGround'))
+      }
+      hud.update()
+      return true
+    }
 
     if (mode.kind === 'plant') {
       const result = beginPlantConstruction(world, mode.typeId as never, tile.x, tile.y)
@@ -545,6 +567,8 @@ async function main(): Promise<void> {
       beginPlantConstruction,
       beginLineConstruction,
       beginHeatPipeConstruction,
+      beginSubstationConstruction,
+      quoteSubstation,
       retirePlant,
       quotePlant,
       quoteLine,

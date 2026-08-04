@@ -28,6 +28,14 @@ export interface LineTypeDef {
   fixedOpexPerKmYear: Sourced<number>
   /** Cost of the substation at each end. */
   substationCapex: Sourced<number>
+  /**
+   * How long a switching station takes to build, on its own.
+   *
+   * Not per kilometre, unlike the line: a substation is a compound with switchgear in it and its
+   * duration is set by procurement and commissioning rather than by distance. Rises sharply with
+   * voltage for the same reason the capital cost does — a 400 kV bay is a very large machine.
+   */
+  substationBuildMonths: Sourced<number>
   buildTimeMonthsPer100Km: Sourced<number>
   designLifeYears: Sourced<number>
   /** Base probability per year that a given kilometre suffers a fault. */
@@ -45,6 +53,7 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     capexPerKm: sourced(350_000, 'EUR', 'entsoe-factsheet', Y, 'Overhead line, flat terrain'),
     fixedOpexPerKmYear: sourced(4_000, 'EUR', 'entsoe-factsheet', Y),
     substationCapex: sourced(4_000_000, 'EUR', 'entsoe-factsheet', Y),
+    substationBuildMonths: sourced(12, 'months', 'entsoe-factsheet', Y),
     buildTimeMonthsPer100Km: sourced(18, 'months', 'entsoe-factsheet', Y),
     designLifeYears: sourced(50, 'years', 'engineering-standard', Y),
     faultRatePerKmYear: sourced(0.004, 'fraction', 'entsoe-factsheet', Y),
@@ -57,6 +66,7 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     capexPerKm: sourced(550_000, 'EUR', 'entsoe-factsheet', Y),
     fixedOpexPerKmYear: sourced(6_000, 'EUR', 'entsoe-factsheet', Y),
     substationCapex: sourced(9_000_000, 'EUR', 'entsoe-factsheet', Y),
+    substationBuildMonths: sourced(18, 'months', 'entsoe-factsheet', Y),
     buildTimeMonthsPer100Km: sourced(24, 'months', 'entsoe-factsheet', Y),
     designLifeYears: sourced(50, 'years', 'engineering-standard', Y),
     faultRatePerKmYear: sourced(0.003, 'fraction', 'entsoe-factsheet', Y),
@@ -69,6 +79,7 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     capexPerKm: sourced(950_000, 'EUR', 'entsoe-factsheet', Y),
     fixedOpexPerKmYear: sourced(9_000, 'EUR', 'entsoe-factsheet', Y),
     substationCapex: sourced(20_000_000, 'EUR', 'entsoe-factsheet', Y),
+    substationBuildMonths: sourced(30, 'months', 'entsoe-factsheet', Y, 'Consents and switchgear lead times, not concrete'),
     buildTimeMonthsPer100Km: sourced(36, 'months', 'entsoe-factsheet', Y, 'Permitting dominates, not construction'),
     designLifeYears: sourced(50, 'years', 'engineering-standard', Y),
     faultRatePerKmYear: sourced(0.002, 'fraction', 'entsoe-factsheet', Y),

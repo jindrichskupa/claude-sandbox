@@ -395,6 +395,59 @@ try {
   if (phaseAfter === phaseBefore) throw new Error('Clicking Retire did nothing')
   await page.keyboard.press('Space')
 
+  // --- A junction of the player's own -------------------------------------
+  // Before this existed a line could only join nodes the scenario had placed, so the player
+  // could wire up what they were given and nothing else.
+  await page.evaluate(() => window.game.hud.buildPanel.setOpen(true))
+  await page.waitForTimeout(200)
+  const subRow = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('#build-panel .build-row')].find((r) =>
+      r.textContent.includes('220 kV substation'),
+    )
+    if (!row) return null
+    // The panel scrolls, and the substations sit below fourteen technologies and three
+    // voltages. Without this the rect is real but the point is clipped, and the click lands
+    // on the map behind it.
+    row.scrollIntoView({ block: 'center' })
+    const b = row.getBoundingClientRect()
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+  })
+  await page.waitForTimeout(150)
+  if (!subRow) throw new Error('No substation offered in the build panel')
+  await page.mouse.click(subRow.x, subRow.y)
+  await page.waitForTimeout(200)
+  const subMode = await page.evaluate(() => window.game.map.buildMode)
+  console.log('build mode after clicking the substation row:', subMode)
+  if (subMode?.kind !== 'substation') throw new Error('Clicking the substation row did not arm it')
+
+  const subSite = await page.evaluate(() => {
+    const g = window.game
+    const cam = g.map.camera
+    for (let y = 0; y < g.world.scenario.mapHeight; y++) {
+      for (let x = 0; x < g.world.scenario.mapWidth; x++) {
+        if (!g.build.quoteSubstation(g.world, 220, x, y).ok) continue
+        const sx = (x * 32 + 16 - cam.x) * cam.zoom
+        const sy = (y * 32 + 16 - cam.y) * cam.zoom
+        if (sx < 360 || sx > 1090 || sy < 150 || sy > 780) continue
+        return { sx, sy }
+      }
+    }
+    return null
+  })
+  if (!subSite) throw new Error('Nowhere clickable to put a substation')
+  const nodesBefore = await page.evaluate(() => window.game.world.network.allNodes().length)
+  await page.mouse.move(subSite.sx, subSite.sy)
+  await page.waitForTimeout(120)
+  await page.mouse.down()
+  await page.mouse.up()
+  await page.waitForTimeout(300)
+  const nodesAfter = await page.evaluate(() => ({
+    count: window.game.world.network.allNodes().length,
+    subs: window.game.world.network.allNodes().filter((n) => n.id.startsWith('n_sub_')).length,
+  }))
+  console.log('substation placed by clicking the map:', nodesBefore, '->', nodesAfter)
+  if (nodesAfter.subs < 1) throw new Error('Clicking the map did not place a substation')
+
   // --- Lines are things you can ask about --------------------------------
   // Clock stopped, so the panel is not rebuilding under the automation between locating a
   // button and pressing it. A person does not need this — a press freezes the rebuild for its

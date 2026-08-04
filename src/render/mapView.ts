@@ -91,6 +91,7 @@ export interface MapViewCallbacks {
 /** What the player is currently placing, if anything. */
 export type BuildMode =
   | { kind: 'plant'; typeId: string }
+  | { kind: 'substation'; kv: number }
   | { kind: 'line'; kv: 110 | 220 | 400; circuits: number; fromNodeId: string | null }
   | { kind: 'pipe'; dn: 200 | 400 | 700; pipes: number; fromNodeId: string | null }
   | null
@@ -652,6 +653,21 @@ export class MapView {
         const cy = hover.y * TILE_PX + TILE_PX / 2
         const colour = this.hoverValid ? 0x5fc27e : 0xe2483d
         g.rect(hover.x * TILE_PX, hover.y * TILE_PX, TILE_PX, TILE_PX).fill({ color: colour, alpha: 0.35 })
+        g.circle(cx, cy, 16).stroke({ width: 2, color: colour, alpha: 0.95 })
+      }
+      return
+    }
+
+    // A substation goes on empty ground like a plant, but its only requirement is buildable
+    // ground — no cooling water, no river, no exposure. So it gets the hover marker without the
+    // suitability shading, which for a technology with no preferences would be a flat wash.
+    if (mode.kind === 'substation') {
+      const hover = this.hoverTile
+      if (hover) {
+        const cx = hover.x * TILE_PX + TILE_PX / 2
+        const cy = hover.y * TILE_PX + TILE_PX / 2
+        const colour = this.hoverValid ? 0x7fd4ff : 0xe2483d
+        g.rect(hover.x * TILE_PX, hover.y * TILE_PX, TILE_PX, TILE_PX).fill({ color: colour, alpha: 0.3 })
         g.circle(cx, cy, 16).stroke({ width: 2, color: colour, alpha: 0.95 })
       }
       return

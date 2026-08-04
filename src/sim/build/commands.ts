@@ -21,6 +21,7 @@ import { designLifeFactor, realDecommissioningFactor } from '../tech/costs'
 import { nominal } from '../tech/money'
 import { PLAYER, tileDistance, type GridEdge, type GridNode, type NodeId } from '../grid/network'
 import { judgeSite } from './siting'
+import { isBuildable } from '../map/terrain'
 import { routeLine, simplifyRoute } from '../grid/routing'
 import { Param } from '../params/types'
 import { canAfford } from '../economy/economy'
@@ -233,6 +234,66 @@ export function quoteLine(world: World, fromId: NodeId, toId: NodeId, kv: Voltag
 
   if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
   return { ok: true, totalCost, buildTicks, lengthKm, route: simplifyRoute(route) }
+}
+
+// ---------------------------------------------------------------------------
+// Substations
+// ---------------------------------------------------------------------------
+
+/**
+ * What a switching station on empty ground would cost.
+ *
+ * Until this existed, a line could only ever join two nodes that were already on the map, so the
+ * player could connect what the scenario had given them and nothing else — no new junction, no
+ * way to split a long corridor, no hub. That is most of what building a grid *is*, and it was
+ * missing while the scenario itself contained two substations the player could only look at.
+ *
+ * The price is the station: the site, the busbar, the switchgear. Each line into it still pays
+ * for its own bays at both ends, as it always has, so nothing is charged twice.
+ */
+export function quoteSubstation(world: World, kv: VoltageLevel, x: number, y: number): Quote {
+  if (!isBuildable(world.terrain, x, y)) return refuse('build.unsuitableGround')
+  if (world.nodeNear(x, y, 1.5)) return refuse('build.tooClose')
+
+  const type = LINE_TYPES[kv]
+  const totalCost = type.substationCapex.value
+  const buildTicks = Math.max(1, Math.round(type.substationBuildMonths.value * TICKS_PER_MONTH))
+
+  if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
+  return { ok: true, totalCost, buildTicks }
+}
+
+/**
+ * Put a substation on the map.
+ *
+ * The node appears at once and there is deliberately no half-built state for it, which is worth
+ * explaining because every other asset has one. A substation on its own does nothing whatever: it
+ * is a place for lines to meet, and the first line to reach it takes years. Giving the node its
+ * own energised flag would mean teaching the island decomposition and the flow solver about a
+ * third kind of not-yet-real thing, in order to model a delay that the lines already impose.
+ */
+export function beginSubstationConstruction(
+  world: World,
+  kv: VoltageLevel,
+  x: number,
+  y: number,
+): { ok: boolean; nodeId?: string; quote: Quote } {
+  const quote = quoteSubstation(world, kv, x, y)
+  if (!quote.ok) return { ok: false, quote }
+
+  const serial = world.nextSerial()
+  const nodeId = `n_sub_${serial}`
+  world.network.addNode({
+    id: nodeId,
+    kind: 'substation',
+    ownerId: PLAYER,
+    x,
+    y,
+    nameKey: `line.${kv}`,
+    nameIndex: serial,
+  })
+  world.scheduleSpending(nodeId, quote.totalCost, quote.buildTicks, 'capex')
+  return { ok: true, nodeId, quote }
 }
 
 /**
