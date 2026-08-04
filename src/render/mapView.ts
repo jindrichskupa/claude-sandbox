@@ -750,6 +750,46 @@ export class MapView {
     }
     return best
   }
+
+  /**
+   * The line or heat main nearest a point, if the point is close enough to be a deliberate click.
+   *
+   * Lines were the only thing on the map you could not select, so the one asset whose behaviour
+   * the player most needs to understand — where it is congested, how long it is, what it costs in
+   * losses — was also the only one they could not ask about. Tested segment by segment along the
+   * routed corridor rather than against the straight line between endpoints, because after the
+   * routing milestone those are frequently nowhere near each other.
+   */
+  edgeAtWorld(wx: number, wy: number, maxDistancePx = 14): GridEdge | null {
+    let best: GridEdge | null = null
+    let bestDist = maxDistancePx
+    for (const edge of this.world.network.allEdges()) {
+      const path = this.edgePath(edge)
+      for (let i = 1; i < path.length; i++) {
+        const d = distanceToSegment(wx, wy, path[i - 1]!, path[i]!)
+        if (d < bestDist) {
+          bestDist = d
+          best = edge
+        }
+      }
+    }
+    return best
+  }
+}
+
+/** Perpendicular distance from a point to a line segment, clamped to the segment's ends. */
+function distanceToSegment(
+  px: number,
+  py: number,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const lengthSq = dx * dx + dy * dy
+  if (lengthSq === 0) return Math.hypot(px - a.x, py - a.y)
+  const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lengthSq))
+  return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy))
 }
 
 /** A node's display name: either a place name or a localised technology plus its number. */

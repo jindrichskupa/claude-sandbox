@@ -10,7 +10,7 @@
 
 import { formatMoney, formatMw, formatMwth, t } from '@i18n/index'
 import { PLANT_TYPES, PLANT_TYPE_IDS, type PlantTypeId } from '@content/plantTypes'
-import { LINE_TYPES, VOLTAGE_LEVELS, type VoltageLevel } from '@content/lineTypes'
+import { lineLossMw, LINE_TYPES, VOLTAGE_LEVELS, type VoltageLevel } from '@content/lineTypes'
 import { HEAT_PIPE_TYPES, PIPE_SIZES, type PipeSize } from '@content/heatPipeTypes'
 import type { World } from '@sim/world'
 import { quotePlant, quoteTargetFor } from '@sim/build/commands'
@@ -240,6 +240,16 @@ export class BuildPanel {
         })}`,
       ),
     )
+    // What this voltage is *for*. A layman has no way to know that the answer is a trade of
+    // capital against losses, and the game never said so: the build menu listed three voltages
+    // and left the player to guess. The rule of thumb here is the real one — losses fall with
+    // the square of the voltage, so distance is what decides, and the number beside it is what
+    // this level would actually lose carrying half its rating a hundred kilometres.
+    const lossAtHalfLoad = lineLossMw(type.capacityMw.value / 2, type.resistanceOhmPerKm.value, 100, kv)
+    main.appendChild(
+      el('div', 'build-note', `${t(`line.use.${kv}`)} · ${t('ui.lossPer100km', { mw: lossAtHalfLoad.toFixed(0) })}`),
+    )
+
     row.appendChild(main)
 
     row.addEventListener('click', () => {

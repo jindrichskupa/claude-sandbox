@@ -20,7 +20,7 @@ import { ageYears } from '@sim/assets/aging'
 import { Layer, LAYER_KEYS, Op, Param, PARAM_KEYS, type Explanation } from '@sim/params/types'
 import { drawLoadCurve, drawMix, drawPrice } from './charts'
 import { nodeLabel } from '@render/mapView'
-import { quoteRefurbishment, refurbishmentGains } from '@sim/build/commands'
+import { quoteLineUpgrade, quoteRefurbishment, refurbishmentGains } from '@sim/build/commands'
 import { BuildPanel, type BuildSelection } from './buildPanel'
 import { PoliticsPanel } from './politicsPanel'
 import { ObjectivesPanel } from './objectivesPanel'
@@ -42,6 +42,7 @@ export interface HudCallbacks {
   onSetInsured: (insured: boolean) => void
   onSave: () => void
   onLoad: () => void
+  onUpgradeLine: (edgeId: string) => void
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -78,6 +79,7 @@ export class Hud {
   readonly objectivesPanel: ObjectivesPanel
 
   private selectedNodeId: string | null = null
+  private selectedEdgeId: string | null = null
   private readonly hint: HTMLDivElement
 
   constructor(
@@ -269,6 +271,24 @@ export class Hud {
       this.objectivesPanel.setOpen(false)
     }
     this.selectedNodeId = nodeId
+    this.selectedEdgeId = null
+    this.renderInspector()
+  }
+
+  /**
+   * Select a line rather than a place.
+   *
+   * Lines were the only thing on the map that could not be clicked, so the asset whose behaviour
+   * the player most needs to understand — where it is congested, what it is costing in losses,
+   * whether it can take another circuit — was the one they could ask least about.
+   */
+  selectEdge(edgeId: string | null): void {
+    if (edgeId) {
+      this.buildPanel.setOpen(false)
+      this.objectivesPanel.setOpen(false)
+    }
+    this.selectedEdgeId = edgeId
+    this.selectedNodeId = null
     this.renderInspector()
   }
 
@@ -480,6 +500,10 @@ export class Hud {
   private lastInspectorSignature: string | null = null
 
   private renderInspector(): void {
+    if (this.selectedEdgeId) {
+      this.renderEdgeInspector(this.selectedEdgeId)
+      return
+    }
     const nodeId = this.selectedNodeId
     if (!nodeId) {
       this.inspector.classList.remove('visible')
@@ -693,7 +717,27 @@ export class Hud {
         const capacity = LINE_TYPES[edge.kv].capacityMw.value * edge.circuits
         const flow = Math.abs(dispatch?.lineFlowMw.get(edgeId) ?? 0)
         const block = el('div', 'asset')
-        block.appendChild(el('div', 'asset-name', `${edge.kv} kV → ${edge.from === nodeId ? edge.to : edge.from}`))
+        const otherId = edge.from === nodeId ? edge.to : edge.from
+        const other = this.world.network.getNode(otherId)
+        block.appendChild(
+          el('div', 'asset-name', `${edge.kv} kV → ${(other && nodeLabel(other)) ?? otherId}`),
+        )
+
+        // A line under construction carries nothing and says so, with a date. Until now it
+        // appeared here indistinguishable from an energised one running at zero — which, for the
+        // asset whose entire character is its lead time, is the worst thing the panel could say.
+        const energisesAt = this.world.energisingTick(edgeId)
+        if (!edge.energised && energisesAt !== undefined) {
+          const months = Math.ceil(Math.max(0, energisesAt - this.world.tick) / TICKS_PER_MONTH)
+          block.appendChild(el('div', 'asset-building', t('ui.energisesIn', { months })))
+          block.appendChild(this.kv(t('ui.length'), `${edge.lengthKm.toFixed(0)} ${t('ui.kmShort')}`))
+          block.appendChild(this.kv(t('ui.capacity'), formatMw(capacity)))
+          this.inspector.appendChild(block)
+          continue
+        }
+
+        block.appendChild(this.kv(t('ui.length'), `${edge.lengthKm.toFixed(0)} ${t('ui.kmShort')}`))
+        block.appendChild(this.kv(t('ui.circuits'), String(edge.circuits)))
         const bar = el('div', 'bar')
         const fill = el('div')
         const loading = flow / capacity
@@ -706,6 +750,110 @@ export class Hud {
         this.inspector.appendChild(block)
       }
     }
+  }
+
+  /**
+   * One line, on its own.
+   *
+   * Everything here answers a question the player could not previously ask: what is this
+   * corridor, how hard is it working, what is it losing, and can it take more. The loss figure
+   * is the important one and it is why the voltage choice matters — the same power over the same
+   * distance costs several times as much to move at 110 kV as at 400 kV, and no amount of
+   * explaining that in a menu lands as well as watching it on a line you built.
+   */
+  private renderEdgeInspector(edgeId: string): void {
+    const edge = this.world.network.getEdge(edgeId)
+    if (!edge) {
+      this.selectedEdgeId = null
+      this.inspector.classList.remove('visible')
+      return
+    }
+
+    const signature = `edge:${edgeId}|${this.world.tick}|${edge.circuits}|${edge.upgradeAtTick ?? ''}`
+    if (signature === this.lastInspectorSignature) return
+    this.lastInspectorSignature = signature
+
+    this.inspector.classList.add('visible')
+    this.inspector.replaceChildren()
+    const close = el('button', 'close-btn', t('ui.close'))
+    close.addEventListener('click', () => this.selectEdge(null))
+    this.inspector.appendChild(close)
+
+    const from = this.world.network.getNode(edge.from)
+    const to = this.world.network.getNode(edge.to)
+    const heat = edge.commodity === 'heat'
+    const title = heat && edge.dn !== undefined ? t(HEAT_PIPE_TYPES[edge.dn].nameKey) : `${edge.kv} kV`
+    this.inspector.appendChild(el('h2', undefined, title))
+    this.inspector.appendChild(
+      el(
+        'div',
+        'subtitle',
+        `${(from && nodeLabel(from)) ?? edge.from} → ${(to && nodeLabel(to)) ?? edge.to}`,
+      ),
+    )
+
+    const block = el('div', 'asset')
+    block.appendChild(this.kv(t('ui.length'), `${edge.lengthKm.toFixed(0)} ${t('ui.kmShort')}`))
+    block.appendChild(this.kv(t('ui.circuits'), String(edge.circuits)))
+
+    if (!edge.energised) {
+      const at = this.world.energisingTick(edgeId)
+      const months = at === undefined ? 0 : Math.ceil(Math.max(0, at - this.world.tick) / TICKS_PER_MONTH)
+      block.appendChild(el('div', 'asset-building', t('ui.energisesIn', { months })))
+    } else if (heat && edge.dn !== undefined) {
+      const pipe = HEAT_PIPE_TYPES[edge.dn]
+      const capacity = pipe.capacityMwth.value * Math.max(1, edge.circuits)
+      const flow = Math.abs(this.world.lastHeat?.pipeFlowMw.get(edgeId) ?? 0)
+      block.appendChild(this.loadBar(flow / capacity, '#e8802a'))
+      block.appendChild(this.kv(t('ui.output'), `${formatMwth(flow)} / ${formatMwth(capacity)}`))
+      block.appendChild(
+        this.kv(t('ui.losses'), formatMwth(pipe.standingLossMwPerKm.value * edge.lengthKm * edge.circuits)),
+      )
+    } else if (edge.kv !== 0) {
+      const capacity = LINE_TYPES[edge.kv].capacityMw.value * edge.circuits
+      const flow = Math.abs(this.world.lastDispatch?.lineFlowMw.get(edgeId) ?? 0)
+      const loss = this.world.lastDispatch?.lineLossMw.get(edgeId) ?? 0
+      const loading = flow / capacity
+      block.appendChild(this.loadBar(loading, loading > 0.9 ? '#e2483d' : loading > 0.5 ? '#e8b23a' : '#5fc27e'))
+      block.appendChild(this.kv(t('ui.output'), `${formatMw(flow)} / ${formatMw(capacity)}`))
+      // Losses as a share of what is flowing, because the absolute figure means nothing without
+      // it: two megawatts lost is excellent on a busy 400 kV line and dreadful on an idle one.
+      const share = flow > 0.1 ? ` (${formatPct(loss / flow)})` : ''
+      block.appendChild(this.kv(t('ui.losses'), `${formatMw(loss)}${share}`))
+    }
+
+    if (edge.upgradeAtTick !== undefined) {
+      const months = Math.ceil(Math.max(0, edge.upgradeAtTick - this.world.tick) / TICKS_PER_MONTH)
+      block.appendChild(el('div', 'asset-building', t('ui.upgradingIn', { months })))
+    } else if (edge.commodity === 'electric' && edge.energised) {
+      // Reinforcing a corridor you already own, rather than drawing a second one on top of it.
+      const quote = quoteLineUpgrade(this.world, edgeId)
+      const row = el('div', 'asset-actions')
+      const button = el('button', undefined, t('ui.addCircuit'))
+      if (quote.ok) {
+        button.title = t('ui.upgradeGains', {
+          cost: formatMoney(quote.totalCost),
+          months: Math.round(quote.buildTicks / TICKS_PER_MONTH),
+        })
+        button.addEventListener('click', () => this.callbacks.onUpgradeLine(edgeId))
+      } else {
+        button.classList.add('disabled')
+        button.title = t(quote.reasonKey ?? 'build.notUpgradable', quote.reasonParams)
+      }
+      row.appendChild(button)
+      block.appendChild(row)
+    }
+
+    this.inspector.appendChild(block)
+  }
+
+  private loadBar(fraction: number, colour: string): HTMLDivElement {
+    const bar = el('div', 'bar')
+    const fill = el('div')
+    fill.style.width = `${Math.max(0, Math.min(1, fraction)) * 100}%`
+    fill.style.background = colour
+    bar.appendChild(fill)
+    return bar
   }
 
   /** Retire and mothball, offered only where they actually apply. */

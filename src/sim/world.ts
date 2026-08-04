@@ -477,6 +477,17 @@ export class World {
     this.energiseAt.set(edgeId, tick)
   }
 
+  /**
+   * When a line under construction will be energised, or undefined if it already is.
+   *
+   * Exposed so the inspector can tell the player when a half-built corridor will start carrying
+   * anything. A plant under construction has said so since M1; a line said nothing at all, which
+   * made the one asset whose whole point is a long lead time the one you could learn least about.
+   */
+  energisingTick(edgeId: string): number | undefined {
+    return this.energiseAt.get(edgeId)
+  }
+
   get date(): GameDate {
     return tickToDate(this.tick, this.scenario.startYear)
   }
@@ -797,6 +808,16 @@ export class World {
         this.energiseAt.delete(edgeId)
         if (this.network.getEdge(edgeId)) this.network.setEnergised(edgeId, true)
       }
+    }
+
+    // A second circuit strung on towers that are already standing. Kept on the edge rather than
+    // in a side table because, unlike energising, it is a change to what the line *is* — and the
+    // edges are saved wholesale, so it survives a save without any format work at all.
+    for (const edge of this.network.allEdges()) {
+      if (edge.upgradeAtTick === undefined || this.tick < edge.upgradeAtTick) continue
+      edge.circuits = edge.upgradeToCircuits ?? edge.circuits
+      delete edge.upgradeAtTick
+      delete edge.upgradeToCircuits
     }
   }
 

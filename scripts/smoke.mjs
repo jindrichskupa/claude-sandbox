@@ -395,6 +395,76 @@ try {
   if (phaseAfter === phaseBefore) throw new Error('Clicking Retire did nothing')
   await page.keyboard.press('Space')
 
+  // --- Lines are things you can ask about --------------------------------
+  // Clock stopped, so the panel is not rebuilding under the automation between locating a
+  // button and pressing it. A person does not need this — a press freezes the rebuild for its
+  // own duration — but Playwright resolves the element and clicks it as two separate steps.
+  await page.keyboard.press('Space')
+  await page.waitForTimeout(200)
+  // Every other asset on the map could be clicked; lines could not, so the one whose behaviour
+  // most needs explaining was the one you could learn least about.
+  const lineClick = await page.evaluate(() => {
+    const g = window.game
+    const cam = g.map.camera
+    for (const edge of g.world.network.allEdges()) {
+      if (edge.commodity !== 'electric' || !edge.energised) continue
+      // Only a single-circuit corridor can be reinforced, which is what this section is about.
+      if (edge.circuits >= 2) continue
+      // Walk the routed corridor rather than the straight line between endpoints — after the
+      // routing milestone those are frequently nowhere near each other — and take a point that
+      // is not also within grabbing distance of a substation, since nodes win ties by design.
+      const route = edge.route ?? [g.world.network.getNode(edge.from), g.world.network.getNode(edge.to)]
+      for (const frac of [0.5, 0.35, 0.65, 0.25, 0.75]) {
+        const i = Math.min(route.length - 1, Math.max(0, Math.round(frac * (route.length - 1))))
+        const mx = route[i].x * 32 + 16
+        const my = route[i].y * 32 + 16
+        if (g.map.nodeAtWorld(mx, my, 32)) continue
+        if (g.map.edgeAtWorld(mx, my)?.id !== edge.id) continue
+        const sx = (mx - cam.x) * cam.zoom
+        const sy = (my - cam.y) * cam.zoom
+        if (sx < 360 || sx > 1090 || sy < 150 || sy > 780) continue
+        return { id: edge.id, sx, sy }
+      }
+    }
+    return null
+  })
+  if (!lineClick) throw new Error('No line on screen to click')
+  await page.mouse.click(lineClick.sx, lineClick.sy)
+  await page.waitForTimeout(300)
+  const lineInspector = await page.evaluate(() => {
+    const panel = document.getElementById('inspector')
+    return {
+      visible: panel.classList.contains('visible'),
+      heading: panel.querySelector('h2')?.textContent,
+      rows: [...panel.querySelectorAll('.kv')].map((n) => n.textContent),
+      action: panel.querySelector('.asset-actions button')?.textContent,
+    }
+  })
+  console.log('clicked a line:', lineInspector)
+  if (!lineInspector.visible) throw new Error('Clicking a line did not open the inspector')
+  if (!lineInspector.rows.some((r) => r.includes('Length'))) throw new Error('The line inspector shows no length')
+  if (lineInspector.action !== 'Add a second circuit') throw new Error('No way to reinforce a corridor')
+
+  // Reinforcing a corridor rather than drawing a second one on top of it.
+  const circuitsBefore = await page.evaluate(
+    (id) => window.game.world.network.getEdge(id).circuits,
+    lineClick.id,
+  )
+  await page.click('#inspector .asset-actions button')
+  await page.waitForTimeout(300)
+  const upgrade = await page.evaluate((id) => {
+    const e = window.game.world.network.getEdge(id)
+    return { circuits: e.circuits, pending: e.upgradeToCircuits ?? null, at: e.upgradeAtTick ?? null }
+  }, lineClick.id)
+  console.log('after Add a second circuit:', { circuitsBefore, ...upgrade })
+  if (upgrade.pending !== circuitsBefore + 1) throw new Error('The second circuit was not ordered')
+  // And it must not arrive before the crews have finished.
+  if (upgrade.circuits !== circuitsBefore) throw new Error('The second circuit arrived instantly')
+
+  await page.screenshot({ path: join(OUT, '16-line-inspector.png') })
+  await page.evaluate(() => window.game.hud.selectEdge(null))
+  await page.keyboard.press('Space')
+
   // --- Objectives -------------------------------------------------------
   const objectives = await page.evaluate(() => {
     const g = window.game

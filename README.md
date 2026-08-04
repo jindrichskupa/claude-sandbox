@@ -59,6 +59,13 @@ the document tries to fetch anything.
   because load and price are correlated and a summer night is not equal evidence to a December
   evening. With the scarcity hours put back, a crippled fleet's tariff is 22× a healthy one's and
   twelve years end with €151bn in the bank; with them removed it is 1.4×.
+- **You can see what a decision costs before you take it.** Hovering a placement shows the
+  price, the length, the lead time and the site quality, or the reason it is refused — because
+  choosing a corridor is a comparison, and until those were on screen the most expensive decision
+  in the game was taken blind. Lines are selectable in their own right, with length, circuits,
+  loading and losses as a share of what is flowing; and a corridor that is short of capacity can
+  take a **second circuit** on the towers already standing, at 45% of a new line's conductor cost,
+  rather than a parallel line drawn on top of the first.
 - **A brief you can lose, and a run you can put down.** The scenario states six objectives
   drawn from a closed set of measurable conditions, and the panel shows each one's live reading
   beside its last verdict. The verdict is annual — a continuous objective must not fail on one

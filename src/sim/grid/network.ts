@@ -62,6 +62,16 @@ export interface GridEdge {
   lengthKm: number
   /** Number of parallel circuits, or parallel mains for a heat edge. */
   circuits: number
+  /**
+   * A second circuit being strung on the towers that are already there.
+   *
+   * Kept as a pending change on the edge rather than as a second edge, because that is what it
+   * physically is: the same corridor, the same steel, another set of conductors. Modelling it as
+   * a parallel line would double the drawing, double the losses bookkeeping, and give the player
+   * two things to manage where the industry has one.
+   */
+  upgradeAtTick?: number
+  upgradeToCircuits?: number
   /** False while under construction or after a fault. */
   energised: boolean
   builtTick: number

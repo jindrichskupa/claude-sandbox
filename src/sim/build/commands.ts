@@ -38,6 +38,17 @@ const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
  */
 const REFURBISH_EARLIEST_LIFE_FRACTION = 0.45
 
+/**
+ * What a second circuit costs, as a fraction of a first one's conductor cost.
+ *
+ * The land, the consents, the access and the towers are already bought. What is left is
+ * conductor, fittings and the crews to string them.
+ */
+const SECOND_CIRCUIT_COST_FRACTION = 0.45
+
+/** Towers are built for two circuits. A third would be a new corridor, not an upgrade. */
+const MAX_CIRCUITS = 2
+
 /** A costed, checked proposal. `reasonKey` explains a refusal in the player's language. */
 export interface Quote {
   ok: boolean
@@ -222,6 +233,50 @@ export function quoteLine(world: World, fromId: NodeId, toId: NodeId, kv: Voltag
 
   if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
   return { ok: true, totalCost, buildTicks, lengthKm, route: simplifyRoute(route) }
+}
+
+/**
+ * What a second circuit on an existing line would cost.
+ *
+ * A corridor is not mostly conductor. The land, the consents, the access roads and the towers
+ * are already there and already paid for, so stringing another set of conductors on them buys a
+ * second circuit's worth of capacity for a fraction of a second corridor's price — and it is the
+ * first thing any real utility does when a route runs short. The substation bays at each end are
+ * the part you do pay for in full: they are new switchgear either way.
+ *
+ * It is also the answer to a question the interface could not previously answer at all. Asking
+ * for a second line between the same two points was simply refused, so the only way to reinforce
+ * a route was a parallel corridor drawn on top of the first one.
+ */
+export function quoteLineUpgrade(world: World, edgeId: string): Quote {
+  const edge = world.network.getEdge(edgeId)
+  if (!edge) return refuse('build.noSuchNode')
+  if (edge.commodity !== 'electric' || edge.kv === 0) return refuse('build.notUpgradable')
+  if (!edge.energised) return refuse('build.stillBuilding')
+  if (edge.upgradeAtTick !== undefined) return refuse('build.alreadyUpgrading')
+  if (edge.circuits >= MAX_CIRCUITS) return refuse('build.maxCircuits', { circuits: MAX_CIRCUITS })
+
+  const type = LINE_TYPES[edge.kv]
+  const totalCost =
+    type.capexPerKm.value * edge.lengthKm * SECOND_CIRCUIT_COST_FRACTION + type.substationCapex.value * 2
+  // Quicker than a new corridor for the same reason it is cheaper: no route to consent, no
+  // towers to erect, only conductors to string on steel that is already standing.
+  const buildMonths = (type.buildTimeMonthsPer100Km.value * edge.lengthKm) / 100
+  const buildTicks = Math.max(1, Math.round(Math.max(2, buildMonths * 0.5) * TICKS_PER_MONTH))
+
+  if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
+  return { ok: true, totalCost, buildTicks, lengthKm: edge.lengthKm }
+}
+
+/** Commit to a second circuit. The capacity arrives when the crews are finished, not now. */
+export function upgradeLine(world: World, edgeId: string): { ok: boolean; quote: Quote } {
+  const quote = quoteLineUpgrade(world, edgeId)
+  if (!quote.ok) return { ok: false, quote }
+  const edge = world.network.requireEdge(edgeId)
+  edge.upgradeAtTick = world.tick + quote.buildTicks
+  edge.upgradeToCircuits = edge.circuits + 1
+  world.scheduleSpending(edgeId, quote.totalCost, quote.buildTicks, 'capex')
+  return { ok: true, quote }
 }
 
 /**

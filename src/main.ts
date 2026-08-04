@@ -10,10 +10,14 @@
 import { Application } from 'pixi.js'
 import { buildWorld, loadWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
-import { MapView, TILE_PX, type BuildMode } from '@render/mapView'
+import { MapView, nodeLabel, TILE_PX, type BuildMode } from '@render/mapView'
+import { PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
+import { LINE_TYPES } from '@content/lineTypes'
+import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
+import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 import { Hud, type Speed } from '@ui/hud'
 import type { BuildSelection } from '@ui/buildPanel'
-import { setLocale, t } from '@i18n/index'
+import { formatMoney, setLocale, t } from '@i18n/index'
 import { makeSaveFile, readLocalSave, writeLocalSave } from '@sim/scenario/save'
 import {
   beginHeatPipeConstruction,
@@ -26,7 +30,11 @@ import {
   reactivatePlant,
   refurbishPlant,
   retirePlant,
+  upgradeLine,
+  type Quote,
 } from '@sim/build/commands'
+
+const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 
 /** Simulation ticks per real second at 1x. One in-game day takes 12 seconds. */
 const TICKS_PER_SECOND_AT_1X = 2
@@ -181,6 +189,12 @@ async function main(): Promise<void> {
       },
       onSave: save,
       onLoad: load,
+      onUpgradeLine: (edgeId) => {
+        const result = upgradeLine(world, edgeId)
+        hud.setHint(result.ok ? t('build.upgrading') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
+        map.syncToWorld()
+        hud.update()
+      },
     })
 
   const makeMap = (): MapView =>
@@ -211,7 +225,27 @@ async function main(): Promise<void> {
     canvas.setPointerCapture(e.pointerId)
   })
 
-  /** Keep the ghost in step with the cursor, and tell it whether the placement is legal. */
+  /**
+   * What a placement would cost, as one line of text.
+   *
+   * This is the whole reason the hover does more than colour a square. Choosing where to run a
+   * corridor is a comparison — this route against that one, from this substation or the next —
+   * and until the price, the length and the lead time are on screen *before* committing, the
+   * player is being asked to make the most expensive decision in the game blind. A refusal says
+   * why, for the same reason: "you cannot build here" and "you cannot afford it" are different
+   * pieces of news and a red square tells you neither.
+   */
+  const quoteText = (quote: Quote, prefix: string): string => {
+    if (!quote.ok) return `${prefix} — ${t(quote.reasonKey ?? 'build.unsuitableGround', quote.reasonParams)}`
+    const parts = [prefix]
+    if (quote.lengthKm !== undefined) parts.push(`${quote.lengthKm.toFixed(0)} ${t('ui.kmShort')}`)
+    parts.push(formatMoney(quote.totalCost))
+    parts.push(`${Math.round(quote.buildTicks / TICKS_PER_MONTH)} ${t('ui.months')}`)
+    if (quote.siteQuality !== undefined) parts.push(`${t('ui.siteQuality')} ${Math.round(quote.siteQuality * 100)}%`)
+    return parts.join(' · ')
+  }
+
+  /** Keep the ghost in step with the cursor, and tell it what the placement would cost. */
   const updateHover = (clientX: number, clientY: number): void => {
     const mode: BuildMode = map.buildMode
     if (!mode) {
@@ -223,15 +257,25 @@ async function main(): Promise<void> {
     map.hoverTile = tile
 
     if (mode.kind === 'plant') {
-      map.hoverValid = quotePlant(world, mode.typeId as never, tile.x, tile.y).ok
+      const quote = quotePlant(world, mode.typeId as never, tile.x, tile.y)
+      map.hoverValid = quote.ok
+      hud.setHint(quoteText(quote, t(PLANT_TYPES[mode.typeId as PlantTypeId].nameKey)))
     } else if (mode.fromNodeId) {
       const worldPoint = map.camera.screenToWorld(clientX - rect.left, clientY - rect.top)
       const target = map.nodeAtWorld(worldPoint.x, worldPoint.y, TILE_PX)
-      map.hoverValid = target
-        ? mode.kind === 'pipe'
-          ? quoteHeatPipe(world, mode.fromNodeId, target.id, mode.dn, mode.pipes).ok
-          : quoteLine(world, mode.fromNodeId, target.id, mode.kv, mode.circuits).ok
-        : false
+      if (!target) {
+        map.hoverValid = false
+        hud.setHint(t(mode.kind === 'pipe' ? 'ui.pipeHint' : 'ui.lineHint'))
+        return
+      }
+      const quote =
+        mode.kind === 'pipe'
+          ? quoteHeatPipe(world, mode.fromNodeId, target.id, mode.dn, mode.pipes)
+          : quoteLine(world, mode.fromNodeId, target.id, mode.kv, mode.circuits)
+      map.hoverValid = quote.ok
+      const label =
+        mode.kind === 'pipe' ? t(HEAT_PIPE_TYPES[mode.dn].nameKey) : t(LINE_TYPES[mode.kv].nameKey)
+      hud.setHint(quoteText(quote, `${label} → ${nodeLabel(target) ?? target.id}`))
     } else {
       map.hoverValid = true
     }
@@ -308,12 +352,20 @@ async function main(): Promise<void> {
 
     if (handleBuildClick(e.clientX, e.clientY)) return
 
-    // A click rather than a drag: select whatever is under the cursor.
+    // A click rather than a drag: select whatever is under the cursor. Nodes win ties, because
+    // every line ends at one and a click near a substation almost always means the substation.
     const rect = canvas.getBoundingClientRect()
     const world2 = map.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top)
     const node = map.nodeAtWorld(world2.x, world2.y, TILE_PX)
-    map.selectedNodeId = node ? node.id : null
-    hud.selectNode(node ? node.id : null)
+    if (node) {
+      map.selectedNodeId = node.id
+      hud.selectNode(node.id)
+      return
+    }
+    map.selectedNodeId = null
+    const edge = map.edgeAtWorld(world2.x, world2.y)
+    if (edge) hud.selectEdge(edge.id)
+    else hud.selectNode(null)
   })
 
   // Right-click abandons placement, which is what every game of this kind does.

@@ -1016,3 +1016,20 @@ button.danger:hover {
 .build-trend.bad {
   color: var(--warn);
 }
+
+/* A line that exists on the map but carries nothing yet. Amber rather than
+ * red: it is not a fault, it is a commitment with a date on it. */
+.asset-building {
+  font-size: 11px;
+  color: var(--warn);
+  margin: 2px 0 4px;
+}
+
+/* What a voltage is for, under its price. Dimmer than the numbers above it:
+ * it is the answer to a question a newcomer has and an expert does not. */
+.build-note {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  line-height: 1.35;
+}

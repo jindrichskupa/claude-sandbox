@@ -300,5 +300,22 @@
   "tech.standardisation": "{built} already built",
   "ui.costTrend": "Cost trend",
   "ui.realTermsSince": "{pct} in real terms since {year}",
-  "ui.perDecadeReal": "per decade, in real terms"
+  "ui.perDecadeReal": "per decade, in real terms",
+  "ui.kmShort": "km",
+  "ui.energisesIn": "Energised in {months} months",
+  "ui.underConstruction": "Under construction",
+  "ui.length": "Length",
+  "ui.addCircuit": "Add a second circuit",
+  "ui.circuits": "Circuits",
+  "ui.upgradeGains": "{cost}, {months} months, doubles the capacity of this corridor",
+  "ui.upgradingIn": "Second circuit in {months} months",
+  "build.notUpgradable": "Cannot take another circuit",
+  "build.stillBuilding": "Still under construction",
+  "build.alreadyUpgrading": "A second circuit is already on the way",
+  "build.maxCircuits": "Already carries {circuits} circuits",
+  "build.upgrading": "Second circuit started",
+  "line.use.110": "Short local links",
+  "line.use.220": "Regional transfer",
+  "line.use.400": "Long-distance bulk power",
+  "ui.lossPer100km": "{mw} MW lost per 100 km at half load"
 }
