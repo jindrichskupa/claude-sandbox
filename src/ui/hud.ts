@@ -225,6 +225,28 @@ export class Hud {
     this.hint = el('div', 'panel')
     this.hint.id = 'hint'
     root.appendChild(this.hint)
+
+    // Captured on the overlay rather than on each button, so it covers every control that exists
+    // now and every one added later. `pointerup` is bound to the window because a press that ends
+    // outside the element — a drag off a button, a release over the map — must still clear the
+    // flag, or the interface would freeze permanently the first time somebody changed their mind.
+    root.addEventListener('pointerdown', this.onPointerDown)
+    window.addEventListener('pointerup', this.onPointerUp)
+    window.addEventListener('pointercancel', this.onPointerCancel)
+  }
+
+  private readonly onPointerDown = (): void => {
+    this.pointerDown = true
+  }
+
+  private readonly onPointerUp = (): void => {
+    if (!this.pointerDown) return
+    this.pointerDown = false
+    this.update()
+  }
+
+  private readonly onPointerCancel = (): void => {
+    this.pointerDown = false
   }
 
   /** Show the one-line instruction that goes with the current placement mode. */
@@ -250,8 +272,29 @@ export class Hud {
     this.renderInspector()
   }
 
+  /**
+   * True from pointer-down until pointer-up, anywhere in the overlay.
+   *
+   * This exists because of a bug that made most of the game unclickable and was invisible to
+   * every test, because no test ever clicked anything — they called the commands directly.
+   *
+   * The panels rebuild their contents from scratch, which is the right design for a dashboard
+   * whose every number moves. But `update()` runs ten times a second, and a human click takes
+   * eighty to a hundred and fifty milliseconds. So a button was routinely destroyed and replaced
+   * *between* the press and the release, and a browser only fires `click` when both landed on
+   * the same element. Roughly every other press did nothing at all, at random, which reads as a
+   * flaky interface rather than as a bug with a cause.
+   *
+   * Suppressing the rebuild for the duration of a press is a complete fix rather than a
+   * mitigation: no rebuild can fall inside a click if no rebuild happens while the button is
+   * down. The display freezes for a tenth of a second while the player is pressing something,
+   * which nobody can perceive and which is the moment they are least interested in the numbers.
+   */
+  private pointerDown = false
+
   /** Refresh everything. Called once per simulation tick, not once per frame. */
   update(): void {
+    if (this.pointerDown) return
     const world = this.world
     const snap = world.recentHistory(1)[0]
     const dispatch = world.lastDispatch
@@ -330,9 +373,26 @@ export class Hud {
    * player's answer to this panel, and putting them anywhere else would hide the connection
    * between "things keep breaking" and "you cut the maintenance budget".
    */
+  private lastEventSignature: string | null = null
+
   private renderEvents(): void {
     const world = this.world
     const state = world.director.state
+
+    // Events arrive a few times a game year; the two standing toggles change only when the
+    // player moves them. Rebuilding this panel ten times a second was destroying the choice
+    // buttons faster than anyone could press them.
+    const signature = [
+      state.pending.map((p) => `${p.uid}:${p.choiceId ?? ''}:${p.landsTick}`).join(','),
+      state.active.map((a) => `${a.uid}:${a.endsTick}`).join(','),
+      world.state.maintenanceLevel,
+      world.state.insured,
+      // Affordability decides whether a response is offered, so it belongs in the signature.
+      Math.round(world.finances.cash / 1e6),
+    ].join('|')
+    if (signature === this.lastEventSignature) return
+    this.lastEventSignature = signature
+
     this.events.replaceChildren()
     this.events.appendChild(el('h3', undefined, t('ui.events')))
 
@@ -417,12 +477,30 @@ export class Hud {
    * The inspector, including the modifier chain. This is the panel that turns the parameter
    * pipeline from an implementation detail into something the player can learn from.
    */
+  private lastInspectorSignature: string | null = null
+
   private renderInspector(): void {
     const nodeId = this.selectedNodeId
     if (!nodeId) {
       this.inspector.classList.remove('visible')
+      this.lastInspectorSignature = null
       return
     }
+
+    // The inspector genuinely shows live numbers, so it cannot be cached on content the way the
+    // other panels are. But it can be cached on the *tick*: nothing in it changes without the
+    // world changing, so a paused game rebuilds it never and a game at normal speed twice a
+    // second instead of ten times.
+    // Lifecycle phases are in the signature as well as the tick, because retiring or mothballing
+    // changes which buttons belong here and does so *without* advancing the clock — on a paused
+    // game the tick alone would leave the old buttons on screen after the action they triggered.
+    const phases = this.world.plants
+      .filter((p) => p.nodeId === nodeId)
+      .map((p) => `${p.id}:${p.phase}`)
+      .join(',')
+    const signature = `${nodeId}|${this.world.tick}|${phases}`
+    if (signature === this.lastInspectorSignature) return
+    this.lastInspectorSignature = signature
     const node = this.world.network.getNode(nodeId)
     if (!node) {
       this.inspector.classList.remove('visible')
@@ -721,8 +799,17 @@ export class Hud {
     return wrap
   }
 
-  /** Remove everything. Used when restarting a scenario. */
+  /**
+   * Remove everything. Used when loading a save, which replaces the whole overlay.
+   *
+   * The listeners have to come off explicitly: the overlay element itself survives, and the two
+   * on `window` certainly do, so a discarded HUD would go on waking up and writing into detached
+   * nodes for the rest of the session — once per load, forever.
+   */
   destroy(): void {
+    this.root.removeEventListener('pointerdown', this.onPointerDown)
+    window.removeEventListener('pointerup', this.onPointerUp)
+    window.removeEventListener('pointercancel', this.onPointerCancel)
     this.root.replaceChildren()
   }
 }

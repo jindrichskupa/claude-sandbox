@@ -304,6 +304,97 @@ try {
   await page.screenshot({ path: join(OUT, '12-politics.png') })
   await page.evaluate(() => window.game.hud.politicsPanel.setOpen(false))
 
+  // --- Actually clicking things ------------------------------------------
+  //
+  // Every test above this line drives the game through its API. That left a bug in the interface
+  // invisible for four milestones: the panels rebuild themselves ten times a second, a human
+  // click takes eighty to a hundred and fifty milliseconds, and a browser only fires `click` when
+  // the press and the release land on the same element. Buttons were being destroyed mid-press,
+  // so roughly every other one did nothing — which reads as a flaky interface rather than as a
+  // bug with a cause, and which no amount of calling `beginPlantConstruction` directly can catch.
+  //
+  // So this section uses the mouse.
+  await page.evaluate(() => window.game.hud.selectNode(null))
+  await page.click('#build-toggle')
+  await page.waitForTimeout(200)
+  if (!(await page.evaluate(() => document.getElementById('build-panel')?.classList.contains('visible')))) {
+    throw new Error('Clicking the Build button did not open the panel')
+  }
+
+  // Pick a technology by clicking its row, and check the choice actually took.
+  const picked = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#build-panel .build-row')]
+    const row = rows.find((r) => r.textContent.includes('Combined-cycle'))
+    if (!row) return null
+    const box = row.getBoundingClientRect()
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  })
+  if (!picked) throw new Error('The combined-cycle row is missing from the build panel')
+  await page.mouse.click(picked.x, picked.y)
+  await page.waitForTimeout(200)
+  const mode = await page.evaluate(() => window.game.map.buildMode)
+  console.log('build mode after clicking a row:', mode)
+  if (mode?.typeId !== 'ccgt') throw new Error('Clicking a build row did not select the technology')
+
+  // And place it by clicking the map, well clear of the panels that sit over the canvas.
+  const site = await page.evaluate(() => {
+    const g = window.game
+    const cam = g.map.camera
+    for (let y = 0; y < g.world.scenario.mapHeight; y++) {
+      for (let x = 0; x < g.world.scenario.mapWidth; x++) {
+        if (!g.build.quotePlant(g.world, 'ccgt', x, y).ok) continue
+        const sx = (x * 32 + 16 - cam.x) * cam.zoom
+        const sy = (y * 32 + 16 - cam.y) * cam.zoom
+        if (sx < 360 || sx > 1090 || sy < 150 || sy > 780) continue
+        return { x, y, sx, sy }
+      }
+    }
+    return null
+  })
+  if (!site) throw new Error('Nowhere clickable to place a station')
+  const fleetBefore = await page.evaluate(() => window.game.world.plants.length)
+  await page.mouse.move(site.sx, site.sy)
+  await page.waitForTimeout(120)
+  await page.mouse.down()
+  await page.mouse.up()
+  await page.waitForTimeout(300)
+  const fleetAfter = await page.evaluate(() => window.game.world.plants.length)
+  console.log('clicked the map to build:', fleetBefore, '->', fleetAfter)
+  if (fleetAfter <= fleetBefore) throw new Error('Clicking the map did not start a station')
+
+  // A panel must not rebuild itself when nothing has changed — that churn is what ate the
+  // clicks, and it is also what made the game burn a core doing nothing.
+  await page.keyboard.press('Space')
+  await page.evaluate(() => window.game.hud.selectNode('n_oldharbour'))
+  await page.waitForTimeout(300)
+  const churn = await page.evaluate(async () => {
+    const counts = {}
+    const observers = []
+    for (const id of ['inspector', 'events', 'build-panel']) {
+      const node = document.getElementById(id)
+      counts[id] = 0
+      const obs = new MutationObserver(() => counts[id]++)
+      obs.observe(node, { childList: true, subtree: true })
+      observers.push(obs)
+    }
+    await new Promise((r) => setTimeout(r, 1500))
+    for (const o of observers) o.disconnect()
+    return counts
+  })
+  console.log('DOM rebuilds in 1.5s with the clock stopped:', churn)
+  for (const [id, n] of Object.entries(churn)) {
+    if (n > 0) throw new Error(`#${id} rebuilt ${n} times while the game was paused`)
+  }
+
+  // And the buttons it holds must survive being clicked.
+  const phaseBefore = await page.evaluate(() => window.game.world.getPlant('p_oldharbour').phase)
+  await page.click('#inspector .asset-actions button.danger')
+  await page.waitForTimeout(300)
+  const phaseAfter = await page.evaluate(() => window.game.world.getPlant('p_oldharbour').phase)
+  console.log('Retire clicked, phase:', phaseBefore, '->', phaseAfter)
+  if (phaseAfter === phaseBefore) throw new Error('Clicking Retire did nothing')
+  await page.keyboard.press('Space')
+
   // --- Objectives -------------------------------------------------------
   const objectives = await page.evaluate(() => {
     const g = window.game

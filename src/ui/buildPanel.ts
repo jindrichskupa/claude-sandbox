@@ -96,9 +96,37 @@ export class BuildPanel {
     this.render()
   }
 
-  /** Redraw. Cheap enough to call whenever money or the date changes. */
+  /**
+   * What the panel would currently show, as a short string.
+   *
+   * Everything on these rows moves slowly: prices reset annually, cash settles monthly, the
+   * government changes at elections. Yet `render` was called ten times a second, and each call
+   * rebuilt twenty rows, each of which ran a full `quotePlant` — including `legalProbe`, which
+   * searches the map for a site the technology will accept. That is a map scan per technology,
+   * two hundred times a second, to redraw text that changes a few times a game year.
+   */
+  private signature(): string {
+    const w = this.world
+    const d = w.date
+    return [
+      d.year,
+      d.month,
+      // Bucketed, because affordability is the only thing cash changes here and it is a
+      // threshold rather than a number on display.
+      Math.round(w.finances.cash / 1e6),
+      w.state.policyRegimeId,
+      this.selection ? JSON.stringify(this.selection) : '',
+    ].join('|')
+  }
+
+  private lastSignature: string | null = null
+
+  /** Redraw, but only when something the panel shows has actually changed. */
   render(): void {
     if (!this.open) return
+    const signature = this.signature()
+    if (signature === this.lastSignature) return
+    this.lastSignature = signature
     this.list.replaceChildren()
 
     this.list.appendChild(el('div', 'build-group-title', t('ui.plants')))

@@ -242,6 +242,31 @@ So: `scripts/storageCompare.ts` runs every arm on the same seeds, reports the pa
 difference with its standard error, and labels anything inside two standard errors as noise.
 Single-run comparisons of this quantity mean nothing.
 
+## A bug that four milestones of tests could not see
+
+Worth its own section, because the lesson generalises.
+
+Every test in this project drove the game through its API: `beginPlantConstruction`, `retirePlant`,
+`hud.buildPanel.setOpen(true)`. All of them passed. Meanwhile most of the interface did not work.
+
+The panels rebuild their contents from scratch on every refresh, which is the right design for a
+dashboard whose every number moves — but the refresh runs ten times a second, and a human click
+takes eighty to a hundred and fifty milliseconds. A browser fires `click` only when the press and
+the release land on the *same* element. So buttons were routinely destroyed and replaced between
+the two, and roughly every other press did nothing, at random. That reads as a flaky interface
+rather than as a bug with a cause, which is exactly why it survived so long.
+
+Two fixes. Rebuilds are suspended while a pointer is down, which is a complete answer rather than
+a mitigation: no rebuild can fall inside a click if none happens while the button is held. And
+each panel now compares a short signature of what it would show and returns without touching the
+DOM when nothing has changed — which also removed the churn that was burning a core for nothing.
+The build panel was running a full site search per technology, twenty technologies, ten times a
+second, to redraw text that changes a few times a game year.
+
+The smoke test now uses the mouse: it clicks the Build button, clicks a row, clicks the map to
+place a station, and clicks Retire in the inspector, and it fails if any panel rebuilds even once
+while the clock is stopped.
+
 ## Known gaps
 
 Stated plainly, because they are the difference between what the simulation looks like it
