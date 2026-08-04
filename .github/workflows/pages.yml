@@ -2,7 +2,10 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-  # So a branch can be published before it is merged.
+    # Which pushes are worth starting a run for. Without this every push to every working
+    # branch spins up a run that immediately skips, which fills the Actions tab with noise.
+    branches: [master, main]
+  # So a branch can be published on demand, including before it is the default one.
   workflow_dispatch:
 
 # Only what Pages needs, and nothing else.
@@ -18,10 +21,10 @@ concurrency:
 
 jobs:
   build:
-    # Publish whatever the default branch happens to be, rather than a branch named here.
-    # Naming one would be wrong twice over: it is wrong today, because this repository's
-    # default branch is not called main, and it would go stale again the moment the branch is
-    # renamed or merged. Asking the repository what its default branch is cannot drift.
+    # Which branch may actually *publish*, which is a different question from which pushes start
+    # a run. The trigger above is about noise; this is about correctness. Asking the repository
+    # for its default branch rather than naming one here means that if the default is ever moved
+    # again, a leftover `master` cannot go on quietly publishing a stale site.
     if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:

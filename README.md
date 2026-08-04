@@ -20,10 +20,12 @@ npm run verify:pages  # serve the build under the Pages sub-path and load it in 
 
 **https://jindrichskupa.github.io/claude-sandbox/**
 
-Pushing to the default branch publishes the game to GitHub Pages via
-`.github/workflows/pages.yml`, which lints, tests and builds before it deploys. The trigger
-asks the repository what its default branch is rather than naming one, so it cannot go stale
-when a branch is renamed or merged.
+Pushing to `master` publishes the game to GitHub Pages via `.github/workflows/pages.yml`,
+which lints, tests and builds before it deploys. Two separate questions are answered
+separately there: the trigger decides which pushes are worth starting a run for, and a job
+condition decides which branch may actually publish. The latter asks the repository for its
+default branch rather than naming one, so if the default is ever moved again a leftover
+`master` cannot go on quietly publishing a stale site.
 
 One failure mode is worth naming because every other signal misses it: a project Pages site
 is served under `/<repo>/`, so a build with absolute asset paths compiles cleanly, deploys
