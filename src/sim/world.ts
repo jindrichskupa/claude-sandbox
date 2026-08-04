@@ -47,6 +47,7 @@ import {
   type ScenarioOutcome,
 } from './scenario/objectives'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
+import { AssetBooks } from './economy/assetLedger'
 import { techModifiers, TECH_SOURCE } from './tech/modifiers'
 import { nominal, pricesFor, type Prices } from './tech/money'
 import type { SaveData } from './scenario/save'
@@ -239,6 +240,14 @@ export class World {
   yearLedger: PeriodLedger = emptyLedger()
   /** Everything since the scenario began, which is the window most objectives are judged over. */
   lifetimeLedger: PeriodLedger = emptyLedger()
+
+  /**
+   * Accounts per plant and per line. See `economy/assetLedger.ts` for why a line has revenue.
+   *
+   * Kept beside the utility's own books rather than on the assets, so a station that has been
+   * demolished keeps its history — which is what any honest account of a run needs.
+   */
+  readonly books = new AssetBooks()
 
   /** How each objective stands. Re-judged when the year closes; a breach is permanent. */
   objectives: ObjectiveProgress[] = []
@@ -662,6 +671,64 @@ export class World {
       advanceCondition(plant, this.tick, mw > 0 || heatMw > 0)
     }
 
+    // --- Per-asset accounts --------------------------------------------
+    //
+    // Credited at the **tariff**, not at the nodal price where the energy was injected, and the
+    // difference matters enough to be worth the paragraph.
+    //
+    // Nodal price is what a merchant generator earns and is the theoretically purer number: it is
+    // what that megawatt-hour was worth at that place in that hour. The first version used it and
+    // produced accounts nobody could act on. In hours when load is shed the nodal price is the
+    // value of lost load, so a plant running through a scarcity hour is credited thousands of
+    // euros a megawatt-hour, and over twelve years the inherited gas station showed an operating
+    // margin of eight and a half billion — against a utility whose cash was falling the whole
+    // time. Both numbers were right and together they were useless.
+    //
+    // This utility is regulated: it sells at a tariff and receives nothing else. Crediting each
+    // machine at the price the business actually gets means the accounts reconcile with the cash
+    // on screen, and "did this plant earn its keep?" is asked at the price its owner is paid.
+    // Scarcity rent has one honest home in this model and it is the line, below.
+    for (const plant of this.plants) {
+      const mw = result.generationMw.get(plant.id) ?? 0
+      if (mw <= 0) continue
+      const book = this.books.for(plant.id).open
+      book.energyMwh += mw
+      book.revenue += mw * tariff
+      const type = PLANT_TYPES[plant.typeId]
+      book.varOpex += mw * this.params.getOr(plant.id, Param.VarOpexPerMwh, 0)
+      if (type.fuel !== 'none') {
+        const efficiency = Math.max(0.01, this.params.get(plant.id, Param.Efficiency))
+        const thermal = mw / efficiency
+        book.fuelCost += thermal * this.params.get(plant.id, Param.FuelPricePerMwhThermal)
+        const co2 = thermal * FUELS[type.fuel].co2PerMwhThermal.value
+        book.co2Tonnes += co2
+        book.carbonCost += co2 * this.state.carbonPricePerTonne
+      }
+    }
+
+    // A line earns congestion rent: what it carried, times the price difference it bridged. On an
+    // unconstrained corridor that difference is near zero and the line earns nothing, which is
+    // right — it is not scarce. When it is full the price separates, and the rent is exactly what
+    // relieving the constraint would be worth. That is the number that makes reinforcement an
+    // arithmetic question rather than a hunch.
+    for (const edge of this.network.allEdges()) {
+      if (edge.commodity !== 'electric' || !edge.energised) continue
+      const flow = result.lineFlowMw.get(edge.id) ?? 0
+      if (Math.abs(flow) < 1e-6) continue
+      const book = this.books.for(edge.id).open
+      const fromPrice = result.nodalPrice.get(edge.from) ?? 0
+      const toPrice = result.nodalPrice.get(edge.to) ?? 0
+      // Signed flow: positive means from -> to, so the rent is earned on that direction's spread.
+      const spread = flow > 0 ? toPrice - fromPrice : fromPrice - toPrice
+      book.energyMwh += Math.abs(flow)
+      book.revenue += Math.abs(flow) * Math.max(0, spread)
+      book.lossMwh += result.lineLossMw.get(edge.id) ?? 0
+      if (edge.kv !== 0) {
+        const capacity = LINE_TYPES[edge.kv].capacityMw.value * edge.circuits
+        if (capacity > 0 && Math.abs(flow) >= capacity * 0.99) book.congestedHours++
+      }
+    }
+
     let served = 0
     for (const city of this.cities) {
       const s = result.servedMw.get(city.id) ?? 0
@@ -827,6 +894,9 @@ export class World {
       const item = this.spending[i]!
       if (item.kind === 'capex') chargeCapex(this.openLedger, item.perTick)
       else chargeDecommissioning(this.openLedger, item.perTick)
+      // Attributed to whatever is being built or torn down, so a project's own account carries
+      // what it cost rather than the money vanishing into the utility's capital line.
+      this.books.for(item.ownerId).open.capital += item.perTick
       item.remainingTicks--
       if (item.remainingTicks <= 0) this.spending.splice(i, 1)
     }
@@ -835,6 +905,15 @@ export class World {
   private closePeriod(): void {
     const ticks = this.tick - this.periodStartTick
     chargeFixedCosts(this.openLedger, this.plants, this.params, ticks, this.state.maintenanceLevel)
+    // The same charge again, per machine. Fixed cost is what makes an idle plant expensive, so an
+    // account that left it out would flatter exactly the assets a player most needs to question.
+    for (const plant of this.plants) {
+      if (plant.phase !== LifecyclePhase.Operating && plant.phase !== LifecyclePhase.Mothballed) continue
+      const perKwYear = this.params.get(plant.id, Param.FixedOpexPerKwYear)
+      const capacityKw = PLANT_TYPES[plant.typeId].capacityMw.value * 1000
+      this.books.for(plant.id).open.fixedOpex +=
+        perKwYear * capacityKw * (ticks / TICKS_PER_YEAR) * this.state.maintenanceLevel
+    }
     if (this.state.insured) chargeInsurance(this.openLedger, this.plants, ticks)
     chargeInterest(this.openLedger, this.finances, ticks, this.state.investorConfidence)
 
@@ -858,6 +937,7 @@ export class World {
     addLedger(this.lifetimeLedger, this.openLedger)
     this.lastMonthLedger = this.openLedger
     this.openLedger = emptyLedger()
+    this.books.closeMonth()
     this.periodStartTick = this.tick
   }
 
@@ -1093,6 +1173,7 @@ export class World {
     this.judgeObjectives()
 
     this.yearLedger = emptyLedger()
+    this.books.closeYear()
     this.director.startYear()
   }
 

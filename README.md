@@ -288,6 +288,44 @@ The smoke test now uses the mouse: it clicks the Build button, clicks a row, cli
 place a station, and clicks Retire in the inspector, and it fails if any panel rebuilds even once
 while the clock is stopped.
 
+## Who earns and who loses
+
+The accounts used to be a single pot, so a run showed cash falling and nothing about where it
+went. Every plant and every line now keeps its own books over three windows — the open month, the
+year, and its whole life.
+
+Twelve years of the opening scenario, played:
+
+| | operating margin | why |
+|---|---|---|
+| Blackridge I (lignite) | −€445m | carbon €1821m against a fuel bill of €422m |
+| Blackridge II (lignite) | −€306m | carbon €1957m |
+| Ironworks (coal CHP) | −€148m | |
+| Eastfield (combined cycle) | +€150m | |
+| Gorge (hydro) | +€99m | |
+| **Blackridge→Central line** | **+€35m** | congestion rent |
+
+The first four lines are the carbon price doing what a carbon price does, stated per machine
+instead of as a falling bank balance. The last one is the interesting one.
+
+**A line earns congestion rent**: what it carried times the price difference it bridged. An
+unconstrained corridor earns nothing, because it is not scarce; a full one earns exactly what
+relieving it would be worth. The highest-earning asset of that kind is the Blackridge→Central
+corridor — which is precisely the bottleneck the scenario's premise describes, and which the
+played-scenario harness could only identify by elimination. Reinforcement is now an arithmetic
+question. The dual variables that produce this have been falling out of the dispatch solver since
+M1 with nobody using them for it.
+
+One judgement call is worth stating because the first version got it wrong. Plants are credited at
+the **tariff**, not at the nodal price where they inject. Nodal price is the purer number and is
+what a merchant generator earns, but in hours when load is shed it is the value of lost load — so
+the first version credited a plant thousands of euros a megawatt-hour for running through a
+scarcity hour, and showed the inherited gas station earning eight and a half billion over twelve
+years while the utility's cash fell throughout. Both numbers were right and together they were
+useless. This utility is regulated: it sells at a tariff and receives nothing else, so crediting
+each machine at the price the business is actually paid makes the accounts reconcile with the cash
+on screen. Scarcity rent has one honest home in this model, and it is the line.
+
 ## What a played scenario shows
 
 Every balance measurement in this project used to watch a utility that did *nothing* — no
