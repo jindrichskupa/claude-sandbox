@@ -72,6 +72,7 @@ import {
   emptyLedger,
   ledgerProfit,
   settlePeriod,
+  thermalInputMwh,
   type Finances,
   type PeriodLedger,
 } from './economy/economy'
@@ -673,32 +674,56 @@ export class World {
 
     // --- Per-asset accounts --------------------------------------------
     //
-    // Credited at the **tariff**, not at the nodal price where the energy was injected, and the
-    // difference matters enough to be worth the paragraph.
+    // Every asset is valued twice, every hour, and the two numbers are kept apart on purpose.
     //
-    // Nodal price is what a merchant generator earns and is the theoretically purer number: it is
-    // what that megawatt-hour was worth at that place in that hour. The first version used it and
-    // produced accounts nobody could act on. In hours when load is shed the nodal price is the
-    // value of lost load, so a plant running through a scarcity hour is credited thousands of
-    // euros a megawatt-hour, and over twelve years the inherited gas station showed an operating
-    // margin of eight and a half billion — against a utility whose cash was falling the whole
-    // time. Both numbers were right and together they were useless.
+    // At the **tariff**, because that is what this firm is paid. It generates, carries and bills;
+    // there is no market and no counterparty, so the price of an internal transfer is the price
+    // the company actually receives. This basis reconciles with the cash on screen, and it is the
+    // one to answer "can I afford to keep this?" with.
     //
-    // This utility is regulated: it sells at a tariff and receives nothing else. Crediting each
-    // machine at the price the business actually gets means the accounts reconcile with the cash
-    // on screen, and "did this plant earn its keep?" is asked at the price its owner is paid.
-    // Scarcity rent has one honest home in this model and it is the line, below.
+    // At the **nodal price**, because that is what the hour was worth where it happened. This is
+    // what the same machine would have earned as a merchant, and it is the only basis on which a
+    // peaker that stands idle for a year and then earns it back in forty February hours makes any
+    // sense at all. On its own it is misleading — it was the first version of this code, and it
+    // showed the inherited gas station eight and a half billion up while the utility's cash fell —
+    // because scarcity hours are priced at the value of lost load and no tariff ever pays that.
+    // Beside the regulated figure it is exactly the comparison worth having.
+    // Heat is credited here on the same principle, and it has to be: a heat-only boiler generates
+    // no electricity at all, so on the electrical side alone it is a machine with costs and no
+    // product — which is not a diagnosis, it is a missing column. A cogeneration unit has the
+    // opposite problem, since its fuel bill covers both jobs and charging all of it against the
+    // electricity would condemn the unit for doing the thing it was built to do. So both products
+    // are credited at their own tariff and the fuel is taken once, from `thermalInputMwh`, which
+    // is the same function the utility's own books use.
     for (const plant of this.plants) {
-      const mw = result.generationMw.get(plant.id) ?? 0
-      if (mw <= 0) continue
+      const signed = result.generationMw.get(plant.id) ?? 0
+      const mw = Math.max(0, signed)
+      const heatMw = Math.max(0, plant.heatOutputMw)
+      const nodal = result.nodalPrice.get(plant.nodeId) ?? tariff
+
+      // A store that is charging is buying, not producing. Booked as a purchase on both bases,
+      // which is what makes storage read correctly: at a flat tariff it buys and sells at the
+      // same price and loses its round-trip efficiency every cycle, and only at prices that move
+      // does it earn anything. That contrast is the point of keeping two columns.
+      if (signed < 0) {
+        const drawn = -signed
+        const charging = this.books.for(plant.id).open
+        charging.energyCost += drawn * tariff
+        charging.marketEnergyCost += drawn * nodal
+      }
+
+      if (mw <= 0 && heatMw <= 0) continue
       const book = this.books.for(plant.id).open
       book.energyMwh += mw
-      book.revenue += mw * tariff
+      book.heatMwh += heatMw
+      book.revenue += mw * tariff + heatMw * heatTariff
+      // Heat is on the same terms in both views: district heat is sold to a town at a regulated
+      // price in every industry structure there is, so there is no second price to show.
+      book.marketRevenue += mw * nodal + heatMw * heatTariff
       const type = PLANT_TYPES[plant.typeId]
-      book.varOpex += mw * this.params.getOr(plant.id, Param.VarOpexPerMwh, 0)
+      book.varOpex += (mw + heatMw) * this.params.getOr(plant.id, Param.VarOpexPerMwh, 0)
       if (type.fuel !== 'none') {
-        const efficiency = Math.max(0.01, this.params.get(plant.id, Param.Efficiency))
-        const thermal = mw / efficiency
+        const thermal = thermalInputMwh(plant, mw, heatMw, this.params)
         book.fuelCost += thermal * this.params.get(plant.id, Param.FuelPricePerMwhThermal)
         const co2 = thermal * FUELS[type.fuel].co2PerMwhThermal.value
         book.co2Tonnes += co2
@@ -706,11 +731,14 @@ export class World {
       }
     }
 
-    // A line earns congestion rent: what it carried, times the price difference it bridged. On an
-    // unconstrained corridor that difference is near zero and the line earns nothing, which is
-    // right — it is not scarce. When it is full the price separates, and the rent is exactly what
-    // relieving the constraint would be worth. That is the number that makes reinforcement an
-    // arithmetic question rather than a hunch.
+    // A line in an integrated utility sells nothing, so on the regulated basis it has no revenue.
+    // What it has is a cost: the energy it consumed getting the rest of the way. Charging those
+    // losses at the same tariff the plants are credited at makes the whole ranking close on the
+    // firm's own revenue — generated × tariff, less lost × tariff, is served × tariff — and turns
+    // the network from an asset class with no accounts into the cost centre it actually is.
+    //
+    // On the market basis the same line is a business: it earns the congestion rent, which is what
+    // an unbundled carrier is paid and what a second circuit would be worth. Both are recorded.
     for (const edge of this.network.allEdges()) {
       if (edge.commodity !== 'electric' || !edge.energised) continue
       const flow = result.lineFlowMw.get(edge.id) ?? 0
@@ -720,9 +748,18 @@ export class World {
       const toPrice = result.nodalPrice.get(edge.to) ?? 0
       // Signed flow: positive means from -> to, so the rent is earned on that direction's spread.
       const spread = flow > 0 ? toPrice - fromPrice : fromPrice - toPrice
+      const loss = result.lineLossMw.get(edge.id) ?? 0
+      const rent = Math.abs(flow) * Math.max(0, spread)
       book.energyMwh += Math.abs(flow)
-      book.revenue += Math.abs(flow) * Math.max(0, spread)
-      book.lossMwh += result.lineLossMw.get(edge.id) ?? 0
+      book.congestionRent += rent
+      // A carrier's entire income in an unbundled market is the rent. In this firm it is nobody's
+      // income, which is why it lands in the market column and not in `revenue`.
+      book.marketRevenue += rent
+      book.lossMwh += loss
+      book.energyCost += loss * tariff
+      // Losses are bought where they occur, so at the average of the two ends' prices — the only
+      // defensible single number when a corridor spans a price difference.
+      book.marketEnergyCost += loss * ((fromPrice + toPrice) / 2)
       if (edge.kv !== 0) {
         const capacity = LINE_TYPES[edge.kv].capacityMw.value * edge.circuits
         if (capacity > 0 && Math.abs(flow) >= capacity * 0.99) book.congestedHours++
@@ -1297,6 +1334,7 @@ export class World {
       director: this.director.state,
       objectives: this.objectives,
       outcome: this.outcome,
+      books: this.books.toJSON(),
       modifiers: this.registry.toJSON(),
     }
   }
@@ -1362,6 +1400,7 @@ export class World {
     Object.assign(this.director.state, clone(data.director))
     this.objectives = clone(data.objectives)
     this.outcome = data.outcome
+    this.books.loadJSON(clone(data.books))
 
     this.registry.loadJSON(clone(data.modifiers))
     // The parameter cache is keyed by tick, so it has to be told which tick it is now or the

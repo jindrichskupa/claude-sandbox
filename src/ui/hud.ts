@@ -24,6 +24,8 @@ import { quoteLineUpgrade, quoteRefurbishment, refurbishmentGains } from '@sim/b
 import { BuildPanel, type BuildSelection } from './buildPanel'
 import { PoliticsPanel } from './politicsPanel'
 import { ObjectivesPanel } from './objectivesPanel'
+import { AccountsPanel, ledgerBlock } from './accountsPanel'
+import { operatingMargin } from '@sim/economy/assetLedger'
 import { cycleLifeUsed, energyCapacityMwh, isStorage, ratedEnergyMwh } from '@sim/dispatch/storage'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 
@@ -78,6 +80,7 @@ export class Hud {
   readonly buildPanel: BuildPanel
   readonly politicsPanel: PoliticsPanel
   readonly objectivesPanel: ObjectivesPanel
+  readonly accountsPanel: AccountsPanel
 
   private selectedNodeId: string | null = null
   private selectedEdgeId: string | null = null
@@ -202,34 +205,33 @@ export class Hud {
     root.appendChild(lineLegend)
 
     // --- Build panel and its hint line ---
+    // Four panels now share the same corner, and each used to name the other three when it
+    // opened — a list that had to be edited in every panel every time one was added, and which
+    // was already wrong for the fourth before it was written. One helper instead.
     this.buildPanel = new BuildPanel(root, world, {
       onSelect: (s) => this.callbacks.onSelectBuild(s),
-      onOpen: () => {
-        this.selectedNodeId = null
-        this.politicsPanel.setOpen(false)
-        this.objectivesPanel.setOpen(false)
-        this.renderInspector()
-      },
+      onOpen: () => this.soloPanel('build'),
     })
 
     this.politicsPanel = new PoliticsPanel(root, world, {
-      onOpen: () => {
-        this.selectedNodeId = null
-        this.buildPanel.setOpen(false)
-        this.objectivesPanel.setOpen(false)
-        this.renderInspector()
-      },
+      onOpen: () => this.soloPanel('politics'),
     })
 
     this.objectivesPanel = new ObjectivesPanel(root, world, {
-      onOpen: () => {
-        this.selectedNodeId = null
-        this.buildPanel.setOpen(false)
-        this.politicsPanel.setOpen(false)
-        this.renderInspector()
-      },
+      onOpen: () => this.soloPanel('objectives'),
       onSave: () => this.callbacks.onSave(),
       onLoad: () => this.callbacks.onLoad(),
+    })
+
+    this.accountsPanel = new AccountsPanel(root, world, {
+      onOpen: () => this.soloPanel('accounts'),
+      // A row in the ranking is a place on the map, and clicking it should take you there. This
+      // is the shortest path from "something is losing money" to "this is the thing".
+      onSelect: (id) => {
+        const plant = this.world.plants.find((p) => p.id === id)
+        if (plant) this.selectNode(plant.nodeId)
+        else if (this.world.network.getEdge(id)) this.selectEdge(id)
+      },
     })
 
     this.hint = el('div', 'panel')
@@ -243,6 +245,31 @@ export class Hud {
     root.addEventListener('pointerdown', this.onPointerDown)
     window.addEventListener('pointerup', this.onPointerUp)
     window.addEventListener('pointercancel', this.onPointerCancel)
+  }
+
+  /**
+   * Leave one panel open and shut the rest, including the inspector.
+   *
+   * Called from a panel's own `onOpen`, so it must not re-open the one that called it — hence
+   * `setOpen(false)` on the others only, never `setOpen(true)` on the keeper, which would
+   * recurse straight back into here.
+   */
+  private soloPanel(keep: 'build' | 'politics' | 'objectives' | 'accounts' | 'none'): void {
+    if (keep !== 'build') this.buildPanel.setOpen(false)
+    if (keep !== 'politics') this.politicsPanel.setOpen(false)
+    if (keep !== 'objectives') this.objectivesPanel.setOpen(false)
+    if (keep !== 'accounts') this.accountsPanel.setOpen(false)
+    this.selectedNodeId = null
+    this.selectedEdgeId = null
+    this.renderInspector()
+  }
+
+  /** Shut every panel that shares the corner, so a map selection can have it. */
+  private closeAllPanels(): void {
+    this.buildPanel.setOpen(false)
+    this.politicsPanel.setOpen(false)
+    this.objectivesPanel.setOpen(false)
+    this.accountsPanel.setOpen(false)
   }
 
   private readonly onPointerDown = (): void => {
@@ -274,10 +301,7 @@ export class Hud {
   selectNode(nodeId: string | null): void {
     // The inspector and the build panel occupy the same corner, so they take turns rather
     // than stacking on top of one another.
-    if (nodeId) {
-      this.buildPanel.setOpen(false)
-      this.objectivesPanel.setOpen(false)
-    }
+    if (nodeId) this.closeAllPanels()
     this.selectedNodeId = nodeId
     this.selectedEdgeId = null
     this.renderInspector()
@@ -291,10 +315,7 @@ export class Hud {
    * whether it can take another circuit — was the one they could ask least about.
    */
   selectEdge(edgeId: string | null): void {
-    if (edgeId) {
-      this.buildPanel.setOpen(false)
-      this.objectivesPanel.setOpen(false)
-    }
+    if (edgeId) this.closeAllPanels()
     this.selectedEdgeId = edgeId
     this.selectedNodeId = null
     this.renderInspector()
@@ -381,6 +402,7 @@ export class Hud {
     this.buildPanel.render()
     this.politicsPanel.render()
     this.objectivesPanel.render()
+    this.accountsPanel.render()
 
     const history = world.recentHistory(240)
     if (history.length > 1) {
@@ -691,6 +713,21 @@ export class Hud {
       block.appendChild(this.explainBlock(this.world.params.explain(plant.id, Param.Availability), '', true))
       block.appendChild(this.explainBlock(this.world.params.explain(plant.id, Param.Efficiency), '', true))
 
+      // What it earned and what it cost, in the same panel as the button that closes it down.
+      // Anywhere else and the decision would be taken with the numbers on a different screen.
+      if (this.world.books.get(plant.id)) {
+        block.appendChild(ledgerBlock(this.world.books.window(plant.id, 'year'), 'ui.acctThisYear'))
+        // The lifetime figure as one line rather than a second table: it is context for the
+        // decision, not the decision itself, and a station's whole history rarely changes what
+        // to do about it this year.
+        const life = operatingMargin(this.world.books.window(plant.id, 'lifetime'))
+        if (Math.abs(life) > 1) {
+          const row = this.kv(t('ui.acctLifetime'), formatMoney(life))
+          row.classList.add(life >= 0 ? 'good' : 'bad')
+          block.appendChild(row)
+        }
+      }
+
       block.appendChild(this.plantActions(plant))
       this.inspector.appendChild(block)
     }
@@ -828,6 +865,24 @@ export class Hud {
       // it: two megawatts lost is excellent on a busy 400 kV line and dreadful on an idle one.
       const share = flow > 0.1 ? ` (${formatPct(loss / flow)})` : ''
       block.appendChild(this.kv(t('ui.losses'), `${formatMw(loss)}${share}`))
+
+      // Congestion rent, which is the whole argument for reinforcing anything. It is what the
+      // corridor earned by being scarce: the power it carried times the price difference between
+      // its two ends. A line that earns nothing is not being wasted — it is simply not the
+      // constraint, and the money is better spent on whichever line is. This is the number that
+      // makes "should I build a second circuit?" an arithmetic question.
+      const books = this.world.books.get(edgeId) && this.world.books.window(edgeId, 'year')
+      const rent = books ? books.congestionRent : 0
+      if (books && rent > 1) {
+        const row = this.kv(t('ui.acctRent'), formatMoney(rent))
+        row.classList.add('good')
+        block.appendChild(row)
+        if (books.congestedHours > 0) {
+          block.appendChild(this.kv('', t('ui.congestedHours', { hours: books.congestedHours })))
+        }
+      } else if (books) {
+        block.appendChild(el('div', 'asset-note', t('ui.acctRentNone')))
+      }
     }
 
     if (edge.upgradeAtTick !== undefined) {

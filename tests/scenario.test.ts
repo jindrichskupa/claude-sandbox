@@ -290,6 +290,36 @@ describe('saving a game', () => {
     }
   })
 
+  it('carries every asset\'s accounts across a save', () => {
+    // The one part of the state that is genuinely irrecoverable. Everything else in the save file
+    // is either authoritative or a function of the seed and the tick; a book of accounts is the
+    // accumulated history of every hour played, and nothing short of replaying the run rebuilds
+    // it. Drop it and a loaded game looks healthy while every machine on the map claims to have
+    // done nothing since it was built — which is precisely the sort of failure that is invisible
+    // until somebody tries to work out where their money went.
+    const world = buildWorld(FIRST_REGION)
+    for (let i = 0; i < 800; i++) world.step()
+
+    const ids = world.books.ids()
+    expect(ids.length).toBeGreaterThan(0)
+
+    const loaded = loadWorld(FIRST_REGION, world.toSaveData())
+    expect(loaded.books.ids().sort()).toEqual(ids.sort())
+    for (const id of ids) {
+      const before = world.books.get(id)!.lifetime
+      const after = loaded.books.get(id)!.lifetime
+      expect(after.revenue, id).toBeCloseTo(before.revenue, 6)
+      expect(after.marketRevenue, id).toBeCloseTo(before.marketRevenue, 6)
+      expect(after.energyMwh, id).toBeCloseTo(before.energyMwh, 6)
+      expect(after.fuelCost, id).toBeCloseTo(before.fuelCost, 6)
+      expect(after.congestionRent, id).toBeCloseTo(before.congestionRent, 6)
+    }
+
+    // And the loaded game keeps its own copy: writing to one must not reach the other.
+    loaded.books.for(ids[0]!).lifetime.revenue = -1
+    expect(world.books.get(ids[0]!)!.lifetime.revenue).not.toBe(-1)
+  })
+
   it('carries a half-finished project across a save', () => {
     // The instalment schedule and the energising queue live outside the assets themselves, so
     // they are exactly the sort of thing a save format forgets.

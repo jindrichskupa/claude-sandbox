@@ -41,6 +41,15 @@ the document tries to fetch anything.
 
 ## What exists today (milestones 1-8)
 
+- **Books for every machine and every corridor, kept on two prices at once.** The accounts used
+  to be a single pot, so a run showed cash falling and nothing about where it went. Each asset now
+  has its own — month, year and lifetime — valued both at the **tariff** the firm is actually paid
+  and at the **nodal price** of the hour it produced in. The first reconciles with the balance on
+  screen; a test asserts the rows sum to the utility's own ledger and reports the residual, which
+  is 0.8% and has two named causes. The second says *when* the money was made, which a flat tariff
+  averages away by design: the same lignite units that lose €445m at the tariff are €8.5bn up at
+  market prices, because the system was short in the hours they ran. Neither number is wrong and
+  neither is sufficient. See [Who earns and who loses](#who-earns-and-who-loses).
 - **Prices that move, in opposite directions.** Nothing is frozen at the year its source
   published it any more. Inflation carries every figure from its own `sourceYear` to the game's;
   capital cost splits into equipment, labour and civil works, and those three then diverge —
@@ -292,39 +301,69 @@ while the clock is stopped.
 
 The accounts used to be a single pot, so a run showed cash falling and nothing about where it
 went. Every plant and every line now keeps its own books over three windows — the open month, the
-year, and its whole life.
+year, and its whole life — and every asset is valued **twice** in each of them.
 
-Twelve years of the opening scenario, played:
+### Two prices, because the answer depends on which company you are
 
-| | operating margin | why |
+There is one firm here. It generates, it carries the power, it bills the towns; there is no
+market and no counterparty anywhere in the model. So the price of an internal transfer is the
+price the firm is actually paid — the **regulated tariff** — and on that basis the arithmetic
+closes:
+
+    Σ plants (generated × tariff) − Σ lines (lost × tariff) − Σ stores (drawn × tariff) = sales
+
+A test asserts it against the utility's own ledger and measures the residual, which is 0.8% and
+has two named causes still on the list: the heat network's standing losses and its circulating
+pumps consume without being charged to any asset yet. The cost side closes exactly, because the
+per-asset fuel bill runs the same `thermalInputMwh` the utility's ledger does.
+
+That equality is a property of a *bundled* firm, not a law of the industry. Split it up and it
+breaks immediately: generators are paid the market price where they inject, the carrier keeps the
+congestion rent, and the retailer takes the difference and the risk. So the same hour is also
+booked at the **nodal price**, and the panel shows both columns. Twelve years of the opening
+scenario, played:
+
+| | at tariff | at market price |
 |---|---|---|
-| Blackridge I (lignite) | −€445m | carbon €1821m against a fuel bill of €422m |
-| Blackridge II (lignite) | −€306m | carbon €1957m |
-| Ironworks (coal CHP) | −€148m | |
-| Eastfield (combined cycle) | +€150m | |
-| Gorge (hydro) | +€99m | |
-| **Blackridge→Central line** | **+€35m** | congestion rent |
+| Blackridge I (lignite) | −€445m | **+€8 525m** |
+| Blackridge II (lignite) | −€306m | **+€7 697m** |
+| Eastfield (combined cycle) | +€150m | +€8 530m |
+| Ironworks (coal CHP) | +€177m | +€1 396m |
+| Gorge (hydro) | +€99m | +€471m |
+| Blackridge→Central corridor | −€145m | −€700m, of which congestion rent is the case for a second circuit |
 
-The first four lines are the carbon price doing what a carbon price does, stated per machine
-instead of as a falling bank balance. The last one is the interesting one.
+Those two columns are not a rounding difference and neither of them is wrong. The left one is the
+truth about the player's bank balance: at the price this utility is allowed to charge, the lignite
+loses money, mostly to the carbon price (€1821m against a fuel bill of €422m). The right one is
+the truth about the hours: the system is short often enough that the energy those units produced
+was worth far more where and when it was produced than the tariff ever paid for it. A regulated
+utility can own a plant for thirty years and never find out what it was for, and this is what that
+looks like as a number.
 
-**A line earns congestion rent**: what it carried times the price difference it bridged. An
-unconstrained corridor earns nothing, because it is not scarce; a full one earns exactly what
-relieving it would be worth. The highest-earning asset of that kind is the Blackridge→Central
-corridor — which is precisely the bottleneck the scenario's premise describes, and which the
-played-scenario harness could only identify by elimination. Reinforcement is now an arithmetic
-question. The dual variables that produce this have been falling out of the dispatch solver since
-M1 with nobody using them for it.
+The first version of this code showed only the market column, and it was useless on its own —
+a plant credited thousands of euros a megawatt-hour for running through a scarcity hour, showing
+eight and a half billion up while the utility's cash fell throughout. The fix was not to pick the
+other one. It was to keep both and label them.
 
-One judgement call is worth stating because the first version got it wrong. Plants are credited at
-the **tariff**, not at the nodal price where they inject. Nodal price is the purer number and is
-what a merchant generator earns, but in hours when load is shed it is the value of lost load — so
-the first version credited a plant thousands of euros a megawatt-hour for running through a
-scarcity hour, and showed the inherited gas station earning eight and a half billion over twelve
-years while the utility's cash fell throughout. Both numbers were right and together they were
-useless. This utility is regulated: it sells at a tariff and receives nothing else, so crediting
-each machine at the price the business is actually paid makes the accounts reconcile with the cash
-on screen. Scarcity rent has one honest home in this model, and it is the line.
+### What a line is
+
+On the regulated basis a corridor sells nothing and is charged for the energy it loses, so it is a
+cost centre — which is what a transmission line in an integrated utility actually is, and it now
+reads as one. Beside that sits **congestion rent**: what it carried times the price difference it
+bridged. An unconstrained corridor earns nothing, because it is not scarce; a full one earns
+exactly what relieving it would be worth. The rent stays out of the regulated margin, because in
+this firm nobody pays it, and is the whole of the market margin, because in an unbundled one
+somebody would.
+
+The highest-earning corridor by that measure is Blackridge→Central — precisely the bottleneck the
+scenario's premise describes, and which the played-scenario harness could previously identify only
+by elimination. Reinforcement is now an arithmetic question. The dual variables that produce this
+have been falling out of the dispatch solver since M1 with nobody using them for it.
+
+The same split explains storage without a special case. A store that charges is *buying*, booked
+on both bases: at a flat tariff it buys and sells at the same price and loses its round-trip
+efficiency every cycle, for ever, and only at prices that move does it earn anything. Which is why
+storage arrives in real systems at about the same time a market does.
 
 ## What a played scenario shows
 

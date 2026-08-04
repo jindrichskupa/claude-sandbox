@@ -561,6 +561,68 @@ try {
 
   await page.screenshot({ path: join(OUT, '13-objectives.png') })
 
+  // --- Accounts ---------------------------------------------------------
+  // The panel that answers "which of these is losing the money?". Two things only a browser can
+  // check: that a ranked list actually appears with both valuations on it, and that clicking a
+  // row takes you to the asset — the shortest path from a number to the thing it describes.
+  const accounts = await page.evaluate(() => {
+    const g = window.game
+    g.hud.accountsPanel.setOpen(true)
+    const panel = document.getElementById('accounts-panel')
+    const rows = [...panel.querySelectorAll('.acct-row')]
+    return {
+      visible: panel.classList.contains('visible'),
+      rows: rows.length,
+      tabs: [...panel.querySelectorAll('.acct-tabs button')].map((n) => n.textContent),
+      first: rows[0]?.querySelector('.acct-name')?.textContent,
+      firstValue: rows[0]?.querySelector('.acct-value')?.textContent,
+      total: panel.querySelector('.acct-summary b')?.textContent,
+      // Worst first: the top row must not be better than the bottom one.
+      sorted: rows.length > 1 ? rows[0].classList.contains('acct-bad') : true,
+    }
+  })
+  console.log('accounts:', accounts)
+  if (!accounts.visible) throw new Error('The accounts panel did not open')
+  if (accounts.rows === 0) throw new Error('The accounts panel ranked nothing')
+  if (!accounts.total) throw new Error('The accounts panel showed no total')
+
+  await page.screenshot({ path: join(OUT, '17-accounts.png') })
+
+  // Switch to the market basis: the same assets, valued at the price of the hour rather than at
+  // the tariff. The numbers must move, or the second column is decoration.
+  const marketView = await page.evaluate(() => {
+    const panel = document.getElementById('accounts-panel')
+    const bases = panel.querySelectorAll('.acct-bases button')
+    bases[1].click()
+    const rows = [...panel.querySelectorAll('.acct-row')]
+    return {
+      first: rows[0]?.querySelector('.acct-name')?.textContent,
+      firstValue: rows[0]?.querySelector('.acct-value')?.textContent,
+      total: panel.querySelector('.acct-summary b')?.textContent,
+    }
+  })
+  console.log('accounts at market prices:', marketView)
+  if (marketView.total === accounts.total) {
+    throw new Error('The market basis showed the same total as the tariff basis')
+  }
+  await page.screenshot({ path: join(OUT, '18-accounts-market.png') })
+
+  // A row is a place on the map.
+  const followed = await page.evaluate(() => {
+    const panel = document.getElementById('accounts-panel')
+    panel.querySelector('.acct-row').click()
+    const inspector = document.getElementById('inspector')
+    return {
+      inspectorOpen: inspector.classList.contains('visible'),
+      panelClosed: !panel.classList.contains('visible'),
+      title: inspector.querySelector('h2')?.textContent,
+    }
+  })
+  console.log('followed a row:', followed)
+  if (!followed.inspectorOpen) throw new Error('Clicking an account did not open the inspector')
+  if (!followed.panelClosed) throw new Error('The accounts panel stayed open over the inspector')
+  await page.screenshot({ path: join(OUT, '19-account-followed.png') })
+
   // --- Save and load ----------------------------------------------------
   // The property that matters is the one the unit tests prove: a loaded game continues
   // identically. What only a browser can show is that the load survives the *renderer* — that

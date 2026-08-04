@@ -72,6 +72,22 @@ describe('i18n', () => {
     expect(missing).toEqual([])
   })
 
+  it('has a translation for every literal key the interface asks for', () => {
+    // The panels are the one place a missing key is silently ugly rather than loud: `t()` returns
+    // the key itself, so a typo ships as `ui.acctMargn` sitting in the middle of a table and
+    // nothing fails. Only literal keys can be checked this way — `t(type.nameKey)` and the
+    // template-built ones are covered by the content tests above — and that is most of them.
+    const files = [...sourceFiles('src/ui'), ...sourceFiles('src/render')]
+    const found = new Set<string>()
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8')
+      for (const m of text.matchAll(/\bt\('([A-Za-z0-9_.]+)'/g)) found.add(m[1]!)
+    }
+    expect(found.size).toBeGreaterThan(50)
+    const missing = [...found].filter((k) => !DICT[k])
+    expect(missing).toEqual([])
+  })
+
   it('interpolates parameters', () => {
     setLocale('en')
     expect(t('reason.windSpeed', { wind: 7.5 })).toContain('7.5')

@@ -23,6 +23,7 @@ import type { GridEdge, GridNode } from '../grid/network'
 import type { CityAsset, PlantAsset } from '../assets/types'
 import type { Entry } from '../params/ModifierRegistry'
 import type { PeriodLedger, Finances } from '../economy/economy'
+import type { AssetAccounts } from '../economy/assetLedger'
 import type { DirectorState } from '../events/director'
 import type { Weather } from '../weather/weather'
 import type { WorldState } from '../world'
@@ -35,7 +36,7 @@ import type { ObjectiveProgress, ScenarioOutcome } from './objectives'
  * filling the gaps with defaults produces a game that looks fine and behaves subtly wrongly,
  * which is worse than a clear refusal — especially in a game where a run is measured in hours.
  */
-export const SAVE_VERSION = 3
+export const SAVE_VERSION = 4
 
 export interface ScheduledSpendData {
   ownerId: string
@@ -74,6 +75,13 @@ export interface SaveData {
   director: DirectorState
   objectives: ObjectiveProgress[]
   outcome: ScenarioOutcome
+  /**
+   * Per-asset accounts. Genuinely irrecoverable: they are the accumulated history of every hour
+   * the run has played, and nothing short of replaying the run would rebuild them. Dropping them
+   * would leave a loaded game looking healthy while every machine on the map claimed to have
+   * done nothing since it was built.
+   */
+  books: Array<[string, AssetAccounts]>
   modifiers: Array<{ sourceId: string; entries: Entry[] }>
 }
 
