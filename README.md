@@ -288,6 +288,40 @@ The smoke test now uses the mouse: it clicks the Build button, clicks a row, cli
 place a station, and clicks Retire in the inspector, and it fails if any panel rebuilds even once
 while the clock is stopped.
 
+## What a played scenario shows
+
+Every balance measurement in this project used to watch a utility that did *nothing* — no
+retirements, no replacements, no lines. A useful control and a terrible target: hours went into
+tuning the tariff, the carbon price and the cost trends against a run in which the player never
+made a decision, while the question that matters was answered by no test at all.
+
+`tests/autoPlayer.ts` plays. Badly, on purpose — it holds a reserve margin over peak demand,
+retires at end of life when the lights can spare it, and builds the cheapest firm capacity it can
+site, ranked on a levelised cost computed from the game's own parameters so that *which*
+technology it picks is an output rather than something the test author chose.
+
+What it found is worth more than a pass would have been:
+
+- **Generation is not the binding constraint.** The player holds 2530 MW of firm capacity against
+  a 1549 MW peak for the whole run — it never needs to build and never dares to close anything —
+  and still ends with 2.6% of demand unserved against an objective of 0.1%. The shortfall is the
+  corridor, which is the scenario's own stated premise and which this harness never reinforces.
+  A player who only asks "have I got enough megawatts?" answers yes every year and watches the
+  lights go out anyway.
+- **The order of two decisions was worth ten times the reliability.** An early version retired
+  end-of-life plant the month it expired, before its replacement existed. That alone produced
+  1.5% unserved instead of 0.97%, and bankruptcy in 2010 instead of 2021. Real utilities run a
+  tired plant past its design life precisely until the new one is ready.
+- **Choosing the cheapest thing that does not solve the problem** is an easy mistake for an
+  optimiser: ranking every technology by cost for a *firm capacity* shortage made it build
+  run-of-river every month for three years, since hydro won on cost and does not count as firm.
+
+None of that is asserted as a target. The tests assert what can be defended — that the scenario is
+playable, that the harness's decisions reach the simulation, and that it chooses on cost — and
+print the diagnosis. Asserting a win would assert something false; asserting the loss would freeze
+a balance problem into a passing test. The next instrument needed is per-asset accounting: the run
+currently shows cash falling and nothing whatever about where it went.
+
 ## Known gaps
 
 Stated plainly, because they are the difference between what the simulation looks like it
