@@ -351,6 +351,70 @@ export function upgradeLine(world: World, edgeId: string): { ok: boolean; quote:
 }
 
 /**
+ * Taking a corridor down.
+ *
+ * The gap this fills was reported by a player who built a better route, watched the flow keep
+ * going the old way, and found no way to remove the old line. Both halves of that are worth
+ * saying. The flow behaviour is correct — two paths in parallel share the current according to
+ * their impedance and the solver's costs, and a min-cost flow will use a cheap old line until it
+ * runs out of capacity, exactly as the real network does. But there was genuinely no way to
+ * demolish one, so the only thing a player could do about a corridor they no longer wanted was
+ * keep paying for it.
+ *
+ * Dismantling costs money — towers, foundations, conductor recovery, reinstating the easement —
+ * and is priced as a fraction of building it, escalating like everything else made of steel and
+ * labour. It is immediate rather than scheduled: unlike a power station there is no fuel to
+ * remove and nothing to make safe over years, and the line stops carrying power the moment the
+ * crews open it.
+ */
+export function quoteLineDemolition(world: World, edgeId: string): Quote {
+  const edge = world.network.getEdge(edgeId)
+  if (!edge) return refuse('build.noSuchNode')
+  if (edge.upgradeAtTick !== undefined) return refuse('build.alreadyUpgrading')
+
+  const year = world.date.year
+  const perKm =
+    edge.commodity === 'heat' && edge.dn !== undefined
+      ? nominal(HEAT_PIPE_TYPES[edge.dn].capexPerKm, year)
+      : edge.kv !== 0
+        ? nominal(LINE_TYPES[edge.kv].capexPerKm, year)
+        : 0
+  const totalCost =
+    perKm *
+    realDecommissioningFactor(year, 2024) *
+    edge.lengthKm *
+    Math.max(1, edge.circuits) *
+    DEMOLITION_COST_FRACTION
+
+  if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
+  return { ok: true, totalCost, buildTicks: 1, lengthKm: edge.lengthKm }
+}
+
+/**
+ * What taking a line down costs against what putting it up did.
+ *
+ * Lower than a power station's, and for a real reason: most of a line's capital is conductor and
+ * steel that comes back as scrap, and there is no contaminated land underneath it. It is not free,
+ * which is the point — a player who over-builds the network pays twice.
+ */
+export const DEMOLITION_COST_FRACTION = 0.12
+
+export function demolishLine(world: World, edgeId: string): { ok: boolean; quote: Quote } {
+  const quote = quoteLineDemolition(world, edgeId)
+  if (!quote.ok) return { ok: false, quote }
+  const edge = world.network.requireEdge(edgeId)
+  world.reportNews({
+    category: 'grid',
+    importance: NewsImportance.Notable,
+    titleKey: 'news.lineDemolished',
+    params: { from: world.displayName(edge.from), to: world.displayName(edge.to) },
+  })
+  world.chargeDemolition(quote.totalCost)
+  world.network.removeEdge(edgeId)
+  return { ok: true, quote }
+}
+
+/**
  * Re-conductoring: what a line has instead of refurbishment.
  *
  * Towers and foundations outlive several generations of the plant they connect; what wears out is

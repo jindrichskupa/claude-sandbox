@@ -22,6 +22,7 @@ import { drawLoadCurve, drawMix, drawPrice } from './charts'
 import { nodeLabel } from '@render/mapView'
 import {
   nextVoltage,
+  quoteLineDemolition,
   quoteLineRenewal,
   quoteLineUpgrade,
   quoteRefurbishment,
@@ -44,6 +45,18 @@ const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 export type Speed = 0 | 1 | 3 | 10 | 50
 
 export interface HudCallbacks {
+  /**
+   * The selection changed, and the map has to agree with the inspector.
+   *
+   * One callback for both halves of that, because they were previously done in two places and
+   * consequently disagreed: the map's highlight was set by the click handler, so a selection made
+   * from a headline or a row in the accounts opened a panel and left the map showing nothing.
+   *
+   * `focus` says whether to move the camera as well. A selection made by clicking the map needs
+   * no help; one made from a headline does, or the panel describes a corridor the player then has
+   * to find by reading node names off the map.
+   */
+  onSelectionChanged: (selection: { nodeId: string | null; edgeId: string | null }, focus: boolean) => void
   onSetSpeed: (speed: Speed) => void
   onSelectBuild: (selection: BuildSelection) => void
   onRetire: (plantId: string) => void
@@ -57,6 +70,7 @@ export interface HudCallbacks {
   onUpgradeLine: (edgeId: string) => void
   onRenewLine: (edgeId: string) => void
   onUpgradeVoltage: (edgeId: string) => void
+  onDemolishLine: (edgeId: string) => void
   onSkip: () => void
 }
 
@@ -241,11 +255,11 @@ export class Hud {
       // A headline is a place. Taking the player there is the difference between a feed that
       // reports and one they can work from.
       onGoTo: (subjectId, kind) => {
-        if (kind === 'edge') this.selectEdge(subjectId)
+        if (kind === 'edge') this.selectEdge(subjectId, true)
         else if (kind === 'plant') {
           const plant = this.world.plants.find((p) => p.id === subjectId)
-          if (plant) this.selectNode(plant.nodeId)
-        } else this.selectNode(subjectId)
+          if (plant) this.selectNode(plant.nodeId, true)
+        } else this.selectNode(subjectId, true)
       },
     })
 
@@ -255,8 +269,8 @@ export class Hud {
       // is the shortest path from "something is losing money" to "this is the thing".
       onSelect: (id) => {
         const plant = this.world.plants.find((p) => p.id === id)
-        if (plant) this.selectNode(plant.nodeId)
-        else if (this.world.network.getEdge(id)) this.selectEdge(id)
+        if (plant) this.selectNode(plant.nodeId, true)
+        else if (this.world.network.getEdge(id)) this.selectEdge(id, true)
       },
     })
 
@@ -326,12 +340,13 @@ export class Hud {
     }
   }
 
-  selectNode(nodeId: string | null): void {
+  selectNode(nodeId: string | null, focus = false): void {
     // The inspector and the build panel occupy the same corner, so they take turns rather
     // than stacking on top of one another.
     if (nodeId) this.closeAllPanels()
     this.selectedNodeId = nodeId
     this.selectedEdgeId = null
+    this.callbacks.onSelectionChanged({ nodeId, edgeId: null }, focus)
     this.renderInspector()
   }
 
@@ -342,10 +357,11 @@ export class Hud {
    * the player most needs to understand — where it is congested, what it is costing in losses,
    * whether it can take another circuit — was the one they could ask least about.
    */
-  selectEdge(edgeId: string | null): void {
+  selectEdge(edgeId: string | null, focus = false): void {
     if (edgeId) this.closeAllPanels()
     this.selectedEdgeId = edgeId
     this.selectedNodeId = null
+    this.callbacks.onSelectionChanged({ nodeId: null, edgeId }, focus)
     this.renderInspector()
   }
 
@@ -934,6 +950,16 @@ export class Hud {
       block.appendChild(
         this.kv(t('ui.losses'), formatMwth(pipe.standingLossMwPerKm.value * edge.lengthKm * edge.circuits)),
       )
+      // A heat main can be taken down too, and for the same reason: a route you no longer want
+      // still loses heat to the ground every hour of every year.
+      const pipeDemolition = quoteLineDemolition(this.world, edgeId)
+      const row = el('div', 'asset-actions')
+      const button = this.lineAction(t('ui.demolishLine'), pipeDemolition, () => this.callbacks.onDemolishLine(edgeId), () =>
+        t('ui.demolishGains', { cost: formatMoney(pipeDemolition.totalCost) }),
+      )
+      button.classList.add('danger')
+      row.appendChild(button)
+      block.appendChild(row)
     } else if (edge.kv !== 0) {
       const capacity = LINE_TYPES[edge.kv].capacityMw.value * edge.circuits
       const flow = Math.abs(this.world.lastDispatch?.lineFlowMw.get(edgeId) ?? 0)
@@ -993,6 +1019,17 @@ export class Hud {
           }),
         ),
       )
+
+      // Taking it down. Reported by a player who built a better route, watched the flow keep
+      // going the old way and found no way to remove the old corridor — the flow behaviour is
+      // correct, two parallel paths share the current, but there was genuinely no way to demolish
+      // one and so no way to stop paying for it.
+      const demolition = quoteLineDemolition(this.world, edgeId)
+      const demolish = this.lineAction(t('ui.demolishLine'), demolition, () => this.callbacks.onDemolishLine(edgeId), () =>
+        t('ui.demolishGains', { cost: formatMoney(demolition.totalCost) }),
+      )
+      demolish.classList.add('danger')
+      row.appendChild(demolish)
 
       const next = edge.kv !== 0 ? nextVoltage(edge.kv) : null
       if (next !== null) {

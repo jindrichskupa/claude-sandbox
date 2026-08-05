@@ -116,6 +116,16 @@ export class MapView {
   private nodeSprites = new Map<string, Sprite>()
   private lastTopologyEpoch = -1
   selectedNodeId: string | null = null
+  /**
+   * The corridor the inspector is showing, drawn so it can be found.
+   *
+   * A node had a selection ring from the first milestone and a line had nothing at all — so
+   * clicking "the line from Central to North is down" in the news opened a panel about a corridor
+   * the player then had to find by reading node names off the map. A selected line is now traced
+   * in the same colour as a selected node, over the top of everything, and `focusOn` moves the
+   * camera to it.
+   */
+  selectedEdgeId: string | null = null
 
   buildMode: BuildMode = null
   /** Per-tile suitability for whatever is being placed. Recomputed only when that changes. */
@@ -273,6 +283,7 @@ export class MapView {
       holder.hitArea = { contains: (x: number, y: number) => Math.abs(x) < TILE_PX / 2 && Math.abs(y) < TILE_PX / 2 }
       holder.on('pointertap', () => {
         this.selectedNodeId = node.id
+        this.selectedEdgeId = null
         this.callbacks.onSelectNode?.(node.id)
       })
       this.nodeLayer.addChild(holder)
@@ -451,7 +462,51 @@ export class MapView {
       // A dark casing under the conductor keeps it legible over any terrain colour.
       stroke({ width: width + 2, color: 0x0e1418, alpha: 0.7 })
       stroke({ width, color: colour })
+
+      // The selection, traced over the conductor rather than under it, because the point of it is
+      // to be findable on a map with sixty other lines on it.
+      if (edge.id === this.selectedEdgeId) {
+        stroke({ width: width + 5, color: 0x7fd4ff, alpha: 0.35 })
+        stroke({ width: width + 1, color: 0x7fd4ff, alpha: 0.9 })
+      }
     }
+
+    // A de-energised corridor is drawn dashed and gets its selection the same way, so a faulted
+    // line — the case that sends most players here — is not the one case that goes unmarked.
+    for (const edge of this.world.network.allEdges()) {
+      if (edge.commodity !== 'electric' || edge.energised) continue
+      if (edge.id !== this.selectedEdgeId) continue
+      const path = this.edgePath(edge)
+      g.moveTo(path[0]!.x, path[0]!.y)
+      for (let i = 1; i < path.length; i++) g.lineTo(path[i]!.x, path[i]!.y)
+      g.stroke({ width: 6, color: 0x7fd4ff, alpha: 0.35 })
+    }
+  }
+
+  /**
+   * Put something in the middle of the screen.
+   *
+   * Used when a selection arrives from somewhere other than a click on the map — a headline, a
+   * forecast row, a line in the accounts. The player did not choose where they were looking, so
+   * the map has to go to them.
+   */
+  focusOn(id: string): void {
+    const node = this.world.network.getNode(id)
+    if (node) {
+      this.camera.centerOn(node.x * TILE_PX + TILE_PX / 2, node.y * TILE_PX + TILE_PX / 2)
+      return
+    }
+    const edge = this.world.network.getEdge(id)
+    if (!edge) return
+    const from = this.world.network.getNode(edge.from)
+    const to = this.world.network.getNode(edge.to)
+    if (!from || !to) return
+    // The midpoint of the corridor, so both ends are usually on screen at once — which is what
+    // the player wants to see about a line, rather than one of its towers.
+    this.camera.centerOn(
+      ((from.x + to.x) / 2) * TILE_PX + TILE_PX / 2,
+      ((from.y + to.y) / 2) * TILE_PX + TILE_PX / 2,
+    )
   }
 
   /**
@@ -776,20 +831,40 @@ export class MapView {
    * routed corridor rather than against the straight line between endpoints, because after the
    * routing milestone those are frequently nowhere near each other.
    */
-  edgeAtWorld(wx: number, wy: number, maxDistancePx = 14): GridEdge | null {
-    let best: GridEdge | null = null
-    let bestDist = maxDistancePx
+  /**
+   * Every edge under the cursor, nearest first.
+   *
+   * Plural because a power line and a heat main routed between the same two places lie on top of
+   * one another — the router gives them the same corridor, which is right, since a pipe and a
+   * line follow the same valley for the same reasons. Returning only the nearest meant the second
+   * one could never be selected at all, which a player found within minutes.
+   */
+  edgesAtWorld(wx: number, wy: number, maxDistancePx = 14): GridEdge[] {
+    const hits: Array<{ edge: GridEdge; dist: number }> = []
     for (const edge of this.world.network.allEdges()) {
       const path = this.edgePath(edge)
+      let nearest = Infinity
       for (let i = 1; i < path.length; i++) {
-        const d = distanceToSegment(wx, wy, path[i - 1]!, path[i]!)
-        if (d < bestDist) {
-          bestDist = d
-          best = edge
-        }
+        nearest = Math.min(nearest, distanceToSegment(wx, wy, path[i - 1]!, path[i]!))
       }
+      if (nearest < maxDistancePx) hits.push({ edge, dist: nearest })
     }
-    return best
+    hits.sort((a, b) => a.dist - b.dist)
+    return hits.map((h) => h.edge)
+  }
+
+  /**
+   * The one to select, cycling through anything stacked underneath.
+   *
+   * Clicking the same spot again advances to the next edge there and wraps round — the standard
+   * answer to overlapping hit targets, and the only one that does not require the player to know
+   * what is hidden before they can ask for it.
+   */
+  edgeAtWorld(wx: number, wy: number, maxDistancePx = 14): GridEdge | null {
+    const hits = this.edgesAtWorld(wx, wy, maxDistancePx)
+    if (hits.length === 0) return null
+    const current = hits.findIndex((e) => e.id === this.selectedEdgeId)
+    return hits[current === -1 ? 0 : (current + 1) % hits.length] ?? null
   }
 }
 

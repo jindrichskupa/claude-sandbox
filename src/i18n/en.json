@@ -470,5 +470,10 @@
   "ui.lineFaultRate": "Faults expected",
   "build.renewing": "Re-conductoring started",
   "build.uprating": "Rebuild at the higher voltage started",
-  "ui.perYear": "{n} a year"
+  "ui.perYear": "{n} a year",
+  "news.lineDemolished": "{from} → {to} has been taken down",
+  "ui.demolishLine": "Take it down",
+  "ui.demolishGains": "{cost} — the corridor is removed and stops costing anything",
+  "build.demolished": "The line has been taken down",
+  "ui.findAsset": "Find an asset by name…"
 }

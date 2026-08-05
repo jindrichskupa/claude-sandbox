@@ -27,7 +27,15 @@ import {
   lineWearFactor,
   repairTicks,
 } from '@sim/grid/aging'
-import { nextVoltage, quoteLineRenewal, quoteVoltageUpgrade, renewLine, upgradeVoltage } from '@sim/build/commands'
+import {
+  demolishLine,
+  nextVoltage,
+  quoteLineDemolition,
+  quoteLineRenewal,
+  quoteVoltageUpgrade,
+  renewLine,
+  upgradeVoltage,
+} from '@sim/build/commands'
 import type { GridEdge } from '@sim/grid/network'
 
 function line(kv: 110 | 220 | 400, lengthKm: number, ageYears: number, conditionPct = 1): GridEdge {
@@ -165,6 +173,44 @@ describe('what a player can do about it', () => {
     const top = world.network.allEdges().find((e) => e.kv === 400)
     if (!top) return
     expect(quoteVoltageUpgrade(world, top.id).reasonKey).toBe('build.alreadyHighestVoltage')
+  })
+})
+
+describe('getting rid of one', () => {
+  it('takes a corridor down, so a route you no longer want stops costing you', () => {
+    // Reported by a player who built a better route, watched the flow keep going the old way and
+    // found no way to remove the old line. The flow behaviour is correct — two parallel paths
+    // share the current — but there was no way to demolish one, so the only option was to keep
+    // paying for it for ever.
+    const world = buildWorld(FIRST_REGION)
+    const edge = world.network.allEdges().find((e) => e.commodity === 'electric' && e.kv !== 0)!
+    const before = world.network.allEdges().length
+
+    const quote = quoteLineDemolition(world, edge.id)
+    expect(quote.ok, quote.reasonKey).toBe(true)
+    // Cheaper than building it, because most of a line is conductor and steel that comes back as
+    // scrap and there is no contaminated land underneath. Not free, which is the point.
+    const newLine = LINE_TYPES[edge.kv as 110 | 220 | 400].capexPerKm.value * edge.lengthKm
+    expect(quote.totalCost).toBeLessThan(newLine * 0.3)
+    expect(quote.totalCost).toBeGreaterThan(0)
+
+    expect(demolishLine(world, edge.id).ok).toBe(true)
+    expect(world.network.allEdges().length).toBe(before - 1)
+    expect(world.network.getEdge(edge.id)).toBeUndefined()
+    expect(world.news.all().some((n) => n.titleKey === 'news.lineDemolished')).toBe(true)
+
+    // And the system carries on without it, islanded or not — a solver that gave up when a
+    // corridor was removed would make this unusable.
+    for (let i = 0; i < 48; i++) world.step()
+    expect(world.lastDispatch?.aborted).toBeFalsy()
+  }, 120_000)
+
+  it('refuses while work is already under way on the same corridor', () => {
+    const world = buildWorld(FIRST_REGION)
+    const edge = world.network.allEdges().find((e) => e.commodity === 'electric' && e.kv !== 0)!
+    edge.builtTick = -45 * TICKS_PER_YEAR
+    renewLine(world, edge.id)
+    expect(quoteLineDemolition(world, edge.id).reasonKey).toBe('build.alreadyUpgrading')
   })
 })
 

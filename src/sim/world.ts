@@ -64,6 +64,7 @@ import {
 } from './scenario/objectives'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
 import { AssetBooks } from './economy/assetLedger'
+import { recordYear, type YearRecord } from './economy/yearbook'
 import { NewsDesk, NewsImportance, type NewsItem, type UpcomingItem } from './news/news'
 import { growthModifiers, stepCityGrowth, GROWTH_SOURCE } from './city/growth'
 import { rooftopOutputMw, rooftopSplit, stepRooftop } from './city/rooftop'
@@ -283,6 +284,16 @@ export class World {
    * that turned "Something is happening" into a sentence naming a place. See `news/news.ts`.
    */
   readonly news = new NewsDesk()
+
+  /**
+   * One line per completed year, for the whole run.
+   *
+   * Every chart in the game shows the last ten days, which is the right window for operating a
+   * system and the wrong one for every decision the player makes. See `economy/yearbook.ts`.
+   */
+  readonly yearbook: YearRecord[] = []
+  /** Generation by category since the year opened, MWh. Reset when the year closes. */
+  private yearMix: Record<string, number> = {}
 
   /**
    * Whether the player has asked to carry on after the verdict.
@@ -552,6 +563,16 @@ export class World {
     let total = 0
     for (const s of this.spending) total += s.perTick * s.remainingTicks
     return total
+  }
+
+  /**
+   * Pay for something taken down now rather than over years.
+   *
+   * A line is dismantled in weeks and there is nothing to make safe afterwards, so unlike a power
+   * station's decommissioning this is a single charge rather than a schedule.
+   */
+  chargeDemolition(cost: number): void {
+    chargeDecommissioning(this.openLedger, cost)
   }
 
   scheduleEnergising(edgeId: string, tick: number): void {
@@ -1026,8 +1047,12 @@ export class World {
     for (const plant of this.plants) {
       const mw = result.generationMw.get(plant.id) ?? 0
       if (mw <= 0) continue
-      const fuel = PLANT_TYPES[plant.typeId].fuel
-      this.termGenerationByFuel.set(fuel, (this.termGenerationByFuel.get(fuel) ?? 0) + mw)
+      const type = PLANT_TYPES[plant.typeId]
+      this.termGenerationByFuel.set(type.fuel, (this.termGenerationByFuel.get(type.fuel) ?? 0) + mw)
+      this.yearMix[type.category] = (this.yearMix[type.category] ?? 0) + mw
+    }
+    if (result.totalRooftopExportMw > 0) {
+      this.yearMix.solar = (this.yearMix.solar ?? 0) + result.totalRooftopExportMw
     }
     // The first hour the market ever pays people to stop generating is a genuinely new fact
     // about the system, and it arrives without anything visibly happening. Reported once a year
@@ -1907,6 +1932,24 @@ export class World {
     }
 
     this.yearLedger = emptyLedger()
+    // Taken before the annual ledger is reset, which is the only moment it is complete.
+    this.yearbook.push(
+      recordYear({
+        year: this.date.year,
+        ledger: this.yearLedger,
+        yearMix: this.yearMix,
+        plants: this.plants,
+        capacityOf: (plant) => this.params.get(plant.id, Param.CapacityMw),
+        rooftopMw: this.cities.reduce((sum, c) => sum + c.rooftopSolarMw, 0),
+        tariffPerMwh: this.state.regulatedTariffPerMwh,
+        profit: ledgerProfit(this.yearLedger),
+        cash: this.finances.cash,
+        debt: this.finances.debt,
+        regimeId: this.state.policyRegimeId,
+      }),
+    )
+    this.yearMix = {}
+
     this.books.closeYear()
     this.director.startYear()
   }
@@ -2041,6 +2084,8 @@ export class World {
       outcome: this.outcome,
       books: this.books.toJSON(),
       news: this.news.toJSON(),
+      yearbook: this.yearbook,
+      yearMix: this.yearMix,
       modifiers: this.registry.toJSON(),
     }
   }
@@ -2108,6 +2153,9 @@ export class World {
     this.outcome = data.outcome
     this.books.loadJSON(clone(data.books))
     this.news.loadJSON(clone(data.news))
+    this.yearbook.length = 0
+    this.yearbook.push(...clone(data.yearbook))
+    this.yearMix = clone(data.yearMix)
 
     this.registry.loadJSON(clone(data.modifiers))
     // The parameter cache is keyed by tick, so it has to be told which tick it is now or the

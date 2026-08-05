@@ -25,6 +25,7 @@ import type { Entry } from '../params/ModifierRegistry'
 import type { PeriodLedger, Finances } from '../economy/economy'
 import type { AssetAccounts } from '../economy/assetLedger'
 import type { NewsItem } from '../news/news'
+import type { YearRecord } from '../economy/yearbook'
 import type { DirectorState } from '../events/director'
 import type { Weather } from '../weather/weather'
 import type { WorldState } from '../world'
@@ -37,7 +38,7 @@ import type { ObjectiveProgress, ScenarioOutcome } from './objectives'
  * filling the gaps with defaults produces a game that looks fine and behaves subtly wrongly,
  * which is worse than a clear refusal — especially in a game where a run is measured in hours.
  */
-export const SAVE_VERSION = 7
+export const SAVE_VERSION = 8
 
 export interface ScheduledSpendData {
   ownerId: string
@@ -89,6 +90,10 @@ export interface SaveData {
    * post-mortem worth reading.
    */
   news: NewsItem[]
+  /** One line per completed year. Irrecoverable for the same reason the accounts are. */
+  yearbook: YearRecord[]
+  /** Generation by category since the current year opened, MWh. */
+  yearMix: Record<string, number>
   modifiers: Array<{ sourceId: string; entries: Entry[] }>
 }
 

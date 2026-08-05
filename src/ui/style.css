@@ -1385,3 +1385,21 @@ button.danger:hover {
   margin-top: 2px;
   text-wrap: balance;
 }
+
+.acct-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0 4px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+}
+
+.acct-search:focus {
+  outline: 1px solid var(--accent, #7fd4ff);
+  outline-offset: -1px;
+}

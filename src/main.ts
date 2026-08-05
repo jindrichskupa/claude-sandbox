@@ -28,6 +28,7 @@ import {
   beginPlantConstruction,
   beginSubstationConstruction,
   quoteSubstation,
+  demolishLine,
   renewLine,
   upgradeVoltage,
   mothballPlant,
@@ -228,6 +229,13 @@ async function main(): Promise<void> {
         }
         skip = { ticksRun: 0 }
       },
+      // The map's highlight and the inspector are the same selection, so they are set together.
+      onSelectionChanged: ({ nodeId, edgeId }, focus) => {
+        map.selectedNodeId = nodeId
+        map.selectedEdgeId = edgeId
+        if (focus && (nodeId ?? edgeId)) map.focusOn((nodeId ?? edgeId)!)
+        map.syncToWorld()
+      },
       onUpgradeLine: (edgeId) => {
         const result = upgradeLine(world, edgeId)
         hud.setHint(result.ok ? t('build.upgrading') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
@@ -237,6 +245,13 @@ async function main(): Promise<void> {
       onRenewLine: (edgeId) => {
         const result = renewLine(world, edgeId)
         hud.setHint(result.ok ? t('build.renewing') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
+        map.syncToWorld()
+        hud.update()
+      },
+      onDemolishLine: (edgeId) => {
+        const result = demolishLine(world, edgeId)
+        hud.setHint(result.ok ? t('build.demolished') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
+        if (result.ok) hud.selectEdge(null)
         map.syncToWorld()
         hud.update()
       },
@@ -426,11 +441,9 @@ async function main(): Promise<void> {
     const world2 = map.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top)
     const node = map.nodeAtWorld(world2.x, world2.y, TILE_PX)
     if (node) {
-      map.selectedNodeId = node.id
       hud.selectNode(node.id)
       return
     }
-    map.selectedNodeId = null
     const edge = map.edgeAtWorld(world2.x, world2.y)
     if (edge) hud.selectEdge(edge.id)
     else hud.selectNode(null)
@@ -592,6 +605,7 @@ async function main(): Promise<void> {
       beginHeatPipeConstruction,
       beginSubstationConstruction,
       quoteSubstation,
+  demolishLine,
   renewLine,
   upgradeVoltage,
       retirePlant,

@@ -33,6 +33,7 @@ import { addLedger, emptyLedger, ledgerProfit, type PeriodLedger } from '@sim/ec
 import { PLANT_TYPES } from '@content/plantTypes'
 import type { World } from '@sim/world'
 import {
+  emptyAssetLedger,
   marketMargin,
   operatingMargin,
   type AssetLedger,
@@ -122,6 +123,7 @@ export class AccountsPanel {
   private window: LedgerWindow = 'year'
   private basis: Basis = 'regulated'
   private lastSignature: string | null = null
+  private search = ''
 
   constructor(
     parent: HTMLElement,
@@ -192,7 +194,7 @@ export class AccountsPanel {
     // The figures move every hour, so this cannot be cached on content; it can be cached on the
     // clock. A paused game rebuilds this never, and a running one twice a second rather than ten
     // times — which is the whole difference between a panel and a spinning fan.
-    const signature = `${this.world.tick}|${this.window}|${this.basis}`
+    const signature = `${this.world.tick}|${this.window}|${this.basis}|${this.search}`
     if (signature === this.lastSignature) return
     this.lastSignature = signature
 
@@ -214,8 +216,42 @@ export class AccountsPanel {
     // happen between the two and were invisible.
     this.body.appendChild(this.firmBlock())
 
+    // A name filter, because on a map with sixty assets the way to find one is to type its name.
+    const search = el('input', 'acct-search') as HTMLInputElement
+    search.type = 'search'
+    search.placeholder = t('ui.findAsset')
+    search.value = this.search
+    // `input` rather than `change`, and re-rendering on each keystroke: the list is short enough
+    // that filtering is instant, and a search box that only works when you press Enter is one
+    // people assume is broken.
+    search.addEventListener('input', () => {
+      this.search = search.value
+      this.lastSignature = null
+      this.render()
+      const again = this.body.querySelector('.acct-search') as HTMLInputElement | null
+      if (again) {
+        again.focus()
+        again.setSelectionRange(again.value.length, again.value.length)
+      }
+    })
+    this.body.appendChild(search)
+
     const measure = BASES.find((b) => b.basis === this.basis)!.measure
-    const rows = this.world.books.ranked(this.window, measure)
+    const ranked = this.world.books.ranked(this.window, measure)
+
+    // Everything the player owns, not only what has an account. This panel is also the *inventory*
+    // — the place to find an asset when you do not remember where on the map it is — and a station
+    // that has never run, or a corridor built last month, is exactly the one somebody is looking
+    // for. Assets with no books sort to the top with a value of zero, which is what they are.
+    const known = new Set(ranked.map((r) => r.id))
+    const rows = [...ranked]
+    for (const plant of this.world.plants) {
+      if (!known.has(plant.id)) rows.unshift({ id: plant.id, value: 0, ledger: emptyAssetLedger() })
+    }
+    for (const edge of this.world.network.allEdges()) {
+      if (!known.has(edge.id)) rows.unshift({ id: edge.id, value: 0, ledger: emptyAssetLedger() })
+    }
+
     if (rows.length === 0) {
       this.body.appendChild(el('div', 'event-empty', t('ui.noAccountsYet')))
       return
@@ -249,8 +285,14 @@ export class AccountsPanel {
       { group: 'network', key: 'ui.acctNetwork' },
       { group: 'former', key: 'ui.acctFormer' },
     ]
+    const needle = this.search.trim().toLowerCase()
     for (const { group, key } of groups) {
-      const mine = rows.filter((r) => assetLabel(this.world, r.id).group === group)
+      const mine = rows.filter((r) => {
+        const label = assetLabel(this.world, r.id)
+        if (label.group !== group) return false
+        if (!needle) return true
+        return `${label.name} ${label.kind}`.toLowerCase().includes(needle)
+      })
       if (mine.length === 0) continue
       const subtotal = mine.reduce((sum, r) => sum + r.value, 0)
       const head = el('div', 'acct-group')
