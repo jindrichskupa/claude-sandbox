@@ -14,6 +14,7 @@ import { PLAYER, type GridEdge, type GridNode } from '../grid/network'
 import { routeLine, simplifyRoute } from '../grid/routing'
 import { LifecyclePhase, type CityAsset, type PlantAsset } from '../assets/types'
 import { expectedCondition } from '../assets/aging'
+import { expectedLineCondition } from '../grid/aging'
 import { designLifeFactor } from '../tech/costs'
 import { World, type ScenarioDef } from '../world'
 import type { SaveData } from './save'
@@ -70,7 +71,14 @@ export function buildWorld(content: ScenarioContent): World {
       lengthKm: route.lengthTiles * content.kmPerTile,
       circuits: spec.circuits,
       energised: true,
-      builtTick: -1,
+      // Negative, exactly as an inherited plant's commissioning tick is: the corridor was strung
+      // decades before the scenario opens, and a brownfield start whose network was built
+      // yesterday is not a brownfield start.
+      builtTick: -Math.round(spec.ageYears * TICKS_PER_YEAR),
+      conditionPct: expectedLineCondition(
+        { kv: spec.kv, builtTick: -Math.round(spec.ageYears * TICKS_PER_YEAR) } as GridEdge,
+        0,
+      ),
       route: simplifyRoute(route),
     }
     world.network.addEdge(edge)
@@ -94,6 +102,10 @@ export function buildWorld(content: ScenarioContent): World {
       circuits: spec.pipes,
       energised: true,
       builtTick: -1,
+      // Heat mains have no ageing model of their own yet — see the network milestone, which did
+      // the electric side. A buried pipe wears differently enough that guessing at it here would
+      // be worse than leaving it out.
+      conditionPct: 1,
       route: simplifyRoute(route),
     })
   }

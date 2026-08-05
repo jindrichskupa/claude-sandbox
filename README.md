@@ -41,6 +41,17 @@ the document tries to fetch anything.
 
 ## What exists today (milestones 1-8)
 
+- **The network is a system you run, not scenery.** A corridor used to have a `builtTick` and
+  nothing else: it never wore out, never failed, never cost anything to keep, and the only thing a
+  player could do to one was string a second circuit — in a game whose own premise is that the
+  corridor is the interesting constraint. Lines now age and are derated as they wear, fault
+  individually and briefly (lightning, a tree, an excavator — back inside a day, but a February
+  peak with the corridor down is a region islanded from its generation), and cost real money per
+  kilometre every month, which the content has specified since M1 and nobody was ever charged.
+  And they have two different answers to age: **re-conductoring** at a third of a new line, and
+  **rebuilding at the next voltage up** — 150 MW to 500 MW for a third of what the corridor cost,
+  because the route, the consents and the easements already exist. See
+  [The network as a system](#the-network-as-a-system).
 - **A fleet that can die, and a brief that cannot be lost to a coin toss.** Two findings from a
   probe rather than from inspection. The inherited fleet used to *never* wear out — eight units in
   1995, eight in 2026, availability slipping and nothing ever forcing a decision — so a player who
@@ -331,6 +342,35 @@ second, to redraw text that changes a few times a game year.
 The smoke test now uses the mouse: it clicks the Build button, clicks a row, clicks the map to
 place a station, and clicks Retire in the inspector, and it fails if any panel rebuilds even once
 while the clock is stopped.
+
+## The network as a system
+
+Everything the generation side has had since M1 and the network side had none of.
+
+| | before | now |
+|---|---|---|
+| condition and ageing | — | decays over a 55–65 year design life |
+| effect of wear | — | derated a few percent, on the binding constraint |
+| faults | storms, network-wide | per line, 1.4–3.5 a year per 100 km |
+| maintenance | plants only | the same lever moves line faults and line opex |
+| cost to own | **free** | €4–9k per km per year, charged monthly |
+| renewal | second circuit only | re-conductor, or rebuild at the next voltage |
+
+Two numbers worth stating because they are the argument for the whole thing. A 110 kV line faults
+**3.5 times a year per 100 km** and a 400 kV line **1.4** — higher voltages are built to a higher
+standard, better protected and better cleared, and that is a real reason to go up a level rather
+than string more of what you have. And the uprate itself: 110 → 220 takes a corridor from 150 MW
+to 500 MW for €28m against €73m for the same line built new, because the expensive and slow part
+of a transmission line is the route, the consents and the easements — and those already exist.
+
+Faults are deliberately not events. The event director already has storms that cut ratings across
+the whole network; this is the other thing, a specific line, out now, for a day. They teach
+different lessons: a storm is weather you insure against, and a fault on the single corridor
+feeding a city is a design flaw you built yourself.
+
+Re-conductoring is offered from *halfway* through the design life rather than at the end of it.
+Renewal is a plan, not a repair, and a game that only offered it once the corridor was failing
+would have turned it into one.
 
 ## How hard, and why
 

@@ -636,6 +636,38 @@ try {
   if (!followed.panelClosed) throw new Error('The accounts panel stayed open over the inspector')
   await page.screenshot({ path: join(OUT, '19-account-followed.png') })
 
+  // --- What you can do to a corridor ------------------------------------
+  // Three different decisions on the same asset, and until this milestone there was one. A line
+  // with work already pending shows its countdown instead, which is why this picks a clean one.
+  const lineActions = await page.evaluate(() => {
+    const g = window.game
+    const edge = g.world.network
+      .allEdges()
+      .find((e) => e.commodity === 'electric' && e.kv !== 0 && e.energised && e.upgradeAtTick === undefined)
+    if (!edge) return null
+    g.hud.selectEdge(edge.id)
+    const panel = document.getElementById('inspector')
+    return {
+      kv: edge.kv,
+      condition: edge.conditionPct,
+      rows: [...panel.querySelectorAll('.kv')].map((r) => r.textContent),
+      actions: [...panel.querySelectorAll('.asset-actions button')].map((b) => ({
+        label: b.textContent,
+        disabled: b.classList.contains('disabled'),
+        title: b.title,
+      })),
+    }
+  })
+  console.log('line actions:', lineActions)
+  if (!lineActions) throw new Error('No clean corridor to inspect')
+  if (lineActions.actions.length < 3) throw new Error('The line inspector offers fewer than three decisions')
+  if (!lineActions.rows.some((r) => r.includes('Condition'))) throw new Error('The line inspector shows no condition')
+  // A refused option is shown with its reason rather than hidden — "too new to be worth
+  // re-conductoring" is more useful than an option that simply is not there.
+  if (lineActions.actions.some((a) => !a.title)) throw new Error('A line action carried no explanation')
+
+  await page.screenshot({ path: join(OUT, '23-line-actions.png') })
+
   // --- News -------------------------------------------------------------
   // The thing that replaced "Something is happening". Two properties only a browser can check:
   // that headlines are real sentences with the parameters filled in, and that the forecast tab

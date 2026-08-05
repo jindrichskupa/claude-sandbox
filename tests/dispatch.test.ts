@@ -22,7 +22,7 @@ function node(id: string, kind: GridNode['kind'], x = 0, y = 0): GridNode {
 }
 
 function edge(id: string, from: string, to: string, kv: 110 | 220 | 400, lengthKm: number, circuits = 1): GridEdge {
-  return { id, commodity: 'electric', ownerId: PLAYER, from, to, kv, lengthKm, circuits, energised: true, builtTick: 0 }
+  return { id, commodity: 'electric', ownerId: PLAYER, from, to, kv, lengthKm, circuits, energised: true, builtTick: 0, conditionPct: 1 }
 }
 
 function plant(id: string, nodeId: string, typeId: PlantTypeId): PlantAsset {

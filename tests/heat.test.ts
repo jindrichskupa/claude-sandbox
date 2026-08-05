@@ -83,6 +83,7 @@ function pipe(id: string, from: string, to: string, dn: 200 | 400 | 700, lengthK
     circuits: 1,
     energised: true,
     builtTick: 0,
+    conditionPct: 1,
   }
 }
 

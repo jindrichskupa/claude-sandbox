@@ -46,6 +46,7 @@ function edge(id: string, from: string, to: string): GridEdge {
     circuits: 1,
     energised: true,
     builtTick: 0,
+    conditionPct: 1,
   }
 }
 

@@ -17,6 +17,15 @@ import { isMonthBoundary, isYearBoundary, TICKS_PER_YEAR, tickToDate, type GameD
 import { Network, PLAYER, type NodeId } from './grid/network'
 import { IslandCache } from './grid/islands'
 import {
+  advanceLineCondition,
+  lineAgingModifiers,
+  lineFaultRate,
+  lineLifeFraction,
+  lineWearFactor,
+  repairTicks,
+  LINE_AGE_SOURCE,
+} from './grid/aging'
+import {
   advanceCondition,
   ageYears,
   agingModifiers,
@@ -615,6 +624,10 @@ export class World {
     // 2. Ageing, monthly — nothing here changes meaningfully within a day.
     if (isMonthBoundary(this.tick) || this.tick === 1) {
       this.registry.setSource(AGE_SOURCE, agingModifiers(this.plants, this.tick))
+      // The network ages too, and until now it did not. A worn corridor is derated rather than
+      // disconnected — a few percent, landing exactly on the constraint this scenario is built
+      // around.
+      this.registry.setSource(LINE_AGE_SOURCE, lineAgingModifiers(this.network.allEdges()))
       // Fuel markets move on a monthly timescale here. Each fuel has its own index, so a
       // political shock moves imported gas and mine-mouth lignite by very different amounts.
       // Re-register the government's modifiers every month rather than only when one takes
@@ -650,6 +663,7 @@ export class World {
 
     // 3. Forced outages. A state transition, not a modifier: the unit is out, not derated.
     this.rollOutages()
+    this.rollLineFaults()
 
     // 3b. Events. Raised, landed and retired here, before anything reads a parameter, so an
     //     event that lands this hour is felt this hour rather than next.
@@ -1065,6 +1079,48 @@ export class World {
   }
 
   /**
+   * Lines fault, individually and briefly.
+   *
+   * Not the forced outage of a machine, which is measured in weeks: lightning, a tree, ice, an
+   * excavator, and it is back inside a day. What makes it interesting is not the duration but the
+   * *place* — a corridor down for eighteen hours in a February peak is a region islanded from its
+   * generation, and the flow problem models exactly that without another line of code.
+   */
+  private rollLineFaults(): void {
+    const stream = this.rng.streamFor('lineFault')
+    const edges = this.network.allEdges()
+    for (let i = 0; i < edges.length; i++) {
+      const edge = edges[i]!
+      if (edge.commodity !== 'electric' || edge.kv === 0) continue
+      advanceLineCondition(edge, this.tick)
+
+      if (edge.faultUntilTick !== undefined) {
+        if (this.tick < edge.faultUntilTick) continue
+        delete edge.faultUntilTick
+        this.network.setEnergised(edge.id, true)
+        continue
+      }
+      // A line still under construction is not a line that can fault.
+      if (!edge.energised) continue
+
+      const rate = lineFaultRate(edge, this.state.maintenanceLevel) * lineWearFactor(edge, this.tick)
+      if (!stream.chance(this.tick, rate / TICKS_PER_YEAR, i)) continue
+
+      const hours = repairTicks(edge)
+      edge.faultUntilTick = this.tick + hours
+      this.network.setEnergised(edge.id, false)
+      this.postNews({
+        category: 'grid',
+        importance: NewsImportance.Major,
+        titleKey: 'news.lineFault',
+        params: { from: this.nodeName(edge.from), to: this.nodeName(edge.to), hours },
+        subjectId: edge.id,
+        subjectKind: 'edge',
+      })
+    }
+  }
+
+  /**
    * A machine that has failed beyond repair. Dismantled on the same terms as a chosen closure,
    * because the work is the same work and the bill does not care why.
    */
@@ -1195,17 +1251,31 @@ export class World {
     // edges are saved wholesale, so it survives a save without any format work at all.
     for (const edge of this.network.allEdges()) {
       if (edge.upgradeAtTick === undefined || this.tick < edge.upgradeAtTick) continue
+      const wasKv = edge.kv
+      const wasCircuits = edge.circuits
       edge.circuits = edge.upgradeToCircuits ?? edge.circuits
+      if (edge.upgradeToKv !== undefined) edge.kv = edge.upgradeToKv
+      // Re-conductoring and a voltage rebuild put new metal on the corridor, so the clock starts
+      // again. A second circuit on old towers does not: the old conductors are still up there.
+      if (edge.upgradeRenewsAge) {
+        edge.builtTick = this.tick
+        edge.conditionPct = 1
+      }
+      const uprated = edge.kv !== wasKv
+      const renewed = !uprated && edge.circuits === wasCircuits
       delete edge.upgradeAtTick
       delete edge.upgradeToCircuits
+      delete edge.upgradeToKv
+      delete edge.upgradeRenewsAge
       this.postNews({
         category: 'grid',
         importance: NewsImportance.Major,
-        titleKey: 'news.circuitAdded',
+        titleKey: uprated ? 'news.lineUprated' : renewed ? 'news.lineRenewed' : 'news.circuitAdded',
         params: {
           from: this.nodeName(edge.from),
           to: this.nodeName(edge.to),
           circuits: edge.circuits,
+          kv: edge.kv,
         },
         subjectId: edge.id,
         subjectKind: 'edge',
@@ -1239,6 +1309,22 @@ export class World {
       this.books.for(plant.id).open.fixedOpex +=
         perKwYear * capacityKw * (ticks / TICKS_PER_YEAR) * this.state.maintenanceLevel
     }
+    // The network costs money to own even when nothing is flowing: vegetation management, tower
+    // painting, insulator washing, patrols, easements. The content has carried this figure since
+    // the first milestone and nobody was ever charged it — so the network was free, and a network
+    // that is free is one the player has no reason to think about.
+    for (const edge of this.network.allEdges()) {
+      if (edge.commodity !== 'electric' || edge.kv === 0) continue
+      const perYear =
+        nominal(LINE_TYPES[edge.kv].fixedOpexPerKmYear, this.date.year) *
+        edge.lengthKm *
+        Math.max(1, edge.circuits) *
+        this.state.maintenanceLevel
+      const cost = perYear * (ticks / TICKS_PER_YEAR)
+      this.openLedger.fixedOpex += cost
+      this.books.for(edge.id).open.fixedOpex += cost
+    }
+
     if (this.state.insured) chargeInsurance(this.openLedger, this.plants, ticks)
     chargeInterest(this.openLedger, this.finances, ticks, this.state.investorConfidence)
 
@@ -1374,6 +1460,35 @@ export class World {
             subjectKind: 'plant',
           })
         }
+      }
+    }
+
+    for (const edge of this.network.allEdges()) {
+      if (edge.commodity !== 'electric' || edge.kv === 0 || !edge.energised) continue
+      const rate = lineFaultRate(edge, this.state.maintenanceLevel) * lineWearFactor(edge, this.tick)
+      if (rate > 0.15) {
+        out.push({
+          category: 'grid',
+          titleKey: 'upcoming.lineFaultRisk',
+          params: { from: this.nodeName(edge.from), to: this.nodeName(edge.to) },
+          chance: Math.min(1, rate),
+          subjectId: edge.id,
+          subjectKind: 'edge',
+        })
+      }
+      // Renewal is a plan, not a repair. A corridor whose conductors are past their design life
+      // is one to re-string before it starts costing outages, and the warning has to arrive with
+      // enough time to do something about it.
+      const life = lineLifeFraction(edge, this.tick)
+      if (life > 0.85) {
+        out.push({
+          category: 'grid',
+          titleKey: 'upcoming.lineEndOfLife',
+          params: { from: this.nodeName(edge.from), to: this.nodeName(edge.to) },
+          whenTicks: Math.round((1 - life) * LINE_TYPES[edge.kv].designLifeYears.value * TICKS_PER_YEAR),
+          subjectId: edge.id,
+          subjectKind: 'edge',
+        })
       }
     }
 

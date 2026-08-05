@@ -48,6 +48,15 @@ export interface LineSpec {
   to: string
   kv: VoltageLevel
   circuits: number
+  /**
+   * How old the corridor already is when the scenario begins.
+   *
+   * The same field the inherited plant carries, and for the same reason: a brownfield start whose
+   * network was built yesterday is not a brownfield start. It also decides whether the renewal
+   * mechanics ever fire — a line with a sixty-year design life that begins at zero is one the
+   * player will never have to think about inside a thirty-year scenario.
+   */
+  ageYears: number
 }
 
 /**
@@ -209,26 +218,27 @@ export const FIRST_REGION: ScenarioContent = {
   ],
 
   lines: [
-    // The western corridor. Two circuits, and still not enough for 1200 MW of lignite.
-    { id: 'l_blackridge_central', from: 'n_blackridge', to: 'n_central', kv: 220, circuits: 2 },
-    { id: 'l_blackridge_ironvale', from: 'n_blackridge', to: 'n_ironvale', kv: 110, circuits: 1 },
+    // The western corridor. Two circuits, and still not enough for 1200 MW of lignite — and the
+    // conductors went up in the late fifties, which is the other half of the same problem.
+    { ageYears: 38, id: 'l_blackridge_central', from: 'n_blackridge', to: 'n_central', kv: 220, circuits: 2 },
+    { ageYears: 44, id: 'l_blackridge_ironvale', from: 'n_blackridge', to: 'n_ironvale', kv: 110, circuits: 1 },
 
     // Central spine.
-    { id: 'l_central_rivermouth', from: 'n_central', to: 'n_rivermouth', kv: 220, circuits: 2 },
-    { id: 'l_central_north', from: 'n_central', to: 'n_northsub', kv: 220, circuits: 1 },
-    { id: 'l_central_ironvale', from: 'n_central', to: 'n_ironvale', kv: 220, circuits: 1 },
+    { ageYears: 30, id: 'l_central_rivermouth', from: 'n_central', to: 'n_rivermouth', kv: 220, circuits: 2 },
+    { ageYears: 35, id: 'l_central_north', from: 'n_central', to: 'n_northsub', kv: 220, circuits: 1 },
+    { ageYears: 33, id: 'l_central_ironvale', from: 'n_central', to: 'n_ironvale', kv: 220, circuits: 1 },
 
     // The north, thin and remote.
-    { id: 'l_north_northgate', from: 'n_northsub', to: 'n_northgate', kv: 110, circuits: 2 },
-    { id: 'l_north_gorge', from: 'n_northsub', to: 'n_gorge', kv: 110, circuits: 1 },
+    { ageYears: 41, id: 'l_north_northgate', from: 'n_northsub', to: 'n_northgate', kv: 110, circuits: 2 },
+    { ageYears: 47, id: 'l_north_gorge', from: 'n_northsub', to: 'n_gorge', kv: 110, circuits: 1 },
 
     // Around the capital.
-    { id: 'l_eastfield_rivermouth', from: 'n_eastfield', to: 'n_rivermouth', kv: 220, circuits: 1 },
-    { id: 'l_oldharbour_rivermouth', from: 'n_oldharbour', to: 'n_rivermouth', kv: 220, circuits: 1 },
-    { id: 'l_millbrook_rivermouth', from: 'n_millbrook', to: 'n_rivermouth', kv: 110, circuits: 1 },
-    { id: 'l_quayside_rivermouth', from: 'n_quayside', to: 'n_rivermouth', kv: 110, circuits: 1 },
-    { id: 'l_ironworks_ironvale', from: 'n_ironworks', to: 'n_ironvale', kv: 110, circuits: 1 },
-    { id: 'l_rivermouth_southbay', from: 'n_rivermouth', to: 'n_southbay', kv: 110, circuits: 2 },
+    { ageYears: 22, id: 'l_eastfield_rivermouth', from: 'n_eastfield', to: 'n_rivermouth', kv: 220, circuits: 1 },
+    { ageYears: 45, id: 'l_oldharbour_rivermouth', from: 'n_oldharbour', to: 'n_rivermouth', kv: 220, circuits: 1 },
+    { ageYears: 36, id: 'l_millbrook_rivermouth', from: 'n_millbrook', to: 'n_rivermouth', kv: 110, circuits: 1 },
+    { ageYears: 39, id: 'l_quayside_rivermouth', from: 'n_quayside', to: 'n_rivermouth', kv: 110, circuits: 1 },
+    { ageYears: 43, id: 'l_ironworks_ironvale', from: 'n_ironworks', to: 'n_ironvale', kv: 110, circuits: 1 },
+    { ageYears: 34, id: 'l_rivermouth_southbay', from: 'n_rivermouth', to: 'n_southbay', kv: 110, circuits: 2 },
   ],
 
   // Short and fat, as every real heat main is: Ironworks is one tile from Ironvale, Quayside

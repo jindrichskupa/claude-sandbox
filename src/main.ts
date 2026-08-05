@@ -28,6 +28,8 @@ import {
   beginPlantConstruction,
   beginSubstationConstruction,
   quoteSubstation,
+  renewLine,
+  upgradeVoltage,
   mothballPlant,
   quoteHeatPipe,
   quoteLine,
@@ -229,6 +231,18 @@ async function main(): Promise<void> {
       onUpgradeLine: (edgeId) => {
         const result = upgradeLine(world, edgeId)
         hud.setHint(result.ok ? t('build.upgrading') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
+        map.syncToWorld()
+        hud.update()
+      },
+      onRenewLine: (edgeId) => {
+        const result = renewLine(world, edgeId)
+        hud.setHint(result.ok ? t('build.renewing') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
+        map.syncToWorld()
+        hud.update()
+      },
+      onUpgradeVoltage: (edgeId) => {
+        const result = upgradeVoltage(world, edgeId)
+        hud.setHint(result.ok ? t('build.uprating') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
         map.syncToWorld()
         hud.update()
       },
@@ -578,6 +592,8 @@ async function main(): Promise<void> {
       beginHeatPipeConstruction,
       beginSubstationConstruction,
       quoteSubstation,
+  renewLine,
+  upgradeVoltage,
       retirePlant,
       quotePlant,
       quoteLine,

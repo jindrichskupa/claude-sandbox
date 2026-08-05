@@ -11,13 +11,14 @@
  * to plan around instead of a single moment of pain.
  */
 
-import { LINE_TYPES, type VoltageLevel } from '@content/lineTypes'
+import { LINE_TYPES, VOLTAGE_LEVELS, type VoltageLevel } from '@content/lineTypes'
 import { PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
 import { HEAT_PIPE_TYPES, type PipeSize } from '@content/heatPipeTypes'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '../core/time'
 import { LifecyclePhase, type PlantAsset } from '../assets/types'
 import { lifeFraction } from '../assets/aging'
 import { designLifeFactor, realDecommissioningFactor } from '../tech/costs'
+import { isWorthRenewing } from '../grid/aging'
 import { nominal } from '../tech/money'
 import { PLAYER, tileDistance, type GridEdge, type GridNode, type NodeId } from '../grid/network'
 import { judgeSite } from './siting'
@@ -350,6 +351,113 @@ export function upgradeLine(world: World, edgeId: string): { ok: boolean; quote:
 }
 
 /**
+ * Re-conductoring: what a line has instead of refurbishment.
+ *
+ * Towers and foundations outlive several generations of the plant they connect; what wears out is
+ * the conductor, the insulators and the fittings. So the renewal is a third of the cost of a new
+ * line and the corridor keeps its route, its consents and its steel. Offered from halfway through
+ * the design life rather than at the end of it, because renewal is a plan and not a repair — and
+ * a game that only offered it once the line was failing would have turned it into one.
+ *
+ * The line stays in service throughout. Re-conductoring is done circuit by circuit on a live
+ * corridor, and taking the whole thing out for a year would be a different and much worse
+ * decision than the one being modelled.
+ */
+export function quoteLineRenewal(world: World, edgeId: string): Quote {
+  const edge = world.network.getEdge(edgeId)
+  if (!edge) return refuse('build.noSuchNode')
+  if (edge.commodity !== 'electric' || edge.kv === 0) return refuse('build.notUpgradable')
+  if (!edge.energised) return refuse('build.stillBuilding')
+  if (edge.upgradeAtTick !== undefined) return refuse('build.alreadyUpgrading')
+  if (!isWorthRenewing(edge, world.tick)) return refuse('build.tooNewToRenew')
+
+  const type = LINE_TYPES[edge.kv]
+  const year = world.date.year
+  // A line is steel and labour and nothing that learns, so its price only ever goes up — the same
+  // arithmetic that makes decommissioning provisions so reliably short.
+  const totalCost =
+    nominal(type.capexPerKm, year) *
+    realDecommissioningFactor(year, type.capexPerKm.sourceYear) *
+    edge.lengthKm *
+    Math.max(1, edge.circuits) *
+    type.refurbishCostFraction.value
+  const buildMonths = (type.buildTimeMonthsPer100Km.value * edge.lengthKm) / 100
+  const buildTicks = Math.max(1, Math.round(Math.max(2, buildMonths * 0.4) * TICKS_PER_MONTH))
+
+  if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
+  return { ok: true, totalCost, buildTicks, lengthKm: edge.lengthKm }
+}
+
+export function renewLine(world: World, edgeId: string): { ok: boolean; quote: Quote } {
+  const quote = quoteLineRenewal(world, edgeId)
+  if (!quote.ok) return { ok: false, quote }
+  const edge = world.network.requireEdge(edgeId)
+  edge.upgradeAtTick = world.tick + quote.buildTicks
+  edge.upgradeToCircuits = edge.circuits
+  // The clock restarts, which is what re-conductoring buys and why it is not merely a repair.
+  edge.upgradeRenewsAge = true
+  world.scheduleSpending(edgeId, quote.totalCost, quote.buildTicks, 'capex')
+  return { ok: true, quote }
+}
+
+/**
+ * Rebuilding a corridor at the next voltage up.
+ *
+ * The decision the scenario's own premise asks for and the game has never offered. A 110 kV line
+ * between a load centre and its generation is a corridor whose route, consents and easements
+ * already exist — which is the expensive and slow part of any new line — so raising it to 220
+ * costs far less than a new corridor and multiplies the capacity more than three times while
+ * cutting the losses fourfold at the same flow.
+ *
+ * Priced as the difference between the two voltages plus the substations at each end, because
+ * the substations are what actually has to be replaced: the towers can often be reused or
+ * extended, the switchgear cannot.
+ */
+export function quoteVoltageUpgrade(world: World, edgeId: string): Quote {
+  const edge = world.network.getEdge(edgeId)
+  if (!edge) return refuse('build.noSuchNode')
+  if (edge.commodity !== 'electric' || edge.kv === 0) return refuse('build.notUpgradable')
+  if (!edge.energised) return refuse('build.stillBuilding')
+  if (edge.upgradeAtTick !== undefined) return refuse('build.alreadyUpgrading')
+
+  const next = nextVoltage(edge.kv)
+  if (next === null) return refuse('build.alreadyHighestVoltage')
+
+  const from = LINE_TYPES[edge.kv]
+  const to = LINE_TYPES[next]
+  const year = world.date.year
+  const conductorDelta = Math.max(0, nominal(to.capexPerKm, year) - nominal(from.capexPerKm, year) * 0.4)
+  const totalCost =
+    (conductorDelta * realDecommissioningFactor(year, to.capexPerKm.sourceYear) * edge.lengthKm) +
+    nominal(to.substationCapex, year) * 2
+  const buildMonths = (to.buildTimeMonthsPer100Km.value * edge.lengthKm) / 100
+  const buildTicks = Math.max(1, Math.round(Math.max(6, buildMonths * 0.7) * TICKS_PER_MONTH))
+
+  if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
+  return { ok: true, totalCost, buildTicks, lengthKm: edge.lengthKm }
+}
+
+export function upgradeVoltage(world: World, edgeId: string): { ok: boolean; quote: Quote } {
+  const quote = quoteVoltageUpgrade(world, edgeId)
+  if (!quote.ok) return { ok: false, quote }
+  const edge = world.network.requireEdge(edgeId)
+  const next = nextVoltage(edge.kv as VoltageLevel)
+  if (next === null) return { ok: false, quote: refuse('build.alreadyHighestVoltage') }
+  edge.upgradeAtTick = world.tick + quote.buildTicks
+  edge.upgradeToCircuits = edge.circuits
+  edge.upgradeToKv = next
+  edge.upgradeRenewsAge = true
+  world.scheduleSpending(edgeId, quote.totalCost, quote.buildTicks, 'capex')
+  return { ok: true, quote }
+}
+
+/** The next voltage level up, or null at the top of the ladder. */
+export function nextVoltage(kv: VoltageLevel): VoltageLevel | null {
+  const index = VOLTAGE_LEVELS.indexOf(kv)
+  return index >= 0 && index + 1 < VOLTAGE_LEVELS.length ? VOLTAGE_LEVELS[index + 1]! : null
+}
+
+/**
  * Start building a line. It is created de-energised, so it carries nothing and does not join
  * two islands until it is finished — which is the whole point of a construction time.
  */
@@ -380,6 +488,7 @@ export function beginLineConstruction(
     circuits,
     energised: false,
     builtTick: world.tick + quote.buildTicks,
+    conditionPct: 1,
     ...(quote.route ? { route: quote.route } : {}),
   }
   world.network.addEdge(edge)
@@ -455,6 +564,7 @@ export function beginHeatPipeConstruction(
     circuits: pipes,
     energised: false,
     builtTick: world.tick + quote.buildTicks,
+    conditionPct: 1,
     ...(quote.route ? { route: quote.route } : {}),
   }
   world.network.addEdge(edge)

@@ -20,7 +20,15 @@ import { ageYears } from '@sim/assets/aging'
 import { Layer, LAYER_KEYS, Op, Param, PARAM_KEYS, type Explanation } from '@sim/params/types'
 import { drawLoadCurve, drawMix, drawPrice } from './charts'
 import { nodeLabel } from '@render/mapView'
-import { quoteLineUpgrade, quoteRefurbishment, refurbishmentGains } from '@sim/build/commands'
+import {
+  nextVoltage,
+  quoteLineRenewal,
+  quoteLineUpgrade,
+  quoteRefurbishment,
+  quoteVoltageUpgrade,
+  refurbishmentGains,
+} from '@sim/build/commands'
+import { lineAgeYears, lineFaultRate, lineWearFactor } from '@sim/grid/aging'
 import { BuildPanel, type BuildSelection } from './buildPanel'
 import { PoliticsPanel } from './politicsPanel'
 import { ObjectivesPanel } from './objectivesPanel'
@@ -47,6 +55,8 @@ export interface HudCallbacks {
   onSave: () => void
   onLoad: () => void
   onUpgradeLine: (edgeId: string) => void
+  onRenewLine: (edgeId: string) => void
+  onUpgradeVoltage: (edgeId: string) => void
   onSkip: () => void
 }
 
@@ -861,7 +871,9 @@ export class Hud {
       return
     }
 
-    const signature = `edge:${edgeId}|${this.world.tick}|${edge.circuits}|${edge.upgradeAtTick ?? ''}`
+    const signature = `edge:${edgeId}|${this.world.tick}|${edge.circuits}|${edge.kv}|${edge.upgradeAtTick ?? ''}|${
+      edge.faultUntilTick ?? ''
+    }`
     if (signature === this.lastInspectorSignature) return
     this.lastInspectorSignature = signature
 
@@ -888,7 +900,28 @@ export class Hud {
     block.appendChild(this.kv(t('ui.length'), `${edge.lengthKm.toFixed(0)} ${t('ui.kmShort')}`))
     block.appendChild(this.kv(t('ui.circuits'), String(edge.circuits)))
 
-    if (!edge.energised) {
+    // A corridor is a machine too, and until now the panel said nothing about its state. Age,
+    // condition and how often it is expected to fault are the three numbers that decide whether
+    // to re-conductor it, and they were all invisible.
+    if (edge.commodity === 'electric' && edge.kv !== 0) {
+      block.appendChild(
+        this.kv(t('ui.lineAge'), `${lineAgeYears(edge, this.world.tick).toFixed(0)} ${t('ui.years')}`),
+      )
+      block.appendChild(this.kv(t('ui.lineCondition'), formatPct(edge.conditionPct)))
+      const rate = lineFaultRate(edge, this.world.state.maintenanceLevel) * lineWearFactor(edge, this.world.tick)
+      if (rate > 0.02) {
+        const row = this.kv(t('ui.lineFaultRate'), t('ui.perYear', { n: rate.toFixed(2) }))
+        if (rate > 0.2) row.classList.add('warn')
+        block.appendChild(row)
+      }
+      if (edge.faultUntilTick !== undefined) {
+        block.appendChild(
+          el('div', 'asset-building bad', t('ui.lineFaulted', { hours: Math.max(0, edge.faultUntilTick - this.world.tick) })),
+        )
+      }
+    }
+
+    if (!edge.energised && edge.faultUntilTick === undefined) {
       const at = this.world.energisingTick(edgeId)
       const months = at === undefined ? 0 : Math.ceil(Math.max(0, at - this.world.tick) / TICKS_PER_MONTH)
       block.appendChild(el('div', 'asset-building', t('ui.energisesIn', { months })))
@@ -936,25 +969,74 @@ export class Hud {
       const months = Math.ceil(Math.max(0, edge.upgradeAtTick - this.world.tick) / TICKS_PER_MONTH)
       block.appendChild(el('div', 'asset-building', t('ui.upgradingIn', { months })))
     } else if (edge.commodity === 'electric' && edge.energised) {
-      // Reinforcing a corridor you already own, rather than drawing a second one on top of it.
-      const quote = quoteLineUpgrade(this.world, edgeId)
+      // Three things a player can do to a corridor they already own, and they are three different
+      // decisions: more capacity on the same steel, new metal on the same route, or the same route
+      // rebuilt to a higher standard.
       const row = el('div', 'asset-actions')
-      const button = el('button', undefined, t('ui.addCircuit'))
-      if (quote.ok) {
-        button.title = t('ui.upgradeGains', {
-          cost: formatMoney(quote.totalCost),
-          months: Math.round(quote.buildTicks / TICKS_PER_MONTH),
-        })
-        button.addEventListener('click', () => this.callbacks.onUpgradeLine(edgeId))
-      } else {
-        button.classList.add('disabled')
-        button.title = t(quote.reasonKey ?? 'build.notUpgradable', quote.reasonParams)
+
+      const addCircuit = quoteLineUpgrade(this.world, edgeId)
+      row.appendChild(
+        this.lineAction(t('ui.addCircuit'), addCircuit, () => this.callbacks.onUpgradeLine(edgeId), () =>
+          t('ui.upgradeGains', {
+            cost: formatMoney(addCircuit.totalCost),
+            months: Math.round(addCircuit.buildTicks / TICKS_PER_MONTH),
+          }),
+        ),
+      )
+
+      const renewal = quoteLineRenewal(this.world, edgeId)
+      row.appendChild(
+        this.lineAction(t('ui.renewLine'), renewal, () => this.callbacks.onRenewLine(edgeId), () =>
+          t('ui.renewGains', {
+            cost: formatMoney(renewal.totalCost),
+            months: Math.round(renewal.buildTicks / TICKS_PER_MONTH),
+          }),
+        ),
+      )
+
+      const next = edge.kv !== 0 ? nextVoltage(edge.kv) : null
+      if (next !== null) {
+        const uprate = quoteVoltageUpgrade(this.world, edgeId)
+        row.appendChild(
+          this.lineAction(t('ui.upgradeVoltage', { kv: next }), uprate, () => this.callbacks.onUpgradeVoltage(edgeId), () =>
+            t('ui.upgradeVoltageGains', {
+              cost: formatMoney(uprate.totalCost),
+              months: Math.round(uprate.buildTicks / TICKS_PER_MONTH),
+              mw: Math.round(LINE_TYPES[next].capacityMw.value * edge.circuits),
+              was: Math.round(LINE_TYPES[edge.kv as 110 | 220 | 400].capacityMw.value * edge.circuits),
+            }),
+          ),
+        )
       }
-      row.appendChild(button)
+
       block.appendChild(row)
     }
 
     this.inspector.appendChild(block)
+  }
+
+  /**
+   * One button for one thing that can be done to a line.
+   *
+   * A refused quote is shown rather than hidden, with the reason as its tooltip — "too new to be
+   * worth re-conductoring" is a different and more useful piece of news than an option that is
+   * simply not there, which the player would read as a missing feature.
+   */
+  private lineAction(
+    label: string,
+    quote: { ok: boolean; reasonKey?: string; reasonParams?: Record<string, string | number> },
+    onClick: () => void,
+    describe: () => string,
+  ): HTMLButtonElement {
+    const button = el('button', undefined, label)
+    if (quote.ok) {
+      button.title = describe()
+      button.addEventListener('click', onClick)
+    } else {
+      button.classList.add('disabled')
+      button.title = t(quote.reasonKey ?? 'build.notUpgradable', quote.reasonParams)
+    }
+    return button
   }
 
   private loadBar(fraction: number, colour: string): HTMLDivElement {

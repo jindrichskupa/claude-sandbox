@@ -1320,18 +1320,25 @@ button.danger:hover {
 
 /* --- Cards ----------------------------------------------------------- */
 
+/* Bottom centre, not top centre.
+ *
+ * The first version sat under the top bar, in the middle of the map — and the
+ * browser smoke test caught it immediately by trying to click a site to build
+ * on and hitting a card instead. Cards have to take pointer events, because
+ * clicking one is how you get to the thing it is about; so the only fix is to
+ * put them where the player is not working. The bottom strip is empty apart
+ * from the line legend in the corner. */
 #news-toasts {
   position: absolute;
-  top: 74px;
+  bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   gap: 6px;
   align-items: center;
-  /* So a card can never swallow a click meant for the map underneath it. The
-   * cards themselves take pointer events back. */
+  /* The container never swallows a click; the cards themselves take them back. */
   pointer-events: none;
 }
 
@@ -1351,7 +1358,7 @@ button.danger:hover {
 @keyframes news-in {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;

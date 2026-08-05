@@ -76,6 +76,26 @@ export interface GridEdge {
   energised: boolean
   builtTick: number
   /**
+   * Physical condition, 1 being as new.
+   *
+   * Lines had none of this until now — a `builtTick` and nothing else — so the whole ageing,
+   * maintenance and renewal half of the game applied to generation only, while the corridor was
+   * scenery that never changed. Condition decays with age, is restored by re-conductoring, and
+   * drives both the fault rate and a slow loss of usable rating.
+   */
+  conditionPct: number
+  /** Tick at which a faulted line comes back. Absent when it is not faulted. */
+  faultUntilTick?: number
+  /** A rebuild at a higher voltage, pending. The kV it will become. */
+  upgradeToKv?: VoltageLevel
+  /**
+   * Whether the pending work restarts the line's age.
+   *
+   * Re-conductoring and a voltage rebuild both do; stringing a second circuit on old towers does
+   * not, because the old conductors are still up there and still the oldest thing on the line.
+   */
+  upgradeRenewsAge?: boolean
+  /**
    * The corridor the line actually follows, as tile corners. Absent for lines that predate
    * routing, which are drawn straight.
    */
