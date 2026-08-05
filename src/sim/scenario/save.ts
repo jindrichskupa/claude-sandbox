@@ -24,6 +24,7 @@ import type { CityAsset, PlantAsset } from '../assets/types'
 import type { Entry } from '../params/ModifierRegistry'
 import type { PeriodLedger, Finances } from '../economy/economy'
 import type { AssetAccounts } from '../economy/assetLedger'
+import type { NewsItem } from '../news/news'
 import type { DirectorState } from '../events/director'
 import type { Weather } from '../weather/weather'
 import type { WorldState } from '../world'
@@ -36,7 +37,7 @@ import type { ObjectiveProgress, ScenarioOutcome } from './objectives'
  * filling the gaps with defaults produces a game that looks fine and behaves subtly wrongly,
  * which is worse than a clear refusal — especially in a game where a run is measured in hours.
  */
-export const SAVE_VERSION = 5
+export const SAVE_VERSION = 6
 
 export interface ScheduledSpendData {
   ownerId: string
@@ -82,6 +83,12 @@ export interface SaveData {
    * done nothing since it was built.
    */
   books: Array<[string, AssetAccounts]>
+  /**
+   * The archive. Saved for the same reason the accounts are: it is the record of the run and
+   * nothing short of replaying it would rebuild it — and it is the raw material of any
+   * post-mortem worth reading.
+   */
+  news: NewsItem[]
   modifiers: Array<{ sourceId: string; entries: Entry[] }>
 }
 

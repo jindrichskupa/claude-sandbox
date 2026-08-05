@@ -75,3 +75,14 @@ export function formatDate(d: { year: number; month: number; day: number; hour: 
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${String(d.day).padStart(2, '0')} ${months[d.month]} ${d.year}, ${String(d.hour).padStart(2, '0')}:00`
 }
+
+/**
+ * The same date without the hour, for anything historical.
+ *
+ * A news archive that stamped every headline to the hour would be reporting a precision nobody
+ * needs and making a column of dates twice as wide as the column of headlines.
+ */
+export function formatShortDate(d: { year: number; month: number; day: number }): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${String(d.day).padStart(2, '0')} ${months[d.month]} ${d.year}`
+}

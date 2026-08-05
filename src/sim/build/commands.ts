@@ -28,6 +28,7 @@ import { canAfford } from '../economy/economy'
 import { REGIMES_BY_ID } from '@content/policies'
 import { offerContract } from '../policy/contracts'
 import type { World } from '../world'
+import { NewsImportance } from '../news/news'
 
 const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 
@@ -293,6 +294,14 @@ export function beginSubstationConstruction(
     nameIndex: serial,
   })
   world.scheduleSpending(nodeId, quote.totalCost, quote.buildTicks, 'capex')
+  world.reportNews({
+    category: 'grid',
+    importance: NewsImportance.Notable,
+    titleKey: 'news.substationBuilt',
+    params: { kv },
+    subjectId: nodeId,
+    subjectKind: 'node',
+  })
   return { ok: true, nodeId, quote }
 }
 
@@ -500,6 +509,17 @@ export function retirePlant(world: World, plantId: string): { ok: boolean; quote
   plant.online = false
   plant.outputMw = 0
   world.scheduleSpending(plantId, quote.totalCost, quote.buildTicks, 'decommissioning')
+  world.reportNews({
+    category: 'fleet',
+    importance: NewsImportance.Notable,
+    titleKey: 'news.retirementBegun',
+    params: {
+      plant: world.plantDisplayName(plantId),
+      months: Math.max(1, Math.round(quote.buildTicks / (TICKS_PER_YEAR / 12))),
+    },
+    subjectId: plantId,
+    subjectKind: 'plant',
+  })
 
   return { ok: true, quote }
 }

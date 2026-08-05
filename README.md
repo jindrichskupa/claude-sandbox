@@ -41,6 +41,16 @@ the document tries to fetch anything.
 
 ## What exists today (milestones 1-8)
 
+- **A newspaper, because "Something is happening" is not a sentence.** The fast-forward used to
+  stop by hashing the world and noticing the hash had changed, which could never say *what*. Now
+  every system files a headline — a station started, a corridor live, a government elected with
+  its share of the vote, a market clearing below zero, a town losing its heat — and the same
+  record drives three things: the card that slides over the map, the archive the player scrolls
+  back through, and the reason the clock stopped. Beside it is the half a log cannot give you:
+  **what is coming**, with a date where there is one and a probability where there is not. A
+  station eleven months from service is a date; a plant of this age tripping this year is a 14%
+  risk; and they are rendered differently on purpose. See
+  [The newspaper](#the-newspaper).
 - **Towns that change size and habits, and roofs that start generating.** A city used to be a
   constant with weather on top, which quietly made the game a question about supply only. Now
   population accumulates — and stops accumulating where the lights keep going out — while
@@ -310,6 +320,55 @@ second, to redraw text that changes a few times a game year.
 The smoke test now uses the mouse: it clicks the Build button, clicks a row, clicks the map to
 place a station, and clicks Retire in the inspector, and it fails if any panel rebuilds even once
 while the clock is stopped.
+
+## The newspaper
+
+The fast-forward stopped and the interface said *"Something is happening"*. That was structurally
+honest — it worked by hashing everything a player could care about and stopping when the hash
+changed, so no system could forget to announce itself — and it was the least useful sentence an
+interface can produce. The player then had to go and find whatever it was.
+
+So systems announce themselves after all, and the announcement is the feature:
+
+```
+16 Jan 1995  EVENTS        Gas supply interruption has hit
+13 Jan 1995  NETWORK       A 220 kV substation has been built
+13 Jan 1995  FLEET         Old Harbour is being retired — 48 months to dismantle
+13 Jan 1995  CONSTRUCTION  Construction started at Combined-cycle gas 4 — 23 months to build
+09 Jan 1995  SUPPLY        Rivermouth is losing its heat supply
+```
+
+One record, three uses: the card that slides in over the map, the archive with a category filter,
+and the reason the fast-forward stopped — which is now a sentence naming a place. Items carry
+their subject, so clicking a headline takes you to it.
+
+Three importance levels rather than a flag, because a game like this generates a great deal of
+true and boring information. `Routine` is filed and never interrupts; `Notable` stops a
+fast-forward; `Major` raises a card. Getting that wrong does not produce a missing feature, it
+produces an interface that cries wolf until the player stops reading it.
+
+And the other half, which a log cannot give you at all:
+
+```
+in 6 months   NETWORK       The line from Combined-cycle gas 1 to Rivermouth goes live
+in 9 months   NETWORK       A second circuit on Central → North
+in 4 years    FLEET         Millbrook reaches the end of its design life
+in 4 years    POLITICS      General election
+in 31 years   OBJECTIVES    The scenario is judged, 2025
+14% this year FLEET         Blackridge is likely to trip
+```
+
+Dates and risks are different fields and are rendered differently, deliberately. A station
+entering service in eleven months is something to plan against; a plant of this age tripping this
+year is something to insure against; and a forecast that presented them identically would teach
+the player to trust neither. The end-of-life warnings start five years out because that is roughly
+how long a replacement takes to permit and build — a warning that arrives later than the lead time
+is not a warning.
+
+The guarantee the old signature gave by construction is now a test: `tests/news.test.ts` plays a
+scenario and asserts that each kind of thing that happens in it produced news. A system that
+forgets to file is a failing test rather than a silent gap — a weaker guarantee, and a much better
+interface.
 
 ## Cities, roofs and the death spiral
 

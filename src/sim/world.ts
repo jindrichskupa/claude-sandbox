@@ -48,6 +48,7 @@ import {
 } from './scenario/objectives'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
 import { AssetBooks } from './economy/assetLedger'
+import { NewsDesk, NewsImportance, type NewsItem, type UpcomingItem } from './news/news'
 import { growthModifiers, stepCityGrowth, GROWTH_SOURCE } from './city/growth'
 import { rooftopOutputMw, rooftopSplit, stepRooftop } from './city/rooftop'
 import { ROOFTOP } from '@content/cityTrends'
@@ -55,6 +56,7 @@ import { techModifiers, TECH_SOURCE } from './tech/modifiers'
 import { nominal, pricesFor, type Prices } from './tech/money'
 import type { SaveData } from './scenario/save'
 import { EventDirector } from './events/director'
+import { EVENTS_BY_ID } from '@content/events'
 import {
   addLedger,
   chargeCapex,
@@ -257,6 +259,14 @@ export class World {
    */
   readonly books = new AssetBooks()
 
+  /**
+   * What has happened, in words.
+   *
+   * Systems post here rather than the interface inferring things from state, which is the change
+   * that turned "Something is happening" into a sentence naming a place. See `news/news.ts`.
+   */
+  readonly news = new NewsDesk()
+
   /** How each objective stands. Re-judged when the year closes; a breach is permanent. */
   objectives: ObjectiveProgress[] = []
   outcome: ScenarioOutcome = 'playing'
@@ -291,6 +301,8 @@ export class World {
   private tariffPriceSum = 0
   private tariffVolumeMwh = 0
   private termGenerationByFuel = new Map<FuelId, number>()
+  /** So a summer of below-zero hours produces one headline rather than four hundred. */
+  private lastNegativePriceYear = 0
   /** Set for one tick after an election, so the UI can announce it. */
   lastElection: { year: number; fromId: string; toId: string; contractsRevoked: number } | null = null
 
@@ -436,6 +448,23 @@ export class World {
   addPlant(plant: PlantAsset): void {
     this.plants.push(plant)
     this.plantsById.set(plant.id, plant)
+    // Filed here rather than in the build command, because this is the one door every new
+    // machine comes through — a scenario's inherited fleet included, which is why it is routine
+    // rather than notable and why the phase decides the headline.
+    if (plant.phase === LifecyclePhase.Building) {
+      this.postNews({
+        category: 'construction',
+        importance: NewsImportance.Notable,
+        titleKey: 'news.constructionStarted',
+        params: {
+          plant: this.plantName(plant.id),
+          type: PLANT_TYPES[plant.typeId].nameKey,
+          months: Math.max(1, Math.round((plant.phaseEndsTick - this.tick) / (TICKS_PER_YEAR / 12))),
+        },
+        subjectId: plant.id,
+        subjectKind: 'plant',
+      })
+    }
     const type = PLANT_TYPES[plant.typeId]
     const key = plant.typeId
     this.state.cumulativeDeployedMw[key] = (this.state.cumulativeDeployedMw[key] ?? 0) + type.capacityMw.value
@@ -492,6 +521,23 @@ export class World {
 
   scheduleEnergising(edgeId: string, tick: number): void {
     this.energiseAt.set(edgeId, tick)
+    // Same reasoning as `addPlant`: every corridor under construction passes through here, so
+    // this is the one place the headline cannot be forgotten.
+    const edge = this.network.getEdge(edgeId)
+    if (!edge) return
+    this.postNews({
+      category: 'grid',
+      importance: NewsImportance.Notable,
+      titleKey: edge.commodity === 'heat' ? 'news.pipeStarted' : 'news.lineStarted',
+      params: {
+        from: this.nodeName(edge.from),
+        to: this.nodeName(edge.to),
+        kv: edge.kv,
+        months: Math.max(1, Math.round((tick - this.tick) / (TICKS_PER_YEAR / 12))),
+      },
+      subjectId: edgeId,
+      subjectKind: 'edge',
+    })
   }
 
   /**
@@ -581,6 +627,7 @@ export class World {
 
     // 3b. Events. Raised, landed and retired here, before anything reads a parameter, so an
     //     event that lands this hour is felt this hour rather than next.
+    const pendingBefore = new Set(this.director.state.pending.map((p) => p.uid))
     const events = this.director.step({
       tick: this.tick,
       year: date.year,
@@ -597,6 +644,37 @@ export class World {
       stream: this.rng.streamFor('events'),
     })
     if (events.spent > 0) chargeEventCost(this.openLedger, events.spent)
+
+    // Two moments per event and they are different news. A forewarning is an *invitation to act*
+    // and is the whole point of the director's warning period; the landing is what the player
+    // then lives with. Reporting only the landing would file the story after the deadline for
+    // doing anything about it had passed.
+    for (const pending of this.director.state.pending) {
+      if (pendingBefore.has(pending.uid)) continue
+      const def = EVENTS_BY_ID.get(pending.defId)
+      if (!def) continue
+      // Only where there is genuinely a warning. Technical and natural events land the hour they
+      // are raised — that is the design, and it is what insurance rather than foresight is for —
+      // so a headline reading "expected in 0 hours" would be a lie dressed as a warning. The
+      // landing below reports those.
+      if (pending.landsTick <= this.tick) continue
+      this.postNews({
+        category: 'event',
+        importance: NewsImportance.Major,
+        titleKey: 'news.eventForewarned',
+        params: { event: def.nameKey, hours: Math.max(0, pending.landsTick - this.tick) },
+      })
+    }
+    for (const active of events.landed) {
+      const def = EVENTS_BY_ID.get(active.defId)
+      if (!def) continue
+      this.postNews({
+        category: 'event',
+        importance: NewsImportance.Major,
+        titleKey: 'news.eventLanded',
+        params: { event: def.nameKey },
+      })
+    }
 
     // 4. Lifecycle transitions (construction finishing, dismantling completing) and the
     //    instalments owed on whatever is still being built.
@@ -835,6 +913,35 @@ export class World {
     if (isMonthBoundary(this.tick)) this.closePeriod()
     if (isYearBoundary(this.tick)) this.closeYear()
 
+    // A shortfall beginning is news; one ending is a relief. Only the rising edge is filed,
+    // because a fortnight of intermittent failure would otherwise produce a hundred identical
+    // headlines and the player would stop reading the feed — which is the only real failure
+    // mode a notification system has.
+    const short = result.totalUnservedMw > UNSERVED_EPSILON_MW || heat.totalUnservedHeatMw > 0.01
+    if (short && this.recentBlackoutTicks === 0) {
+      const worst = this.worstServedCity(result, heat)
+      const cold = heat.totalUnservedHeatMw > 0.01
+      // Named where a town can be named and unnamed where it cannot, rather than leaving a blank
+      // where the place should be. A headline with a hole in it reads as a bug, which is exactly
+      // what the player will conclude.
+      this.postNews({
+        category: 'reliability',
+        importance: NewsImportance.Major,
+        titleKey: cold
+          ? worst
+            ? 'news.heatFailure'
+            : 'news.heatFailureAnon'
+          : worst
+            ? 'news.blackout'
+            : 'news.blackoutAnon',
+        params: {
+          mw: Math.round(Math.max(result.totalUnservedMw, heat.totalUnservedHeatMw)),
+          city: worst ? this.nodeName(worst.nodeId) : '',
+        },
+        ...(worst ? { subjectId: worst.nodeId, subjectKind: 'node' as const } : {}),
+      })
+    }
+
     // A rolling memory of failure, which several event risk factors read. Decays over a month,
     // so one bad evening does not brand the utility for a year.
     this.recentBlackoutTicks =
@@ -882,6 +989,19 @@ export class World {
       const fuel = PLANT_TYPES[plant.typeId].fuel
       this.termGenerationByFuel.set(fuel, (this.termGenerationByFuel.get(fuel) ?? 0) + mw)
     }
+    // The first hour the market ever pays people to stop generating is a genuinely new fact
+    // about the system, and it arrives without anything visibly happening. Reported once a year
+    // at most, because after the first summer it is weather rather than news.
+    if (snapshot.pricePerMwh < -0.5 && date.year > this.lastNegativePriceYear) {
+      this.lastNegativePriceYear = date.year
+      this.postNews({
+        category: 'market',
+        importance: NewsImportance.Notable,
+        titleKey: 'news.negativePrice',
+        params: { price: Math.round(snapshot.pricePerMwh) },
+      })
+    }
+
     this.priceWindow.push(snapshot.pricePerMwh)
     if (this.priceWindow.length > PRICE_WINDOW_TICKS) this.priceWindow.shift()
     this.history[this.historyCount % HISTORY_LENGTH] = snapshot
@@ -917,6 +1037,17 @@ export class World {
         plant.conditionPct = 1
         plant.online = true
         plant.capexPaid = this.params.get(plant.id, Param.CapexPerKw) * this.params.get(plant.id, Param.CapacityMw) * 1000
+        this.postNews({
+          category: 'construction',
+          importance: NewsImportance.Major,
+          titleKey: 'news.plantCommissioned',
+          params: {
+            plant: this.plantName(plant.id),
+            mw: Math.round(this.params.get(plant.id, Param.CapacityMw)),
+          },
+          subjectId: plant.id,
+          subjectKind: 'plant',
+        })
       } else if (plant.phase === LifecyclePhase.Refurbishing && this.tick >= plant.phaseEndsTick) {
         const type = PLANT_TYPES[plant.typeId]
         // Diminishing returns: each overhaul buys less than the one before.
@@ -931,6 +1062,14 @@ export class World {
         if (PLANT_TYPES[plant.typeId].storage?.cycleLife) plant.cyclesUsed = 0
         plant.phase = LifecyclePhase.Operating
         plant.online = true
+        this.postNews({
+          category: 'construction',
+          importance: NewsImportance.Notable,
+          titleKey: 'news.plantRefurbished',
+          params: { plant: this.plantName(plant.id) },
+          subjectId: plant.id,
+          subjectKind: 'plant',
+        })
       } else if (plant.phase === LifecyclePhase.Decommissioning && this.tick >= plant.phaseEndsTick) {
         const type = PLANT_TYPES[plant.typeId]
         plant.phase = LifecyclePhase.Remediating
@@ -942,8 +1081,24 @@ export class World {
           this.openLedger,
           nominal(type.recyclingRecoveryPerKw, this.date.year) * type.capacityMw.value * 1000,
         )
+        this.postNews({
+          category: 'fleet',
+          importance: NewsImportance.Notable,
+          titleKey: 'news.plantDismantled',
+          params: { plant: this.plantName(plant.id) },
+          subjectId: plant.id,
+          subjectKind: 'plant',
+        })
       } else if (plant.phase === LifecyclePhase.Remediating && this.tick >= plant.phaseEndsTick) {
         plant.phase = LifecyclePhase.Cleared
+        this.postNews({
+          category: 'fleet',
+          importance: NewsImportance.Routine,
+          titleKey: 'news.siteCleared',
+          params: { plant: this.plantName(plant.id) },
+          subjectId: plant.id,
+          subjectKind: 'plant',
+        })
       }
     }
 
@@ -953,7 +1108,17 @@ export class World {
       for (const [edgeId, tick] of [...this.energiseAt]) {
         if (this.tick < tick) continue
         this.energiseAt.delete(edgeId)
-        if (this.network.getEdge(edgeId)) this.network.setEnergised(edgeId, true)
+        const edge = this.network.getEdge(edgeId)
+        if (!edge) continue
+        this.network.setEnergised(edgeId, true)
+        this.postNews({
+          category: 'grid',
+          importance: NewsImportance.Major,
+          titleKey: edge.commodity === 'heat' ? 'news.pipeEnergised' : 'news.lineEnergised',
+          params: { from: this.nodeName(edge.from), to: this.nodeName(edge.to), kv: edge.kv },
+          subjectId: edgeId,
+          subjectKind: 'edge',
+        })
       }
     }
 
@@ -965,6 +1130,18 @@ export class World {
       edge.circuits = edge.upgradeToCircuits ?? edge.circuits
       delete edge.upgradeAtTick
       delete edge.upgradeToCircuits
+      this.postNews({
+        category: 'grid',
+        importance: NewsImportance.Major,
+        titleKey: 'news.circuitAdded',
+        params: {
+          from: this.nodeName(edge.from),
+          to: this.nodeName(edge.to),
+          circuits: edge.circuits,
+        },
+        subjectId: edge.id,
+        subjectKind: 'edge',
+      })
     }
   }
 
@@ -1028,6 +1205,202 @@ export class World {
    * contribution — the same pattern weather and ageing use, and the reason a change of
    * government cannot leave anything of its predecessor behind by accident.
    */
+  /**
+   * File an item, stamped with the hour it happened.
+   *
+   * Every caller would otherwise repeat the tick, and a headline stamped with the wrong hour is
+   * worse than no headline: the archive is the raw material for a post-mortem.
+   */
+  private postNews(item: Omit<NewsItem, 'tick'>): void {
+    this.news.post({ ...item, tick: this.tick })
+  }
+
+  /**
+   * What is coming, with a date where there is one and a probability where there is not.
+   *
+   * Computed on demand from state rather than stored, because a stored forecast is one that can
+   * be wrong about the present — and because everything here is already knowable: a construction
+   * end tick, an election date, a forewarned event's landing hour, the age of a machine against
+   * its design life.
+   *
+   * The distinction between `whenTicks` and `chance` is deliberate and is the honest part. A
+   * station completing in eleven months is a date the player can plan against. A plant of this
+   * age suffering a forced outage this year is a risk they can only insure against. Presenting
+   * them in the same shape would teach the player to distrust both, so they are different fields
+   * and the panel renders them differently.
+   */
+  upcoming(): UpcomingItem[] {
+    const out: UpcomingItem[] = []
+
+    for (const pending of this.director.state.pending) {
+      const def = EVENTS_BY_ID.get(pending.defId)
+      if (!def) continue
+      out.push({
+        category: 'event',
+        titleKey: 'upcoming.event',
+        params: { event: def.nameKey },
+        whenTicks: pending.landsTick - this.tick,
+      })
+    }
+
+    for (const plant of this.plants) {
+      if (plant.phase === LifecyclePhase.Building) {
+        out.push({
+          category: 'construction',
+          titleKey: 'upcoming.plantCompletes',
+          params: { plant: this.plantName(plant.id) },
+          whenTicks: plant.phaseEndsTick - this.tick,
+          subjectId: plant.id,
+          subjectKind: 'plant',
+        })
+      } else if (plant.phase === LifecyclePhase.Refurbishing || plant.phase === LifecyclePhase.Decommissioning) {
+        out.push({
+          category: 'fleet',
+          titleKey:
+            plant.phase === LifecyclePhase.Refurbishing ? 'upcoming.refurbishEnds' : 'upcoming.dismantlingEnds',
+          params: { plant: this.plantName(plant.id) },
+          whenTicks: plant.phaseEndsTick - this.tick,
+          subjectId: plant.id,
+          subjectKind: 'plant',
+        })
+      } else if (plant.phase === LifecyclePhase.Operating) {
+        // End of life, which is the most plannable and most ignored fact in the game. Shown from
+        // five years out, because that is roughly how long a replacement takes to permit and
+        // build — a warning that arrives later than the lead time is not a warning.
+        const ageTicks = this.tick - plant.commissionedTick
+        const lifeTicks = plant.designLifeYears * (1 + plant.lifeExtension) * TICKS_PER_YEAR
+        const remaining = lifeTicks - ageTicks
+        if (remaining < 5 * TICKS_PER_YEAR) {
+          out.push({
+            category: 'fleet',
+            titleKey: 'upcoming.endOfLife',
+            params: { plant: this.plantName(plant.id) },
+            whenTicks: remaining,
+            subjectId: plant.id,
+            subjectKind: 'plant',
+          })
+        }
+        // And the risk that it does not get there. An annual failure probability from the same
+        // numbers `rollOutages` uses, so the warning and the dice cannot disagree.
+        const type = PLANT_TYPES[plant.typeId]
+        const rate = (type.forcedOutageRate.value * (1 + (1 - plant.conditionPct) * 2)) / this.state.maintenanceLevel
+        if (rate > 0.08) {
+          out.push({
+            category: 'fleet',
+            titleKey: 'upcoming.outageRisk',
+            params: { plant: this.plantName(plant.id) },
+            chance: Math.min(1, rate),
+            subjectId: plant.id,
+            subjectKind: 'plant',
+          })
+        }
+      }
+    }
+
+    for (const [edgeId, tick] of this.energiseAt) {
+      const edge = this.network.getEdge(edgeId)
+      if (!edge) continue
+      out.push({
+        category: 'grid',
+        titleKey: 'upcoming.lineEnergises',
+        params: { from: this.nodeName(edge.from), to: this.nodeName(edge.to) },
+        whenTicks: tick - this.tick,
+        subjectId: edgeId,
+        subjectKind: 'edge',
+      })
+    }
+    for (const edge of this.network.allEdges()) {
+      if (edge.upgradeAtTick === undefined) continue
+      out.push({
+        category: 'grid',
+        titleKey: 'upcoming.circuitArrives',
+        params: { from: this.nodeName(edge.from), to: this.nodeName(edge.to) },
+        whenTicks: edge.upgradeAtTick - this.tick,
+        subjectId: edge.id,
+        subjectKind: 'edge',
+      })
+    }
+
+    out.push({
+      category: 'politics',
+      titleKey: 'upcoming.election',
+      whenTicks: this.state.nextElectionTick - this.tick,
+    })
+
+    // The scenario's own deadline, which a player thirty years in has usually stopped counting.
+    const endTick = (this.scenario.endYear - this.scenario.startYear + 1) * TICKS_PER_YEAR
+    if (endTick > this.tick) {
+      out.push({
+        category: 'objective',
+        titleKey: 'upcoming.scenarioEnds',
+        params: { year: this.scenario.endYear },
+        whenTicks: endTick - this.tick,
+      })
+    }
+
+    // Dates first and soonest first; risks after, worst first. Two orderings because they are
+    // two kinds of thing, and interleaving them by any single key produces a list where nothing
+    // is where the reader expects it.
+    const dated = out.filter((i) => i.whenTicks !== undefined).sort((a, b) => a.whenTicks! - b.whenTicks!)
+    const risks = out.filter((i) => i.whenTicks === undefined).sort((a, b) => (b.chance ?? 0) - (a.chance ?? 0))
+    return [...dated, ...risks]
+  }
+
+  /**
+   * File a headline from outside the world's own tick — the build commands, mostly.
+   *
+   * Public because a command module is not part of the world and should not be reaching into a
+   * private, and because keeping the tick stamping in one place is the whole point of it.
+   */
+  reportNews(item: Omit<NewsItem, 'tick'>): void {
+    this.postNews(item)
+  }
+
+  /** Which town is worst off this hour, so a shortfall headline can name a place. */
+  private worstServedCity(result: DispatchResult, heat: HeatResult): { nodeId: string } | null {
+    let worst: { nodeId: string } | null = null
+    let most = 0
+    for (const city of this.cities) {
+      const short = (result.unservedMw.get(city.id) ?? 0) + (heat.unservedHeatMw.get(city.id) ?? 0)
+      if (short > most) {
+        most = short
+        worst = { nodeId: city.nodeId }
+      }
+    }
+    return worst
+  }
+
+  /**
+   * A plant's name as a player would say it, rather than as it is keyed.
+   *
+   * Scenario nodes carry a literal name ("Blackridge"); nodes the player built carry a key and an
+   * index instead, because "220 kV substation 4" has to be translatable. The simulation has no
+   * business knowing what language the interface is in, so a keyed name is returned as the
+   * composite `key#index` and expanded by `headline()` in the UI. One convention, documented in
+   * both places, and the alternative was importing the translator into the model.
+   */
+  displayName(nodeId: string): string {
+    const node = this.network.getNode(nodeId)
+    if (!node) return nodeId.replace(/^n_/, '')
+    if (node.name) return node.name
+    if (node.nameKey) return node.nameIndex === undefined ? node.nameKey : `${node.nameKey}#${node.nameIndex}`
+    return nodeId.replace(/^n_/, '')
+  }
+
+  /** The same, for a plant, via the node it stands on. */
+  plantDisplayName(plantId: string): string {
+    const nodeId = this.plantsById.get(plantId)?.nodeId
+    return nodeId ? this.displayName(nodeId) : plantId.replace(/^p_/, '')
+  }
+
+  private plantName(plantId: string): string {
+    return this.plantDisplayName(plantId)
+  }
+
+  private nodeName(nodeId: string): string {
+    return this.displayName(nodeId)
+  }
+
   private applyRegime(): void {
     this.registry.setSource(POLICY_SOURCE, policyModifiers(this.state.policyRegimeId, this.scenario.carbonPricePerTonne))
   }
@@ -1193,6 +1566,27 @@ export class World {
 
     this.applyRegime()
     this.lastElection = { year, fromId: previousId, toId: result.winnerId, contractsRevoked: revoked }
+
+    // Two separate pieces of news, because they are two separate facts and the second one is
+    // worse. A government changing is politics; a government tearing up the contracts its
+    // predecessor signed is the thing that makes every future investment more expensive.
+    this.postNews({
+      category: 'politics',
+      importance: NewsImportance.Major,
+      titleKey: previousId === result.winnerId ? 'news.governmentReturned' : 'news.governmentChanged',
+      params: {
+        government: REGIMES_BY_ID.get(result.winnerId)?.nameKey ?? result.winnerId,
+        share: Math.round((result.shares[result.winnerId] ?? 0) * 100),
+      },
+    })
+    if (revoked > 0) {
+      this.postNews({
+        category: 'politics',
+        importance: NewsImportance.Major,
+        titleKey: 'news.contractsRevoked',
+        params: { count: revoked },
+      })
+    }
   }
 
   /**
@@ -1248,11 +1642,26 @@ export class World {
     if (this.tariffVolumeMwh >= this.minimumTariffSampleMwh()) {
       const averagePrice = this.tariffPriceSum / this.tariffVolumeMwh
       const reset = averagePrice * (1 + ECONOMICS.retailMarginOverWholesale.value)
+      const previous = this.state.regulatedTariffPerMwh
       this.state.regulatedTariffPerMwh = Math.max(
         this.prices.tariffFloorPerMwh,
         // Move most of the way, not all: a regulator reviews rather than tracks.
         this.state.regulatedTariffPerMwh + (reset - this.state.regulatedTariffPerMwh) * 0.6,
       )
+      // Worth reporting only when it actually moved. The tariff is the number every household's
+      // decision to put panels on the roof divides by, so a rise is not merely revenue.
+      const change = this.state.regulatedTariffPerMwh - previous
+      if (Math.abs(change) > previous * 0.02) {
+        this.postNews({
+          category: 'market',
+          importance: NewsImportance.Notable,
+          titleKey: change > 0 ? 'news.tariffRaised' : 'news.tariffCut',
+          params: {
+            from: Math.round(previous),
+            to: Math.round(this.state.regulatedTariffPerMwh),
+          },
+        })
+      }
     }
     this.tariffPriceSum = 0
     this.tariffVolumeMwh = 0
@@ -1281,7 +1690,19 @@ export class World {
 
     if (this.tick >= this.state.nextElectionTick) this.holdElection(this.date.year)
 
+    const before = new Map(this.objectives.map((o) => [o.id, o.status]))
     this.judgeObjectives()
+    for (const objective of this.objectives) {
+      const was = before.get(objective.id)
+      if (was === objective.status || objective.status === 'pending') continue
+      const def = this.scenario.objectives.find((o) => o.id === objective.id)
+      this.postNews({
+        category: 'objective',
+        importance: objective.status === 'failed' ? NewsImportance.Major : NewsImportance.Notable,
+        titleKey: objective.status === 'failed' ? 'news.objectiveFailed' : 'news.objectiveMet',
+        params: { objective: def?.descriptionKey ?? objective.id },
+      })
+    }
 
     this.yearLedger = emptyLedger()
     this.books.closeYear()
@@ -1417,6 +1838,7 @@ export class World {
       objectives: this.objectives,
       outcome: this.outcome,
       books: this.books.toJSON(),
+      news: this.news.toJSON(),
       modifiers: this.registry.toJSON(),
     }
   }
@@ -1483,6 +1905,7 @@ export class World {
     this.objectives = clone(data.objectives)
     this.outcome = data.outcome
     this.books.loadJSON(clone(data.books))
+    this.news.loadJSON(clone(data.news))
 
     this.registry.loadJSON(clone(data.modifiers))
     // The parameter cache is keyed by tick, so it has to be told which tick it is now or the

@@ -25,6 +25,7 @@ import { BuildPanel, type BuildSelection } from './buildPanel'
 import { PoliticsPanel } from './politicsPanel'
 import { ObjectivesPanel } from './objectivesPanel'
 import { AccountsPanel, ledgerBlock } from './accountsPanel'
+import { NewsPanel } from './newsPanel'
 import { operatingMargin } from '@sim/economy/assetLedger'
 import { rooftopOutputMw, rooftopPotentialMw, rooftopSplit } from '@sim/city/rooftop'
 import { cycleLifeUsed, energyCapacityMwh, isStorage, ratedEnergyMwh } from '@sim/dispatch/storage'
@@ -82,6 +83,7 @@ export class Hud {
   readonly politicsPanel: PoliticsPanel
   readonly objectivesPanel: ObjectivesPanel
   readonly accountsPanel: AccountsPanel
+  readonly newsPanel: NewsPanel
 
   private selectedNodeId: string | null = null
   private selectedEdgeId: string | null = null
@@ -224,6 +226,19 @@ export class Hud {
       onLoad: () => this.callbacks.onLoad(),
     })
 
+    this.newsPanel = new NewsPanel(root, world, {
+      onOpen: () => this.soloPanel('news'),
+      // A headline is a place. Taking the player there is the difference between a feed that
+      // reports and one they can work from.
+      onGoTo: (subjectId, kind) => {
+        if (kind === 'edge') this.selectEdge(subjectId)
+        else if (kind === 'plant') {
+          const plant = this.world.plants.find((p) => p.id === subjectId)
+          if (plant) this.selectNode(plant.nodeId)
+        } else this.selectNode(subjectId)
+      },
+    })
+
     this.accountsPanel = new AccountsPanel(root, world, {
       onOpen: () => this.soloPanel('accounts'),
       // A row in the ranking is a place on the map, and clicking it should take you there. This
@@ -255,11 +270,12 @@ export class Hud {
    * `setOpen(false)` on the others only, never `setOpen(true)` on the keeper, which would
    * recurse straight back into here.
    */
-  private soloPanel(keep: 'build' | 'politics' | 'objectives' | 'accounts' | 'none'): void {
+  private soloPanel(keep: 'build' | 'politics' | 'objectives' | 'accounts' | 'news' | 'none'): void {
     if (keep !== 'build') this.buildPanel.setOpen(false)
     if (keep !== 'politics') this.politicsPanel.setOpen(false)
     if (keep !== 'objectives') this.objectivesPanel.setOpen(false)
     if (keep !== 'accounts') this.accountsPanel.setOpen(false)
+    if (keep !== 'news') this.newsPanel.setOpen(false)
     this.selectedNodeId = null
     this.selectedEdgeId = null
     this.renderInspector()
@@ -271,6 +287,7 @@ export class Hud {
     this.politicsPanel.setOpen(false)
     this.objectivesPanel.setOpen(false)
     this.accountsPanel.setOpen(false)
+    this.newsPanel.setOpen(false)
   }
 
   private readonly onPointerDown = (): void => {
@@ -404,6 +421,7 @@ export class Hud {
     this.politicsPanel.render()
     this.objectivesPanel.render()
     this.accountsPanel.render()
+    this.newsPanel.render()
 
     const history = world.recentHistory(240)
     if (history.length > 1) {

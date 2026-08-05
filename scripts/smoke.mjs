@@ -400,14 +400,23 @@ try {
   // could wire up what they were given and nothing else.
   await page.evaluate(() => window.game.hud.buildPanel.setOpen(true))
   await page.waitForTimeout(200)
+  // The panel has sections now, because the substations used to sit below eleven kinds of power
+  // station and a player looking for one concluded they did not exist. Lines and substations
+  // share the "Network" section, which is where anybody would look for either.
+  const sectioned = await page.evaluate(() => {
+    const tabs = [...document.querySelectorAll('#build-panel .acct-tabs button')]
+    const network = tabs.find((b) => b.textContent === 'Network')
+    if (!network) return false
+    network.click()
+    return true
+  })
+  if (!sectioned) throw new Error('The build panel has no Network section')
+  await page.waitForTimeout(150)
   const subRow = await page.evaluate(() => {
     const row = [...document.querySelectorAll('#build-panel .build-row')].find((r) =>
       r.textContent.includes('220 kV substation'),
     )
     if (!row) return null
-    // The panel scrolls, and the substations sit below fourteen technologies and three
-    // voltages. Without this the rect is real but the point is clipped, and the click lands
-    // on the map behind it.
     row.scrollIntoView({ block: 'center' })
     const b = row.getBoundingClientRect()
     return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
@@ -626,6 +635,67 @@ try {
   if (!followed.inspectorOpen) throw new Error('Clicking an account did not open the inspector')
   if (!followed.panelClosed) throw new Error('The accounts panel stayed open over the inspector')
   await page.screenshot({ path: join(OUT, '19-account-followed.png') })
+
+  // --- News -------------------------------------------------------------
+  // The thing that replaced "Something is happening". Two properties only a browser can check:
+  // that headlines are real sentences with the parameters filled in, and that the forecast tab
+  // shows dates and probabilities as different things.
+  const news = await page.evaluate(() => {
+    const g = window.game
+    g.hud.newsPanel.setOpen(true)
+    const panel = document.getElementById('news-panel')
+    const rows = [...panel.querySelectorAll('.news-row')]
+    return {
+      visible: panel.classList.contains('visible'),
+      rows: rows.length,
+      headlines: rows.slice(0, 4).map((r) => r.querySelector('.news-title')?.textContent),
+      // A headline still carrying a raw key is a translation bug that ships silently.
+      rawKeys: rows.filter((r) => /^[a-z]+\.[A-Za-z.]+$/.test(r.querySelector('.news-title')?.textContent ?? ''))
+        .length,
+    }
+  })
+  console.log('news:', news)
+  if (!news.visible) throw new Error('The news panel did not open')
+  if (news.rows === 0) throw new Error('The news panel filed nothing at all')
+  if (news.rawKeys > 0) throw new Error('A headline was shown as an untranslated key')
+
+  await page.screenshot({ path: join(OUT, '20-news.png') })
+
+  const coming = await page.evaluate(() => {
+    const panel = document.getElementById('news-panel')
+    panel.querySelectorAll('.acct-tabs button')[1].click()
+    const rows = [...panel.querySelectorAll('.news-row')]
+    return {
+      rows: rows.length,
+      dated: rows.filter((r) => r.querySelector('.news-when')).length,
+      risks: rows.filter((r) => r.querySelector('.news-chance')).length,
+      first: rows[0]?.textContent?.trim().slice(0, 80),
+    }
+  })
+  console.log('coming up:', coming)
+  if (coming.rows === 0) throw new Error('The forecast tab showed nothing at all')
+  if (coming.dated === 0) throw new Error('The forecast showed no dated item')
+
+  await page.screenshot({ path: join(OUT, '21-news-coming.png') })
+
+  // A card over the map, raised from the simulation rather than by the panel.
+  const toast = await page.evaluate(() => {
+    const g = window.game
+    g.hud.newsPanel.setOpen(false)
+    g.world.reportNews({
+      category: 'grid',
+      importance: 2,
+      titleKey: 'news.lineEnergised',
+      params: { from: 'Central', to: 'Eastfield', kv: 220 },
+    })
+    g.hud.newsPanel.collect(g.world.news.drain())
+    const cards = [...document.querySelectorAll('.news-toast')]
+    return { count: cards.length, text: cards[0]?.querySelector('.news-toast-title')?.textContent }
+  })
+  console.log('card:', toast)
+  if (toast.count === 0) throw new Error('An important item raised no card')
+
+  await page.screenshot({ path: join(OUT, '22-news-card.png') })
 
   // --- Save and load ----------------------------------------------------
   // The property that matters is the one the unit tests prove: a loaded game continues

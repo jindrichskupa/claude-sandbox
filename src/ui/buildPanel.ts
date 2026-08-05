@@ -44,11 +44,32 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node
 }
 
+/**
+ * The three things a player builds, as sections they choose between.
+ *
+ * One long scroll before this, and the substations were below eleven kinds of power station and
+ * three voltages of line — so a player looking for the thing that lets two corridors meet found
+ * a list of turbines and concluded it did not exist. Which it had, for a week.
+ *
+ * Lines and substations are one section rather than two, because they are one decision: a
+ * corridor that needs a junction needs a substation at the junction, and the two were never
+ * going to be looked for in different places.
+ */
+const SECTIONS = [
+  { id: 'plants' as const, key: 'ui.plants' },
+  { id: 'network' as const, key: 'ui.network' },
+  { id: 'heat' as const, key: 'ui.heat' },
+]
+
+type SectionId = (typeof SECTIONS)[number]['id']
+
 export class BuildPanel {
   private readonly root: HTMLDivElement
   private readonly list: HTMLDivElement
+  private readonly tabs: HTMLDivElement
   private readonly toggle: HTMLButtonElement
   private selection: BuildSelection = null
+  private section: SectionId = 'plants'
   private open = false
 
   constructor(
@@ -69,6 +90,18 @@ export class BuildPanel {
     close.addEventListener('click', () => this.setOpen(false))
     header.appendChild(close)
     this.root.appendChild(header)
+
+    this.tabs = el('div', 'acct-tabs')
+    for (const section of SECTIONS) {
+      const button = el('button', undefined, t(section.key))
+      button.addEventListener('click', () => {
+        this.section = section.id
+        this.lastSignature = null
+        this.render()
+      })
+      this.tabs.appendChild(button)
+    }
+    this.root.appendChild(this.tabs)
 
     this.list = el('div', 'build-list')
     this.root.appendChild(this.list)
@@ -116,6 +149,7 @@ export class BuildPanel {
       // threshold rather than a number on display.
       Math.round(w.finances.cash / 1e6),
       w.state.policyRegimeId,
+      this.section,
       this.selection ? JSON.stringify(this.selection) : '',
     ].join('|')
   }
@@ -129,26 +163,25 @@ export class BuildPanel {
     if (signature === this.lastSignature) return
     this.lastSignature = signature
     this.list.replaceChildren()
-
-    this.list.appendChild(el('div', 'build-group-title', t('ui.plants')))
-    for (const typeId of PLANT_TYPE_IDS) {
-      this.list.appendChild(this.plantRow(typeId))
+    for (let i = 0; i < this.tabs.children.length; i++) {
+      this.tabs.children[i]!.classList.toggle('active', SECTIONS[i]!.id === this.section)
     }
 
-    this.list.appendChild(el('div', 'build-group-title', t('ui.lines')))
-    for (const kv of VOLTAGE_LEVELS) {
-      this.list.appendChild(this.lineRow(kv))
+    if (this.section === 'plants') {
+      for (const typeId of PLANT_TYPE_IDS) this.list.appendChild(this.plantRow(typeId))
+      return
     }
 
-    this.list.appendChild(el('div', 'build-group-title', t('ui.substations')))
-    for (const kv of VOLTAGE_LEVELS) {
-      this.list.appendChild(this.substationRow(kv))
+    if (this.section === 'network') {
+      this.list.appendChild(el('div', 'build-group-title', t('ui.lines')))
+      for (const kv of VOLTAGE_LEVELS) this.list.appendChild(this.lineRow(kv))
+      this.list.appendChild(el('div', 'build-group-title', t('ui.substations')))
+      for (const kv of VOLTAGE_LEVELS) this.list.appendChild(this.substationRow(kv))
+      return
     }
 
     this.list.appendChild(el('div', 'build-group-title', t('ui.heatMains')))
-    for (const dn of PIPE_SIZES) {
-      this.list.appendChild(this.pipeRow(dn))
-    }
+    for (const dn of PIPE_SIZES) this.list.appendChild(this.pipeRow(dn))
   }
 
   private plantRow(typeId: PlantTypeId): HTMLDivElement {

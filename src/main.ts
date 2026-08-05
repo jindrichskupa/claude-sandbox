@@ -19,13 +19,9 @@ import { Hud, type Speed } from '@ui/hud'
 import type { BuildSelection } from '@ui/buildPanel'
 import { formatMoney, setLocale, t } from '@i18n/index'
 import { makeSaveFile, readLocalSave, writeLocalSave } from '@sim/scenario/save'
-import {
-  notableChange,
-  notableState,
-  SKIP_LIMIT_TICKS,
-  type NotableReason,
-  type NotableState,
-} from '@sim/scenario/notable'
+import { SKIP_LIMIT_TICKS } from '@sim/scenario/notable'
+import { NewsImportance, type NewsItem } from '@sim/news/news'
+import { headline } from '@ui/newsPanel'
 import {
   beginHeatPipeConstruction,
   beginLineConstruction,
@@ -94,7 +90,7 @@ async function main(): Promise<void> {
 
   let speed: Speed = 1
   /** A run-until-something-happens in progress, with where it started from and how far it has got. */
-  let skip: { from: NotableState; ticksRun: number } | null = null
+  let skip: { ticksRun: number } | null = null
 
   /** Set the placement mode and the instruction that goes with it. */
   const applySelection = (selection: BuildSelection): void => {
@@ -228,7 +224,7 @@ async function main(): Promise<void> {
           hud.setHint(null)
           return
         }
-        skip = { from: notableState(world), ticksRun: 0 }
+        skip = { ticksRun: 0 }
       },
       onUpgradeLine: (edgeId) => {
         const result = upgradeLine(world, edgeId)
@@ -501,19 +497,26 @@ async function main(): Promise<void> {
       // Run as hard as this frame's budget allows, checking after every hour whether the world
       // has done something worth stopping for. The budget is what keeps the page answering the
       // mouse: without it a skip over a quiet year would lock the tab for fourteen seconds.
+      //
+      // What counts as "something" is now a filed headline of at least `Notable` importance,
+      // which is why the hint below is a sentence naming a place rather than the old
+      // "Something is happening". See `sim/news/news.ts`.
       const until = performance.now() + SKIP_BUDGET_MS
-      let found: NotableReason | null = null
+      let found: NewsItem | null = null
       while (performance.now() < until && skip.ticksRun < SKIP_LIMIT_TICKS) {
         world.step()
         skip.ticksRun++
-        found = notableChange(skip.from, notableState(world))
-        if (found) break
+        const posted = world.news.peekHighest()
+        if (posted && posted.importance >= NewsImportance.Notable) {
+          found = posted
+          break
+        }
       }
       if (found || skip.ticksRun >= SKIP_LIMIT_TICKS) {
         // The map is only resynchronised at the end. Nobody is reading flow arrows during a
         // fast-forward, and redrawing them every frame was costing more than the simulation.
         map.syncToWorld()
-        hud.setHint(t(found ?? 'notable.timeLimit'))
+        hud.setHint(found ? headline(found) : t('notable.timeLimit'))
         skip = null
         speed = 0
         hud.setSpeed(0)
@@ -522,6 +525,7 @@ async function main(): Promise<void> {
         // wants to know is how much of the year they have spent looking for something.
         hud.setHint(t('ui.skipping', { days: Math.floor(skip.ticksRun / 24) }))
       }
+      hud.newsPanel.collect(world.news.drain())
       hud.update()
     } else if (speed > 0 && playable) {
       accumulator += dt * TICKS_PER_SECOND_AT_1X * speed
@@ -536,6 +540,11 @@ async function main(): Promise<void> {
       if (accumulator > 1) accumulator = 0
       if (stepped > 0) map.syncToWorld()
     }
+
+    // Cards are raised once per frame from whatever the simulation filed, however many hours
+    // that was. Draining rather than peeking is what stops the same headline appearing twice.
+    hud.newsPanel.collect(world.news.drain())
+    hud.newsPanel.tickToasts(performance.now())
 
     // The panels do not need refreshing at 60 Hz; the map animation does.
     uiAccumulator += dt
