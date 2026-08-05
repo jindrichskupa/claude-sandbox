@@ -8,6 +8,7 @@
  */
 
 import { PLANT_TYPES } from '@content/plantTypes'
+import { RELIABILITY } from '@content/reliability'
 import { TICKS_PER_YEAR } from '../core/time'
 import { cycleLifeUsed } from '../dispatch/storage'
 import { Layer, Op, Param, type Modifier } from '../params/types'
@@ -121,6 +122,53 @@ export function agingModifiers(plants: PlantAsset[], tick: number): Array<{ targ
   }
 
   return out
+}
+
+/**
+ * How much more often this machine fails than a new one of the same type.
+ *
+ * One through the useful life and rising as a power past it — the wear-out region of a bathtub
+ * hazard curve. See `content/reliability.ts` for why that shape and not a cliff.
+ */
+export function wearFactor(plant: PlantAsset, tick: number): number {
+  const overrun = Math.max(0, lifeFraction(plant, tick) - 1)
+  return Math.pow(1 + overrun, RELIABILITY.wearOutExponent.value)
+}
+
+/**
+ * The annual forced-outage rate this machine actually has, right now.
+ *
+ * One function, two callers: the dice that decide whether it trips, and the forecast panel that
+ * warns the player it might. They cannot disagree about the odds, which is the whole reason this
+ * is not computed at each site.
+ *
+ * Condition and age are both in it and are not the same thing. Condition is what neglect and
+ * running hours have done to a machine; age is what its design assumptions have run out of.
+ * A well-maintained forty-year-old boiler is in good condition and still made of forty-year-old
+ * steel.
+ */
+export function forcedOutageRate(plant: PlantAsset, tick: number, maintenanceLevel: number): number {
+  const type = PLANT_TYPES[plant.typeId]
+  const wear = 1 + (1 - plant.conditionPct) * 2
+  return (type.forcedOutageRate.value * wear * wearFactor(plant, tick)) / Math.max(0.1, maintenanceLevel)
+}
+
+/**
+ * The chance that a failure, having happened, turns out to be beyond economic repair.
+ *
+ * Zero for anything that is not nearly worn out, then interpolated from the design life to twice
+ * it. This is the number that turns "my fleet is old" from a slow cost into a thing that can
+ * happen to the player on a Tuesday — and it is the reason refurbishment, which resets condition
+ * and buys design life, is worth its price.
+ */
+export function terminalFailureShare(plant: PlantAsset, tick: number): number {
+  const f = lifeFraction(plant, tick)
+  if (f < RELIABILITY.terminalFromLifeFraction.value) return 0
+  const atOne = RELIABILITY.terminalShareAtDesignLife.value
+  const atTwo = RELIABILITY.terminalShareAtDoubleLife.value
+  // Linear between the two anchors, extrapolated no further than twice the gap again: a machine
+  // at three times its design life is a museum piece, and a share above one is meaningless.
+  return Math.max(0, Math.min(0.6, atOne + (atTwo - atOne) * (f - 1)))
 }
 
 /** Advance condition by one tick of running. Called by the world. */

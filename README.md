@@ -41,6 +41,17 @@ the document tries to fetch anything.
 
 ## What exists today (milestones 1-8)
 
+- **A fleet that can die, and a brief that cannot be lost to a coin toss.** Two findings from a
+  probe rather than from inspection. The inherited fleet used to *never* wear out — eight units in
+  1995, eight in 2026, availability slipping and nothing ever forcing a decision — so a player who
+  did nothing at all never met a crisis. Failure now follows a bathtub hazard: flat through the
+  useful life, rising as a cube past it, and a few percent of failures on a worn machine turn out
+  to be beyond economic repair. Left alone, the fleet loses its first unit around 2000 and is down
+  to one by 2022. And the reliability objective, measured, was breached in its *third year* by two
+  outages coinciding in one peak hour with a healthy fleet — so continuous objectives now carry a
+  per-objective tolerance, the ratio conditions are judged on the year rather than the whole run,
+  and a lost run can be continued in free play. See
+  [How hard, and why](#how-hard-and-why).
 - **A newspaper, because "Something is happening" is not a sentence.** The fast-forward used to
   stop by hashing the world and noticing the hash had changed, which could never say *what*. Now
   every system files a headline — a station started, a corridor live, a government elected with
@@ -320,6 +331,59 @@ second, to redraw text that changes a few times a game year.
 The smoke test now uses the mouse: it clicks the Build button, clicks a row, clicks the map to
 place a station, and clicks Retire in the inspector, and it fails if any panel rebuilds even once
 while the clock is stopped.
+
+## How hard, and why
+
+Two probes, `scripts/paceProbe.ts` and `scripts/fleetShape.ts`, because a review of whether a game
+is any fun is worthless done by eye.
+
+**Pace.** 9.9 items worth stopping for per game year, 9.0 of them worth interrupting the player
+about; the longest silence is 9.7 months. At 10× that is something every 35 seconds of real time.
+Thirty years takes 3.0 hours at 10×, 36 minutes at 50×, less with the skip.
+
+**Difficulty, before.** A player who did nothing at all ended thirty years bankrupt — but the
+fleet was still there. Eight units in 1995, eight units in 2026, condition decaying and
+availability slipping, unserved energy drifting from 0.0% to 0.6% a year. No crisis ever arrived,
+so the scenario had no turning point and the whole replace-or-refurbish half of the game was
+optional.
+
+**Difficulty, after.** Failure now follows the shape reliability engineering has used since the
+1950s: a bathtub hazard, flat through the useful life and rising as a cube of the overrun past it.
+A unit at 1.5× its design life fails 3.4 times as often as a new one, one at 2× fails 8 times as
+often. And a share of those failures — 2% at the design life, 18% at twice it — turn out to be
+beyond economic repair, which is the mechanic that creates the crisis: the unit is not out for six
+weeks, it is finished, and the replacement takes six years to build. Untouched:
+
+| | 1995 | 2000 | 2006 | 2010 | 2014 | 2020 |
+|---|---|---|---|---|---|---|
+| units running | 8 | 7 | 6 | 5 | 3 | 2 |
+| firm capacity | 2530 MW | 2030 | 1880 | 1280 | 570 | 120 |
+| unserved | 0.0% | 0.6% | 2.4% | 7.2% | 19% | 87% |
+
+Nothing is forbidden and no rule closes anything at a fixed age; it simply gets worse until
+running it is plainly the wrong choice. Which is the decision a fleet owner actually makes, and
+refurbishment — which resets condition and buys design life — is what answers it.
+
+**And a brief that was unfair rather than hard.** The 0.1% unserved-energy limit was breached in
+the scenario's *third year*, with a healthy fleet, all eight units running and a 69% reserve
+margin, by two forced outages coinciding in one peak hour. Failing a thirty-year run for that is a
+coin toss with the run riding on it. Three changes:
+
+- Continuous objectives carry a `breachTolerance` **in content**, because the right answer differs
+  by kind of harm. Reliability gets one year of grace; a town left without heat in February gets
+  none, and should not — burst pipework is not something a good following year makes up for.
+- The ratio conditions are measured over the year rather than the whole run. Over a lifetime, one
+  bad fortnight in 1997 sits in the denominator until 2025: the player cannot recover from it by
+  running the system well, only by outlasting it.
+- A lost run can be continued. The verdict stands and the objectives keep their statuses; only the
+  clock runs on — because for a deliberately-played strategy the interesting part is often what
+  happens *after* the brief fails. Bankruptcy is the one ending with no way on.
+
+**What the probe also found, and has not been fixed.** The shortfall in a passive run splits 96.8%
+"not enough plant" against 3.2% "behind a constraint" — so an earlier claim in this file, that the
+corridor is what binds, was wrong. It was made by comparing nameplate firm capacity against peak
+demand rather than *available* capacity against demand in the same hour. The corridor matters; it
+is not what fails first.
 
 ## The newspaper
 

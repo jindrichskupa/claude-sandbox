@@ -48,11 +48,15 @@ describe('the opening scenario, played', () => {
     // 2530 MW firm against a 1549 MW peak — so it never needs to build and never dares to close
     // anything. And it still loses, with 2.6% of demand unserved.
     //
-    // Which means **generation is not the binding constraint**. The shortfall is the corridor:
-    // the scenario's own premise is that the cheap lignite is in the west, the demand is in the
-    // east, and the link between them was built for a smaller country. A player who only ever
-    // asks "have I got enough megawatts?" — which is what this harness asks — will answer yes
-    // every year and watch the lights go out anyway.
+    // That conclusion was drawn once and was wrong, and the correction is worth keeping. It
+    // compared *nameplate* firm capacity against peak demand and concluded the corridor must be
+    // what binds. Measuring instead what was actually available in each failing hour —
+    // `scripts/paceProbe.ts` — splits the shortfall 96.8% "not enough plant" against 3.2%
+    // "behind a constraint". The corridor is real and it is not what fails first; what fails
+    // first is a fleet whose availability has decayed and, since the wear-out model, whose units
+    // start failing beyond repair. A harness that only asks "have I got enough megawatts on the
+    // nameplate?" answers yes every year and watches the lights go out anyway — which is still
+    // the finding, for a different reason than the one first written here.
     //
     // What is asserted is only that when it does choose, it chooses on cost rather than on a
     // technology named here.

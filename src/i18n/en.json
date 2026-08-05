@@ -449,5 +449,7 @@
   "ui.keepPlaying": "Keep playing",
   "ui.keepPlayingNote": "The verdict stands. The clock runs on so you can see where the strategy ends up.",
   "ui.objectiveAtRisk": "One bad year — another fails it",
-  "ui.freePlay": "Free play — the scenario has been judged"
+  "ui.freePlay": "Free play — the scenario has been judged",
+  "news.terminalFailure": "{plant} has failed beyond repair after {years} years — {mw} MW lost",
+  "upcoming.terminalRisk": "{plant} could fail beyond repair"
 }

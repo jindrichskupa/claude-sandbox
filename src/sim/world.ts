@@ -16,7 +16,14 @@ import { RandomSource } from './core/rng'
 import { isMonthBoundary, isYearBoundary, TICKS_PER_YEAR, tickToDate, type GameDate } from './core/time'
 import { Network, PLAYER, type NodeId } from './grid/network'
 import { IslandCache } from './grid/islands'
-import { advanceCondition, agingModifiers, AGE_SOURCE } from './assets/aging'
+import {
+  advanceCondition,
+  ageYears,
+  agingModifiers,
+  forcedOutageRate,
+  terminalFailureShare,
+  AGE_SOURCE,
+} from './assets/aging'
 import { isDispatchable, LifecyclePhase, type CityAsset, type PlantAsset } from './assets/types'
 import { ModifierRegistry } from './params/ModifierRegistry'
 import { Params } from './params/Params'
@@ -54,6 +61,7 @@ import { rooftopOutputMw, rooftopSplit, stepRooftop } from './city/rooftop'
 import { ROOFTOP } from '@content/cityTrends'
 import { techModifiers, TECH_SOURCE } from './tech/modifiers'
 import { nominal, pricesFor, type Prices } from './tech/money'
+import { realDecommissioningFactor } from './tech/costs'
 import type { SaveData } from './scenario/save'
 import { EventDirector } from './events/director'
 import { EVENTS_BY_ID } from '@content/events'
@@ -1032,19 +1040,61 @@ export class World {
     for (let i = 0; i < this.plants.length; i++) {
       const plant = this.plants[i]!
       if (plant.phase !== LifecyclePhase.Operating) continue
-      const type = PLANT_TYPES[plant.typeId]
-      // Wear makes failure more likely and maintenance makes it less likely — the same lever,
-      // pulled in two directions.
-      const rate = (type.forcedOutageRate.value * (1 + (1 - plant.conditionPct) * 2)) / this.state.maintenanceLevel
+      // Wear makes failure more likely, age makes it likelier still, and maintenance makes it
+      // less likely. One function, shared with the forecast that warns about it — see
+      // `assets/aging.ts`.
+      const rate = forcedOutageRate(plant, this.tick, this.state.maintenanceLevel)
       // Convert an annual availability figure into an hourly transition probability.
       const failPerHour = rate / 400
       const repairPerHour = 1 / 72
       if (plant.online) {
-        if (stream.chance(this.tick, failPerHour, i)) plant.online = false
+        if (!stream.chance(this.tick, failPerHour, i)) continue
+        plant.online = false
+        // And sometimes it does not come back. A cracked casing or a failed stator on a machine
+        // past its design life is not a six-week outage, it is the end of the unit — and the
+        // owner finds out that the replacement takes six years. This is what stops an ageing
+        // fleet from being a slow cost the player can simply absorb for ever.
+        const terminal = terminalFailureShare(plant, this.tick)
+        if (terminal > 0 && stream.chance(this.tick, terminal, i + 500_000)) {
+          this.forceRetirement(plant)
+        }
       } else if (stream.chance(this.tick, repairPerHour, i + 100_000)) {
         plant.online = true
       }
     }
+  }
+
+  /**
+   * A machine that has failed beyond repair. Dismantled on the same terms as a chosen closure,
+   * because the work is the same work and the bill does not care why.
+   */
+  private forceRetirement(plant: PlantAsset): void {
+    const type = PLANT_TYPES[plant.typeId]
+    const capacityMw = this.params.get(plant.id, Param.CapacityMw)
+    const cost =
+      nominal(type.decommissionCostPerKw, this.date.year) *
+      realDecommissioningFactor(this.date.year, type.decommissionCostPerKw.sourceYear) *
+      capacityMw *
+      1000
+    const ticks = Math.max(1, Math.round(type.decommissionYears.value * TICKS_PER_YEAR))
+
+    plant.phase = LifecyclePhase.Decommissioning
+    plant.phaseEndsTick = this.tick + ticks
+    plant.outputMw = 0
+    plant.heatOutputMw = 0
+    this.scheduleSpending(plant.id, cost, ticks, 'decommissioning')
+    this.postNews({
+      category: 'fleet',
+      importance: NewsImportance.Major,
+      titleKey: 'news.terminalFailure',
+      params: {
+        plant: this.plantName(plant.id),
+        mw: Math.round(capacityMw),
+        years: Math.round(ageYears(plant, this.tick)),
+      },
+      subjectId: plant.id,
+      subjectKind: 'plant',
+    })
   }
 
   private advanceLifecycles(): void {
@@ -1298,16 +1348,28 @@ export class World {
             subjectKind: 'plant',
           })
         }
-        // And the risk that it does not get there. An annual failure probability from the same
-        // numbers `rollOutages` uses, so the warning and the dice cannot disagree.
-        const type = PLANT_TYPES[plant.typeId]
-        const rate = (type.forcedOutageRate.value * (1 + (1 - plant.conditionPct) * 2)) / this.state.maintenanceLevel
+        // And the risk that it does not get there. The same function `rollOutages` rolls
+        // against, so the warning and the dice cannot disagree.
+        const rate = forcedOutageRate(plant, this.tick, this.state.maintenanceLevel)
         if (rate > 0.08) {
           out.push({
             category: 'fleet',
             titleKey: 'upcoming.outageRisk',
             params: { plant: this.plantName(plant.id) },
             chance: Math.min(1, rate),
+            subjectId: plant.id,
+            subjectKind: 'plant',
+          })
+        }
+        // The one worth acting on. A machine that can fail beyond repair is a machine whose
+        // replacement should already be under construction, because it will not be after.
+        const terminal = terminalFailureShare(plant, this.tick) * rate
+        if (terminal > 0.002) {
+          out.push({
+            category: 'fleet',
+            titleKey: 'upcoming.terminalRisk',
+            params: { plant: this.plantName(plant.id) },
+            chance: Math.min(1, terminal),
             subjectId: plant.id,
             subjectKind: 'plant',
           })

@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 import { buildWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { CITY_TRENDS, ROOFTOP } from '@content/cityTrends'
-import { electrificationUplift, intensityFactor } from '@sim/city/growth'
+import { electrificationUplift, intensityFactor, stepCityGrowth } from '@sim/city/growth'
 import { adoptionTarget, householdPvCostPerMwh, rooftopSplit } from '@sim/city/rooftop'
 import { Param } from '@sim/params/types'
 
@@ -141,17 +141,19 @@ describe('what the roofs do to the market', () => {
   }, 300_000)
 })
 
-describe('a town over four decades', () => {
-  it('grows without running away, and the demand chain says why', () => {
+describe('a town over the years', () => {
+  it('grows while the lights stay on, and the demand chain says why', () => {
+    // Ten years rather than forty, and deliberately. Past the first decade the untouched fleet
+    // starts failing beyond repair — see `tests/reliability.test.ts` — and a town that spends
+    // years in the dark loses people, which is the *other* half of this model and is tested
+    // directly below. Mixing the two in one run measures neither.
     const world = buildWorld(FIRST_REGION)
     const city = world.cities[0]!
     const startPopulation = city.population
     const startBase = world.params.base(city.id, Param.DemandMw)
 
-    // Forty years at an hour a tick is a long test; a month a step through the same monthly
-    // machinery is not, and growth only ever moves on a month boundary.
     const trace: string[] = []
-    for (let i = 0; i < 24 * 365 * 40; i += 1) {
+    for (let i = 0; i < 24 * 365 * 10; i++) {
       world.step()
       if (world.tick % (24 * 365) === 0) {
         trace.push(
@@ -164,14 +166,38 @@ describe('a town over four decades', () => {
     for (const line of trace) console.log(line)
 
     expect(city.population).toBeGreaterThan(startPopulation)
-    // Not a boom town: four decades at a fraction of a percent is under a third again.
-    expect(city.population).toBeLessThan(startPopulation * 1.5)
+    // Not a boom town: a decade at a fraction of a percent is a few percent in total.
+    expect(city.population).toBeLessThan(startPopulation * 1.2)
+    // The scenario's own figure is never overwritten — growth is a modifier over it, which is
+    // what keeps the explanation readable.
     expect(startBase).toBeCloseTo(world.params.base(city.id, Param.DemandMw), 6)
 
-    // And the explanation names its parts rather than presenting one number.
     const explained = world.params.explain(city.id, Param.DemandMw)
     const reasons = explained.steps.map((s) => s.reasonKey)
     expect(reasons).toContain('reason.population')
     expect(reasons).toContain('reason.perHead')
   }, 900_000)
+
+  it('loses people where the lights go out, which is the only place reliability changes the problem', () => {
+    // The player's record changes the *size* of what they have to serve, not just their score.
+    // A town dark for a month does not grow that month; one dark for years empties out, and the
+    // factory does not come back.
+    const world = buildWorld(FIRST_REGION)
+    const stream = world.rng.streamFor('city')
+
+    const served = { ...world.cities[0]!, id: 'c_served', unservedTicksRecent: 0 }
+    const dark = { ...world.cities[0]!, id: 'c_dark', unservedTicksRecent: 730 }
+    const towns = [served, dark]
+
+    for (let month = 0; month < 120; month++) {
+      dark.unservedTicksRecent = 730 // dark every hour of every month
+      stepCityGrowth(towns, month * 730, stream)
+    }
+    console.log('after ten years:', Math.round(served.population), 'k served,', Math.round(dark.population), 'k dark')
+
+    expect(served.population).toBeGreaterThan(world.cities[0]!.population)
+    expect(dark.population).toBeLessThan(served.population)
+    // And the counter is cleared each month, so it measures the month rather than the run.
+    expect(served.unservedTicksRecent).toBe(0)
+  })
 })
