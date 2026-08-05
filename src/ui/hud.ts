@@ -26,6 +26,7 @@ import { PoliticsPanel } from './politicsPanel'
 import { ObjectivesPanel } from './objectivesPanel'
 import { AccountsPanel, ledgerBlock } from './accountsPanel'
 import { operatingMargin } from '@sim/economy/assetLedger'
+import { rooftopOutputMw, rooftopPotentialMw, rooftopSplit } from '@sim/city/rooftop'
 import { cycleLifeUsed, energyCapacityMwh, isStorage, ratedEnergyMwh } from '@sim/dispatch/storage'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 
@@ -587,6 +588,34 @@ export class Hud {
       if (unserved > 0.01) block.appendChild(this.kv(t('ui.unserved'), formatMw(unserved)))
       const price = dispatch?.nodalPrice.get(nodeId) ?? 0
       block.appendChild(this.kv(t('ui.price'), `€${price.toFixed(1)}/MWh`))
+      block.appendChild(this.kv(t('ui.population'), t('ui.thousandPeople', { people: Math.round(city.population) })))
+
+      // The town's own generation, which the player neither owns nor dispatches and has to buy.
+      // Split into the half that never reaches the meter and the half that comes back up the
+      // feeder, because those are two different problems: one is lost revenue, the other is a
+      // megawatt somebody has to find a home for at noon in June.
+      if (city.rooftopSolarMw > 0.01) {
+        const potential = rooftopPotentialMw(city)
+        block.appendChild(
+          this.kv(
+            t('ui.rooftopSolar'),
+            `${formatMw(city.rooftopSolarMw)} · ${t('ui.rooftopShare', {
+              pct: Math.round((city.rooftopSolarMw / Math.max(1, potential)) * 100),
+            })}`,
+          ),
+        )
+        const output = rooftopOutputMw(city, this.world.weather)
+        if (output > 0.01) {
+          const split = rooftopSplit(output, this.world.params.get(city.id, Param.DemandMw))
+          block.appendChild(this.kv(t('ui.rooftopSelfUse'), formatMw(split.selfUseMw)))
+          if (split.exportMw > 0.01) {
+            const row = this.kv(t('ui.rooftopExport'), formatMw(split.exportMw))
+            row.classList.add('warn')
+            block.appendChild(row)
+          }
+        }
+      }
+
       block.appendChild(this.explainBlock(this.world.params.explain(city.id, Param.DemandMw), 'MW'))
 
       const heat = this.world.lastHeat

@@ -138,10 +138,27 @@ export enum Layer {
   Policy,
   Event,
   Geopolitics,
+  /**
+   * How much of the thing there is now, as against when the scenario opened.
+   *
+   * Appended to the enum rather than inserted, because the numeric values are what a save file
+   * stores; its place in the pipeline is set by `LAYER_ORDER` below, which is the only thing
+   * that decides ordering.
+   */
+  Growth,
 }
 
+/**
+ * Growth sits immediately after Tech and before everything conditional.
+ *
+ * The reasoning is the same as Tech's: it says how large the underlying quantity now is, before
+ * anything about today's weather, this government or this hour is applied. A town with forty
+ * percent more people in it is a bigger town, and the December evening peak should be computed
+ * against the bigger town rather than the other way round.
+ */
 export const LAYER_ORDER: Layer[] = [
   Layer.Tech,
+  Layer.Growth,
   Layer.Age,
   Layer.Weather,
   Layer.Policy,
@@ -149,7 +166,7 @@ export const LAYER_ORDER: Layer[] = [
   Layer.Geopolitics,
 ]
 
-export const LAYER_COUNT = 6
+export const LAYER_COUNT = 7
 
 export const LAYER_KEYS: Record<Layer, string> = {
   [Layer.Tech]: 'layer.tech',
@@ -158,6 +175,7 @@ export const LAYER_KEYS: Record<Layer, string> = {
   [Layer.Policy]: 'layer.policy',
   [Layer.Event]: 'layer.event',
   [Layer.Geopolitics]: 'layer.geopolitics',
+  [Layer.Growth]: 'layer.growth',
 }
 
 /**
@@ -182,6 +200,7 @@ export const LAYER_TIER: Record<Layer, Tier> = {
   [Layer.Policy]: Tier.Monthly,
   [Layer.Event]: Tier.Hourly,
   [Layer.Geopolitics]: Tier.Monthly,
+  [Layer.Growth]: Tier.Monthly,
 }
 
 /**
@@ -214,7 +233,7 @@ export interface Modifier {
   op: Op
   value: number
   /** Which system registered this, for grouping and debugging. */
-  sourceKind: 'age' | 'weather' | 'policy' | 'event' | 'tech' | 'geopolitics' | 'scenario'
+  sourceKind: 'age' | 'weather' | 'policy' | 'event' | 'tech' | 'geopolitics' | 'scenario' | 'growth'
   /** Stable id of the specific source, e.g. an event id. */
   sourceId: string
   reasonKey: string

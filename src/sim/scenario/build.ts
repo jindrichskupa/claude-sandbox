@@ -104,6 +104,8 @@ export function buildWorld(content: ScenarioContent): World {
       nodeId: spec.nodeId,
       name: spec.name,
       population: spec.population,
+      startingPopulation: spec.population,
+      rooftopSolarMw: 0,
       baseDemandMw: spec.baseDemandMw,
       baseHeatDemandMwth: spec.baseHeatDemandMwth,
       satisfaction: 0.8,

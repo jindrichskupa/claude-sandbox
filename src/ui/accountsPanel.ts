@@ -29,6 +29,7 @@
  */
 
 import { formatMoney, t } from '@i18n/index'
+import { addLedger, emptyLedger, ledgerProfit, type PeriodLedger } from '@sim/economy/economy'
 import { PLANT_TYPES } from '@content/plantTypes'
 import type { World } from '@sim/world'
 import {
@@ -204,6 +205,15 @@ export class AccountsPanel {
 
     this.body.replaceChildren()
 
+    // The firm's own profit and loss, above the assets that produced it.
+    //
+    // Nowhere else in the interface showed it. The top bar has one number for last month, which
+    // says whether it was a good month and nothing about why, and the per-asset ranking below
+    // deliberately stops at operating margin. Interest, tax, capital and — since the roofs
+    // started generating — what the utility pays households for power it did not want, all
+    // happen between the two and were invisible.
+    this.body.appendChild(this.firmBlock())
+
     const measure = BASES.find((b) => b.basis === this.basis)!.measure
     const rows = this.world.books.ranked(this.window, measure)
     if (rows.length === 0) {
@@ -250,6 +260,59 @@ export class AccountsPanel {
       const scale = Math.max(...mine.map((r) => Math.abs(r.value)), 1)
       for (const row of mine) this.body.appendChild(this.renderRow(row.id, row.value, row.ledger, scale))
     }
+  }
+
+  /**
+   * Which of the utility's own ledgers goes with the window the player has chosen, including the
+   * month in progress.
+   *
+   * Same correction as the per-asset windows need and for the same reason: the year and lifetime
+   * ledgers only take a month when it closes, so a panel reading them raw shows a run of zeros
+   * for the first thirty days of a new game and then a figure up to a month out of date for ever
+   * after. The month window is the open period itself, which is what "this month" means.
+   */
+  private firmLedger(): PeriodLedger {
+    if (this.window === 'month') return this.world.openLedger
+    const total = emptyLedger()
+    addLedger(total, this.window === 'year' ? this.world.yearLedger : this.world.lifetimeLedger)
+    addLedger(total, this.world.openLedger)
+    return total
+  }
+
+  private firmBlock(): HTMLDivElement {
+    const l = this.firmLedger()
+    const wrap = el('div', 'acct-detail')
+    wrap.appendChild(el('div', 'why-title', t('ui.acctTheFirm')))
+
+    const line = (key: string, amount: number, sign: 'pos' | 'neg'): void => {
+      if (Math.abs(amount) < 1) return
+      const row = el('div', 'why-step')
+      row.appendChild(el('span', 'reason', t(key)))
+      row.appendChild(el('span', `delta ${sign}`, formatMoney(sign === 'neg' ? -amount : amount)))
+      wrap.appendChild(row)
+    }
+
+    line('ui.acctRevenue', l.revenue, 'pos')
+    line('ui.heatRevenue', l.heatRevenue, 'pos')
+    line('ui.acctCapacityIncome', l.capacityIncome, 'pos')
+    line('ui.acctFuel', l.fuelCost, 'neg')
+    line('ui.acctCarbon', l.carbonCost, 'neg')
+    line('ui.acctVarOpex', l.varOpex, 'neg')
+    line('ui.acctFixedOpex', l.fixedOpex, 'neg')
+    // Its own line and never folded into anything, because it is the one cost here that grows
+    // when the player raises the tariff — see `sim/city/rooftop.ts`.
+    line('ui.rooftopPurchases', l.rooftopPurchases, 'neg')
+    line('ui.acctUnservedPenalty', l.unservedPenalty, 'neg')
+    line('ui.acctInterest', l.interest, 'neg')
+    line('ui.acctCapex', l.capex, 'neg')
+    line('ui.acctTax', l.tax + l.windfallLevy, 'neg')
+
+    const profit = ledgerProfit(l)
+    const total = el('div', 'why-step total')
+    total.appendChild(el('span', 'reason', t('ui.acctProfit')))
+    total.appendChild(el('span', `delta ${profit >= 0 ? 'pos' : 'neg'}`, formatMoney(profit)))
+    wrap.appendChild(total)
+    return wrap
   }
 
   /**

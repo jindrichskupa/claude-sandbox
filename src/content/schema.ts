@@ -38,6 +38,10 @@ export type Unit =
   | 't/MWh_th'
   | 'fraction'
   | 'fraction/h'
+  | 'fraction/yr'
+  | 'kW'
+  | 'kW/person'
+  | 'kWh/kW/yr'
   | 'years'
   | 'months'
   | 'hours'
@@ -68,6 +72,10 @@ export const SOURCES = {
   'irena-costs': 'IRENA, Renewable Power Generation Costs',
   'euro-chp-practice': 'Euroheat & Power / IEA DHC, district heating and CHP practice',
   'eu-energy-policy': 'European energy policy practice: EU ETS settlement prices, national support schemes, 2022 windfall levies',
+  'eurostat': 'Eurostat, European energy balances, household consumption and demographic statistics',
+  'iea-efficiency': 'IEA, Energy Efficiency market reports (per-capita electricity intensity trends)',
+  'iea-electrification': 'IEA, roadmaps for the electrification of transport and heat',
+  'pvgis': 'European Commission JRC, Photovoltaic Geographical Information System (yield and roof potential)',
   'engineering-standard': 'Standard power engineering reference values (textbook level)',
   'game-design': 'Game design choice — not a physical or economic measurement',
 } as const

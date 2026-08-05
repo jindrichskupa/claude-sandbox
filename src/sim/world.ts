@@ -48,6 +48,9 @@ import {
 } from './scenario/objectives'
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
 import { AssetBooks } from './economy/assetLedger'
+import { growthModifiers, stepCityGrowth, GROWTH_SOURCE } from './city/growth'
+import { rooftopOutputMw, rooftopSplit, stepRooftop } from './city/rooftop'
+import { ROOFTOP } from '@content/cityTrends'
 import { techModifiers, TECH_SOURCE } from './tech/modifiers'
 import { nominal, pricesFor, type Prices } from './tech/money'
 import type { SaveData } from './scenario/save'
@@ -153,6 +156,10 @@ export interface TickSnapshot {
   heatDemandMw: number
   heatSuppliedMw: number
   heatUnservedMw: number
+  /** Rooftop energy consumed behind the meter — demand the utility no longer gets to serve. */
+  rooftopSelfUseMw: number
+  /** Rooftop energy the network absorbed and paid for. */
+  rooftopExportMw: number
 }
 
 export interface ScenarioDef {
@@ -548,6 +555,18 @@ export class World {
         Param.CarbonPricePerTonne,
         this.scenario.carbonPricePerTonne,
       )
+
+      // 2a. The towns. People first, then their roofs, then re-register what both imply for
+      //     demand — in that order, because the roofs are sized on the population and the
+      //     demand modifiers are ratios to it.
+      //
+      //     The rooftop step reads the *tariff*, which is what makes this a feedback loop
+      //     rather than a schedule: a utility whose price rises is subsidising its customers'
+      //     departure, and the panels that result never come off the roof.
+      stepCityGrowth(this.cities, this.tick, this.rng.streamFor('city'))
+      const retail = this.params.getOr('world', Param.TariffPerMwh, this.scenario.tariffPerMwh)
+      stepRooftop(this.cities, retail, date.year, this.rooftopSupportPerMwh())
+      this.registry.setSource(GROWTH_SOURCE, growthModifiers(this.cities, date.year, this.scenario.startYear))
     }
 
     // 2b. Technology and prices, annually. Nothing in here changes within a year: a learning
@@ -595,6 +614,8 @@ export class World {
       fromTick: this.tick - 1,
       snowpackMm: this.weather.snowpackMm,
       hours: FORECAST_WINDOW_HOURS,
+      year: date.year,
+      startYear: this.scenario.startYear,
       siteWindFactor: (plant) => {
         const node = this.network.getNode(plant.nodeId)
         return node ? windSiteFactor(this.terrain, node.x, node.y) : 1
@@ -627,6 +648,19 @@ export class World {
     })
     this.lastHeat = heat
 
+    // 6b. What the roofs are doing this hour, and how it splits between the meter and the
+    //     feeder. Computed before the dispatch because both halves change the problem: the
+    //     self-consumed part shrinks the demand arc, and the exported part is an offer.
+    const rooftopBid = this.rooftopBidPerMwh()
+    const rooftop = new Map<string, { selfUseMw: number; exportMw: number; bidPerMwh: number }>()
+    for (const city of this.cities) {
+      if (city.rooftopSolarMw <= 0) continue
+      const output = rooftopOutputMw(city, this.weather)
+      if (output <= 0) continue
+      const split = rooftopSplit(output, this.params.get(city.id, Param.DemandMw))
+      rooftop.set(city.id, { ...split, bidPerMwh: rooftopBid })
+    }
+
     // 7. Dispatch.
     const result = dispatch({
       network: this.network,
@@ -639,6 +673,7 @@ export class World {
       chpCommitments: heat.commitments,
       auxDemand: heat.pumpingDemandMw,
       prices: this.prices,
+      ...(rooftop.size > 0 ? { rooftop } : {}),
       // Last hour's losses are an excellent first guess at this hour's, because load moves
       // slowly. Same fixed point, roughly half the solves to reach it.
       ...(this.lastLossDemand ? { initialLossDemand: this.lastLossDemand } : {}),
@@ -782,6 +817,14 @@ export class World {
     }
     creditSales(this.openLedger, served, tariff)
     chargeUnserved(this.openLedger, result.totalUnservedMw, this.prices)
+
+    // Paid for whether the utility wanted the energy or not — that is what must-take means, and
+    // it is the whole reason the household would rather pay to stay on than be curtailed. Only
+    // what was actually absorbed is paid for here; curtailed export is the household's loss, and
+    // in most countries the subject of a lawsuit.
+    if (result.totalRooftopExportMw > 0) {
+      this.openLedger.rooftopPurchases += result.totalRooftopExportMw * this.rooftopSupportPerMwh()
+    }
 
     let heatServed = 0
     for (const city of this.cities) heatServed += heat.servedHeatMw.get(city.id) ?? 0
@@ -987,6 +1030,37 @@ export class World {
    */
   private applyRegime(): void {
     this.registry.setSource(POLICY_SOURCE, policyModifiers(this.state.policyRegimeId, this.scenario.carbonPricePerTonne))
+  }
+
+  /**
+   * What a household is paid per MWh it exports.
+   *
+   * Taken from the government's support offer for solar rather than from a lever of its own. A
+   * regime that is paying for solar farms is paying for solar roofs; one that is not, is not.
+   * That keeps the political side of this honest — rooftop support is not a separate dial the
+   * content author can tune to make a point — and it means withdrawing support hits households
+   * and the player's own subsidised plant on the same day, which is what actually happened.
+   *
+   * The floor is the avoided-cost export payment that exists everywhere even with no scheme at
+   * all. It is small, and being small is why negative prices are a phenomenon of the subsidy era
+   * rather than a permanent feature.
+   */
+  private rooftopSupportPerMwh(): number {
+    const regime = REGIMES_BY_ID.get(this.state.policyRegimeId)
+    const offer = regime?.levers.supportOffers.solar
+    const support = offer ? nominal(offer, this.date.year) : 0
+    return Math.max(nominal(ROOFTOP.baseExportPricePerMwh, this.date.year), support)
+  }
+
+  /**
+   * What the roofs bid into the dispatch.
+   *
+   * Negative, by exactly what the household forfeits by being curtailed. This is not a special
+   * case for rooftop: it is the same arithmetic `marginalCostPerMwh` does for any plant on a
+   * guaranteed price, and it is the only reason a power market ever clears below zero.
+   */
+  private rooftopBidPerMwh(): number {
+    return -this.rooftopSupportPerMwh()
   }
 
   /**
@@ -1253,12 +1327,20 @@ export class World {
       const cat = PLANT_TYPES[plant.typeId].category
       mixMw[cat] = (mixMw[cat] ?? 0) + mw
     }
+    // Rooftop counts in the mix, because on the chart the player is reading it is generation
+    // that arrived and displaced something. Only the exported half: self-consumed energy never
+    // touched the system and putting it here would make the mix add up to more than the load.
+    if (result.totalRooftopExportMw > 0) {
+      mixMw.solar = (mixMw.solar ?? 0) + result.totalRooftopExportMw
+    }
     return {
       tick: this.tick,
       date,
       weather: this.weather,
       demandMw: result.totalDemandMw,
       generationMw: result.totalGenerationMw,
+      rooftopSelfUseMw: result.totalRooftopSelfUseMw,
+      rooftopExportMw: result.totalRooftopExportMw,
       lossMw: result.totalLossMw,
       unservedMw: result.totalUnservedMw,
       pricePerMwh: this.systemPrice(result),

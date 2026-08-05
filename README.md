@@ -41,6 +41,20 @@ the document tries to fetch anything.
 
 ## What exists today (milestones 1-8)
 
+- **Towns that change size and habits, and roofs that start generating.** A city used to be a
+  constant with weather on top, which quietly made the game a question about supply only. Now
+  population accumulates — and stops accumulating where the lights keep going out — while
+  consumption per head follows two opposed real trends: appliance efficiency taking about half a
+  percent a year off, and electrification of transport and heat arriving later as a logistic and
+  adding far more. Netted, they produce the shape the last three decades actually had: a decade
+  of stagnation, then growth that catches a planner who extrapolated the stagnation.
+  Rooftop photovoltaics are not scripted to a year. Adoption is the ratio of the retail tariff to
+  what a household's own roof would cost — the same learning curve that prices the player's solar
+  farms, with a small-system premium and a household's discount rate. Nothing happens in the
+  1990s because a rooftop system then cost €430/MWh against an €85 tariff; a wave follows once
+  that falls to €73. **The tariff is the numerator**, so a utility whose costs rise is paying its
+  customers to leave, and the panels never come off the roof. See
+  [Cities, roofs and the death spiral](#cities-roofs-and-the-death-spiral).
 - **Books for every machine and every corridor, kept on two prices at once.** The accounts used
   to be a single pot, so a run showed cash falling and nothing about where it went. Each asset now
   has its own — month, year and lifetime — valued both at the **tariff** the firm is actually paid
@@ -296,6 +310,53 @@ second, to redraw text that changes a few times a game year.
 The smoke test now uses the mouse: it clicks the Build button, clicks a row, clicks the map to
 place a station, and clicks Retire in the inspector, and it fails if any panel rebuilds even once
 while the clock is stopped.
+
+## Cities, roofs and the death spiral
+
+Demand per head across a run, from the model rather than from a table:
+
+| 1995 | 2005 | 2015 | 2020 | 2025 | 2035 | 2045 |
+|---|---|---|---|---|---|---|
+| 100% | 94% | 89% | 88% | 89% | 105% | 113% |
+
+Two forces that a single "demand growth" number would collapse into a lie. Efficiency compounds
+from the first year; electrification is a logistic centred in the 2030s and worth +55% at
+saturation. They cancel for about fifteen years and then stop cancelling.
+
+Rooftop solar arrives the same way — as a consequence rather than a schedule. `adoptionTarget`
+divides the retail tariff by what a household's own roof costs and puts the ratio through a
+logistic centred *above* parity, because a household buys at a payback under about ten years and
+not at levelised parity. One town in the opening scenario, played:
+
+| | 1995 | 2005 | 2015 | 2025 | 2035 |
+|---|---|---|---|---|---|
+| population | 900k | 937k | 972k | 1008k | 1032k |
+| rooftop | 0 MW | 9 MW | 249 MW | 488 MW | 674 MW |
+
+against a peak demand of roughly 420 MW. What that does to the market is the part worth
+simulating. Self-consumption is netted off behind the meter — capped by the residential share of
+the town's load, so an industrial city cannot swallow it — and the sale simply does not happen.
+The surplus is offered into the dispatch at `varOpex − exportPrice`, and there the arithmetic is
+the same one any subsidised plant uses: a household paid per unit produced forfeits that payment
+by being curtailed, so it will pay almost that much to stay on.
+
+Measured over a summer, with roofs large enough to cover the town at noon:
+
+| government | lowest price at the town | hours below zero |
+|---|---|---|
+| renewables push (€110/MWh support) | **−€80.5/MWh** | 2110 |
+| market liberal (no scheme) | −€14.3/MWh | 2110 |
+
+Both numbers are asserted in tests, and the second is asserted as forcefully as the first:
+**negative prices are a consequence of subsidy, not of sunshine.** A model that produced deep
+negative prices from sunshine alone would be teaching the player something false about why they
+happen. What the deep ones create is the operating problem the user asked for — at noon in June
+the system is being paid to take power it does not want and the player needs somewhere to put it,
+which is the first moment in the game where a battery or a pumped store is obviously worth
+building rather than merely available.
+
+The rooftop payments are their own line in the monthly ledger, and they are the one cost on it
+that grows when the player raises the tariff.
 
 ## Who earns and who loses
 

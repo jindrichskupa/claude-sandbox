@@ -577,6 +577,8 @@ try {
       first: rows[0]?.querySelector('.acct-name')?.textContent,
       firstValue: rows[0]?.querySelector('.acct-value')?.textContent,
       total: panel.querySelector('.acct-summary b')?.textContent,
+      // The firm's own P&L above the assets, which is the only place it appears at all.
+      firm: panel.querySelector('.acct-detail .why-step.total .delta')?.textContent,
       // Worst first: the top row must not be better than the bottom one.
       sorted: rows.length > 1 ? rows[0].classList.contains('acct-bad') : true,
     }
@@ -585,6 +587,8 @@ try {
   if (!accounts.visible) throw new Error('The accounts panel did not open')
   if (accounts.rows === 0) throw new Error('The accounts panel ranked nothing')
   if (!accounts.total) throw new Error('The accounts panel showed no total')
+
+  if (!accounts.firm) throw new Error('The accounts panel did not show the utility\'s own profit and loss')
 
   await page.screenshot({ path: join(OUT, '17-accounts.png') })
 

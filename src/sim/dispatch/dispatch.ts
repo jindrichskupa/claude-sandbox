@@ -37,6 +37,11 @@ export interface DispatchResult {
   totalLossMw: number
   /** MW drawn by the heat network's pumps. Not a loss and not a city's demand. */
   totalAuxDemandMw: number
+  /** Rooftop export actually absorbed, per city. What is missing was curtailed. */
+  rooftopTakenMw: Map<string, number>
+  /** Rooftop energy consumed behind the meter, which the utility never got to sell. */
+  totalRooftopSelfUseMw: number
+  totalRooftopExportMw: number
   totalUnservedMw: number
   /** MW drawn by storage that was actually charging. */
   totalStorageChargeMw: number
@@ -131,6 +136,7 @@ interface Built {
   lossArcs: Array<{ serveArc: number; unservedArc: number }>
   auxArcs: Array<{ serveArc: number; unservedArc: number }>
   storageArcs: Array<{ plantId: string; dischargeArc: number; chargeArc: number; forgoArc: number }>
+  rooftopArcs: Array<{ cityId: string; arc: number; offeredMw: number; selfUseMw: number }>
   totalDemand: number
   /** Amount added to every injection arc so the solver sees only non-negative costs. */
   costShift: number
@@ -164,10 +170,21 @@ export interface DispatchInput {
    * about the ordering these impose and not about what decade it is, can leave it out.
    */
   prices?: Prices
+  /**
+   * Photovoltaics on the town's own roofs, per city id.
+   *
+   * `selfUseMw` never reaches the market: it is netted off behind the meter, so the city's demand
+   * arc shrinks and the sale simply does not happen. `exportMw` is offered as generation at
+   * `bidPerMwh`, which under a support scheme is well below zero — a household paid per unit
+   * produced forfeits that payment by being curtailed and will pay to stay on. That is the whole
+   * mechanism behind a negative price, and it is the same one a subsidised plant uses.
+   */
+  rooftop?: Map<string, { selfUseMw: number; exportMw: number; bidPerMwh: number }>
 }
 
 function build(input: DispatchInput): Built {
-  const { network, plants, cities, params, carbonPrice, lossDemand, storagePlans, chpCommitments, auxDemand } = input
+  const { network, plants, cities, params, carbonPrice, lossDemand, storagePlans, chpCommitments, auxDemand, rooftop } =
+    input
   const nodeIds = network.nodeIds()
   const indexOf = new Map<NodeId, number>()
   nodeIds.forEach((id, i) => indexOf.set(id, i))
@@ -201,6 +218,11 @@ function build(input: DispatchInput): Built {
   }
   for (const plan of storagePlans?.values() ?? []) {
     if (plan.mode === 'discharging') minBid = Math.min(minBid, plan.offerPricePerMwh)
+  }
+  // Rooftop is usually the most negative bid on the system once a support scheme exists, so it
+  // has to be in the shift or every arc cost the solver sees would go negative anyway.
+  for (const r of rooftop?.values() ?? []) {
+    if (r.exportMw > 0) minBid = Math.min(minBid, r.bidPerMwh)
   }
   const costShift = minBid < 0 ? -minBid : 0
 
@@ -250,11 +272,23 @@ function build(input: DispatchInput): Built {
   }
 
   const cityArcs: Built['cityArcs'] = []
+  const rooftopArcs: Built['rooftopArcs'] = []
   let totalDemand = storageChargeDemand
   for (const city of cities) {
     const node = indexOf.get(city.nodeId)
     if (node === undefined) continue
-    const demand = Math.max(0, params.get(city.id, Param.DemandMw))
+    const own = rooftop?.get(city.id)
+    // Behind-the-meter output never appears as demand *or* as generation. It is simply a sale
+    // that does not happen, which is exactly how it looks to the utility that used to make it.
+    const demand = Math.max(0, params.get(city.id, Param.DemandMw) - (own?.selfUseMw ?? 0))
+    if (own && own.exportMw > 0) {
+      rooftopArcs.push({
+        cityId: city.id,
+        arc: solver.addArc(source, node, own.exportMw, own.bidPerMwh + costShift),
+        offeredMw: own.exportMw,
+        selfUseMw: own.selfUseMw,
+      })
+    }
     totalDemand += demand
     const serveArc = solver.addArc(node, sink, demand, 0)
     // Last-resort arc. Using it means the lights went out, and its price is what makes
@@ -317,6 +351,7 @@ function build(input: DispatchInput): Built {
     lossArcs,
     auxArcs,
     storageArcs,
+    rooftopArcs,
     totalDemand,
     costShift,
   }
@@ -341,6 +376,7 @@ function solveOnce(input: DispatchInput): DispatchResult {
     lossArcs,
     auxArcs,
     storageArcs,
+    rooftopArcs,
     totalDemand,
     costShift,
   } = built
@@ -380,6 +416,27 @@ function solveOnce(input: DispatchInput): DispatchResult {
       totalStorageChargeMw += charged
     }
     generationMw.set(plantId, mw)
+  }
+
+  // Rooftop export the system actually took. Counted as generation, because it is: it came off
+  // a roof, went into the network and served somebody else's load. What was not taken was
+  // curtailed, which under a support scheme is a household losing money and, in most of Europe,
+  // an argument on the evening news.
+  const rooftopTakenMw = new Map<string, number>()
+  let totalRooftopExportMw = 0
+  let totalRooftopSelfUseMw = 0
+  for (const { cityId, arc, selfUseMw } of rooftopArcs) {
+    const mw = solver.flowOf(arc)
+    rooftopTakenMw.set(cityId, mw)
+    totalGenerationMw += mw
+    totalRooftopExportMw += mw
+    totalRooftopSelfUseMw += selfUseMw
+  }
+  // Self-consumption at towns with nothing left over still has to be counted, and those towns
+  // never got an export arc.
+  for (const [cityId, own] of input.rooftop ?? []) {
+    if (own.exportMw <= 0) totalRooftopSelfUseMw += own.selfUseMw
+    if (!rooftopTakenMw.has(cityId)) rooftopTakenMw.set(cityId, 0)
   }
 
   const servedMw = new Map<string, number>()
@@ -443,6 +500,9 @@ function solveOnce(input: DispatchInput): DispatchResult {
     totalGenerationMw,
     totalLossMw,
     totalAuxDemandMw,
+    rooftopTakenMw,
+    totalRooftopSelfUseMw,
+    totalRooftopExportMw,
     totalUnservedMw,
     totalStorageChargeMw,
     totalStorageDischargeMw,

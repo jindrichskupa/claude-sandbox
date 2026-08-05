@@ -61,6 +61,8 @@ function city(id: string, nodeId: string, heatMw: number): CityAsset {
     nodeId,
     name: id,
     population: 100,
+  startingPopulation: 100,
+  rooftopSolarMw: 0,
     baseDemandMw: 0,
     baseHeatDemandMwth: heatMw,
     satisfaction: 1,

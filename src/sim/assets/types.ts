@@ -109,6 +109,18 @@ export interface CityAsset {
   name: string
   /** Thousands of people. Drives demand growth and political weight. */
   population: number
+  /**
+   * The population the scenario opened with.
+   *
+   * Kept because demand growth is expressed as a *ratio* to it, and the base demand the scenario
+   * quoted belongs to that many people. Recomputing it from the current population would make
+   * the town's growth invisible the moment it happened.
+   */
+  startingPopulation: number
+  /**
+   * Photovoltaics on this town's own roofs, in MW. Not the player's — see `sim/city/rooftop.ts`.
+   */
+  rooftopSolarMw: number
   /** Demand at reference conditions, before the daily, seasonal and weather shaping. */
   baseDemandMw: number
   /** District heating demand at reference conditions. Unused until the heat milestone. */

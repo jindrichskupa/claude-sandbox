@@ -13,6 +13,7 @@
  */
 
 import { PLANT_TYPES } from '@content/plantTypes'
+import { intensityFactor } from '../city/growth'
 import { hydroPowerFraction, solarPowerFraction, temperatureDemandFactor, windPowerFraction } from '../weather/effects'
 import type { WeatherModel } from '../weather/weather'
 import { isDispatchable, type CityAsset, type PlantAsset } from '../assets/types'
@@ -50,6 +51,10 @@ export interface ForecastInput {
   hours: number
   /** Wind exposure of a plant's site, 0.65..1.35. */
   siteWindFactor: (plant: PlantAsset) => number
+  /** Calendar year, so per-capita demand trends can be applied. */
+  year: number
+  /** The scenario's first year, which the demand trends are measured from. */
+  startYear: number
 }
 
 /**
@@ -62,8 +67,18 @@ export interface ForecastInput {
 export function forecastResidualLoad(input: ForecastInput): ForecastHour[] {
   const { weatherModel, plants, cities, params, fromTick, hours, siteWindFactor } = input
 
+  // The base demand *as the towns are now*, not as the scenario first described them. `base()`
+  // deliberately skips the modifier chain — the forecast applies its own hourly and seasonal
+  // shaping and would double-count the weather layer — but skipping the growth layer with it
+  // would have storage planning against a 1995 load in 2035. So the growth factor is
+  // reconstructed here from its two components, which are the only two there are.
   let baseDemand = 0
-  for (const city of cities) baseDemand += params.base(city.id, Param.DemandMw)
+  const intensity = intensityFactor(input.year, input.startYear)
+  for (const city of cities) {
+    const people = city.startingPopulation > 0 ? city.population / city.startingPopulation : 1
+    baseDemand += params.base(city.id, Param.DemandMw) * people * intensity
+  }
+  const rooftopMw = cities.reduce((sum, c) => sum + c.rooftopSolarMw, 0)
 
   const weatherPlants = plants.filter(
     (p) => isDispatchable(p) && PLANT_TYPES[p.typeId].weatherDependence !== 'none',
@@ -98,6 +113,13 @@ export function forecastResidualLoad(input: ForecastInput): ForecastHour[] {
           break
       }
     }
+
+    // Rooftop belongs here in full, both the exported half and the self-consumed half. Storage is
+    // planning against *residual* load — what the dispatchable fleet has to cover — and from that
+    // point of view a household running its own kettle off its own roof and a household exporting
+    // to the feeder are the same thing: a megawatt the system does not have to produce. Leaving
+    // it out is what would make a battery sleep through the middle of a June day.
+    mustRunRenewableMw += rooftopMw * solarPowerFraction(weather.irradiance, weather.tempC)
 
     out.push({
       tick,

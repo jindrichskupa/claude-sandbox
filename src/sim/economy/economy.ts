@@ -39,6 +39,14 @@ export interface PeriodLedger {
   windfallLevy: number
   /** Payment for keeping firm capacity available, where a capacity market exists. */
   capacityIncome: number
+  /**
+   * What the utility paid households for the power their roofs pushed back into the network.
+   *
+   * Its own line rather than folded into fuel or purchases, because it is the one cost on this
+   * list that grows when the player *raises* the tariff — see `sim/city/rooftop.ts` — and a
+   * player who cannot see it has no way to notice that happening.
+   */
+  rooftopPurchases: number
   /** Energy sold, MWh. */
   energySoldMwh: number
   /** Energy not delivered, MWh. */
@@ -55,6 +63,7 @@ export function emptyLedger(): PeriodLedger {
   return {
     revenue: 0,
     heatRevenue: 0,
+    rooftopPurchases: 0,
     fuelCost: 0,
     carbonCost: 0,
     varOpex: 0,
@@ -94,7 +103,8 @@ export function ledgerProfit(l: PeriodLedger): number {
     l.eventCost -
     l.insurancePremium -
     l.tax -
-    l.windfallLevy
+    l.windfallLevy -
+    l.rooftopPurchases
   )
 }
 
@@ -115,6 +125,7 @@ export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.tax += from.tax
   into.windfallLevy += from.windfallLevy
   into.capacityIncome += from.capacityIncome
+  into.rooftopPurchases += from.rooftopPurchases
   into.energySoldMwh += from.energySoldMwh
   into.energyUnservedMwh += from.energyUnservedMwh
   into.heatSoldMwh += from.heatSoldMwh
