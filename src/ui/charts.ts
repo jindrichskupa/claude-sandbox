@@ -7,6 +7,7 @@
  */
 
 import type { TickSnapshot } from '@sim/world'
+import type { YearRecord } from '@sim/economy/yearbook'
 
 export interface ChartTheme {
   background: string
@@ -170,4 +171,126 @@ export function drawPrice(canvas: HTMLCanvasElement, history: TickSnapshot[]): v
   ctx.fillStyle = THEME.text
   ctx.font = THEME.font
   ctx.fillText(`€${last.pricePerMwh.toFixed(0)}/MWh`, 4, h - 4)
+}
+
+// ---------------------------------------------------------------------------
+// The long run
+// ---------------------------------------------------------------------------
+//
+// Everything above draws hours. These draw *years*, and the difference is not
+// only the axis. A ten-day chart is an instrument you read while operating; a
+// thirty-year chart is an argument about a strategy, and the things that make
+// it readable are different — the bars are discrete because a year is, the
+// axis is labelled because "which decade" is the question being asked, and a
+// second series is overlaid rather than given its own panel because the whole
+// point is the relationship between the two.
+
+/** Labels down the left and along the bottom, in the space a small chart can spare. */
+function drawYearAxis(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  years: YearRecord[],
+  topLabel: string,
+): void {
+  ctx.fillStyle = THEME.text
+  ctx.font = THEME.font
+  ctx.fillText(topLabel, 4, 11)
+  if (years.length === 0) return
+  const first = String(years[0]!.year)
+  const last = String(years[years.length - 1]!.year)
+  ctx.fillText(first, 2, h - 2)
+  ctx.fillText(last, w - ctx.measureText(last).width - 2, h - 2)
+}
+
+/**
+ * One bar per year, with an optional line over the top on its own scale.
+ *
+ * The overlay is the reason this exists rather than two charts. Emissions falling while carbon
+ * *intensity* stays flat is a different story from both falling, and it is a story you can only
+ * see if the two are drawn on the same years.
+ */
+export function drawYearBars(
+  canvas: HTMLCanvasElement,
+  years: YearRecord[],
+  bar: { of: (y: YearRecord) => number; colour: string; label: (max: number) => string },
+  line?: { of: (y: YearRecord) => number; colour: string },
+): void {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const w = canvas.width
+  const h = canvas.height
+  setup(ctx, w, h)
+  if (years.length === 0) return
+  drawGrid(ctx, w, h)
+
+  const pad = 12
+  const plot = h - pad
+  const max = Math.max(1e-9, ...years.map(bar.of)) * 1.1
+  const slot = w / years.length
+  const width = Math.max(1, slot - 1)
+
+  ctx.fillStyle = bar.colour
+  for (let i = 0; i < years.length; i++) {
+    const value = Math.max(0, bar.of(years[i]!))
+    const barHeight = (value / max) * (plot - 2)
+    ctx.fillRect(i * slot, plot - barHeight, width, barHeight)
+  }
+
+  if (line) {
+    const lineMax = Math.max(1e-9, ...years.map(line.of)) * 1.1
+    ctx.strokeStyle = line.colour
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    for (let i = 0; i < years.length; i++) {
+      const py = plot - (Math.max(0, line.of(years[i]!)) / lineMax) * (plot - 2)
+      const px = i * slot + width / 2
+      if (i === 0) ctx.moveTo(px, py)
+      else ctx.lineTo(px, py)
+    }
+    ctx.stroke()
+  }
+
+  drawYearAxis(ctx, w, h, years, bar.label(max / 1.1))
+}
+
+/**
+ * The generation mix, year by year, as a share of each year's total.
+ *
+ * Shares rather than absolute energy, deliberately. A fleet that halves its output and keeps the
+ * same proportions has done something very different from one that decarbonised, and an absolute
+ * stack makes the two look identical while a share stack makes them look nothing alike. The
+ * absolute figure is one chart up, where the emissions are.
+ */
+export function drawYearMix(canvas: HTMLCanvasElement, years: YearRecord[]): void {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const w = canvas.width
+  const h = canvas.height
+  setup(ctx, w, h)
+  if (years.length === 0) return
+
+  const pad = 12
+  const plot = h - pad
+  const slot = w / years.length
+  const width = Math.max(1, slot - 1)
+
+  for (let i = 0; i < years.length; i++) {
+    const year = years[i]!
+    let total = 0
+    for (const c of STACK_ORDER) total += year.mixMwh[c] ?? 0
+    if (total <= 0) continue
+
+    let y = plot
+    for (const category of STACK_ORDER) {
+      const share = (year.mixMwh[category] ?? 0) / total
+      if (share <= 0) continue
+      const band = share * (plot - 2)
+      ctx.fillStyle = CATEGORY_COLOURS[category] ?? '#888'
+      ctx.fillRect(i * slot, y - band, width, band)
+      y -= band
+    }
+  }
+
+  drawYearAxis(ctx, w, h, years, '100%')
 }

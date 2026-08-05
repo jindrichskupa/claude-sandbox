@@ -729,6 +729,55 @@ try {
 
   await page.screenshot({ path: join(OUT, '22-news-card.png') })
 
+  // --- History ----------------------------------------------------------
+  // Four charts of the whole run. The unit tests prove the numbers; what only a browser can
+  // show is that the canvases were actually drawn on and that each caption says something —
+  // a chart panel whose captions are blank is how an empty yearbook used to look, and it
+  // looked exactly like a working one.
+  const history = await page.evaluate(() => {
+    const g = window.game
+    // Run to the first year end. The panel has nothing to say before one closes, which is
+    // correct behaviour and useless as a test.
+    const guard = Date.now() + 60_000
+    while (g.world.yearbook.length === 0 && Date.now() < guard) g.world.step()
+    g.hud.historyPanel.setOpen(true)
+    const panel = document.getElementById('history-panel')
+    const canvases = [...panel.querySelectorAll('canvas')]
+    // Counting non-transparent pixels would only prove the background was filled, which it is
+    // even on an empty chart. Each chart is asked for its own series colour instead.
+    const series = [
+      [0xc8, 0x6a, 0x3a], // emissions
+      [0xc8, 0x6a, 0x3a], // thermal — the mix band this fleet certainly has
+      [0xe2, 0x48, 0x3d], // unserved
+      [0x5f, 0xc2, 0x7e], // cash
+    ]
+    const painted = canvases.map((c, i) => {
+      const data = c.getContext('2d').getImageData(0, 0, c.width, c.height).data
+      const [r, g, b] = series[i]
+      let ink = 0
+      for (let j = 0; j < data.length; j += 4) {
+        if (data[j] === r && data[j + 1] === g && data[j + 2] === b) ink++
+      }
+      return ink
+    })
+    return {
+      years: g.world.yearbook.length,
+      visible: panel.classList.contains('visible'),
+      canvases: canvases.length,
+      painted,
+      captions: [...panel.querySelectorAll('.hist-caption')].map((d) => d.textContent),
+    }
+  })
+  console.log('history:', history)
+  if (history.years === 0) throw new Error('No year closed within the time allowed')
+  if (!history.visible) throw new Error('The history panel did not open')
+  if (history.canvases !== 4) throw new Error(`Expected four charts, found ${history.canvases}`)
+  if (history.painted.some((n) => n < 20)) throw new Error(`A history chart drew no series: ${history.painted}`)
+  if (history.captions.some((c) => !c)) throw new Error('A history chart carried no caption')
+
+  await page.screenshot({ path: join(OUT, '24-history.png') })
+  await page.evaluate(() => window.game.hud.historyPanel.setOpen(false))
+
   // --- Save and load ----------------------------------------------------
   // The property that matters is the one the unit tests prove: a loaded game continues
   // identically. What only a browser can show is that the load survives the *renderer* — that

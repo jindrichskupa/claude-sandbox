@@ -1931,11 +1931,11 @@ export class World {
       })
     }
 
-    this.yearLedger = emptyLedger()
-    // Taken before the annual ledger is reset, which is the only moment it is complete.
+    // Taken before the annual ledger is reset, which is the only moment it is complete, and
+    // dated to the year that just ended rather than the one this tick opened.
     this.yearbook.push(
       recordYear({
-        year: this.date.year,
+        year: this.date.year - 1,
         ledger: this.yearLedger,
         yearMix: this.yearMix,
         plants: this.plants,
@@ -1948,6 +1948,7 @@ export class World {
         regimeId: this.state.policyRegimeId,
       }),
     )
+    this.yearLedger = emptyLedger()
     this.yearMix = {}
 
     this.books.closeYear()

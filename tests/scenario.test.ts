@@ -463,6 +463,31 @@ describe('the save file envelope', () => {
     expect(loaded.finances.cash).toBeCloseTo(world.finances.cash, 6)
   })
 
+  it('leaves every power line a middle the player can click', () => {
+    // A corridor is selected by clicking somewhere along it, and the stations at its ends own a
+    // disc around themselves. If a line is shorter than those two discs together, no part of it
+    // belongs to the line and the player cannot ask about it at all — which is how a line
+    // between two neighbouring nodes became invisible to the interface.
+    //
+    // Four tiles is the working minimum: a node core of about half a tile at each end, and
+    // enough between them to aim at. Exempt are the corridors that also carry a heat main — a
+    // combined heat and power station stands next to the town it heats because a heat main
+    // longer than about thirty kilometres loses more than it delivers, so its power line is
+    // short for a reason no map layout can argue with. `MapView.pickAt` is what makes those
+    // selectable; everything else has to earn its length here.
+    for (const scenario of SCENARIO_LIST) {
+      const at = new Map(scenario.nodes.map((n) => [n.id, n]))
+      const heated = new Set(scenario.heatPipes.flatMap((p) => [`${p.from}|${p.to}`, `${p.to}|${p.from}`]))
+      for (const line of scenario.lines) {
+        if (heated.has(`${line.from}|${line.to}`)) continue
+        const a = at.get(line.from)!
+        const b = at.get(line.to)!
+        const tiles = Math.hypot(a.x - b.x, a.y - b.y)
+        expect(`${line.id} ${tiles.toFixed(2)}`).toBe(`${line.id} ${Math.max(tiles, 4).toFixed(2)}`)
+      }
+    }
+  })
+
   it('knows every scenario by the id its saves record', () => {
     for (const scenario of SCENARIO_LIST) {
       expect(scenarioById(scenario.id)).toBe(scenario)

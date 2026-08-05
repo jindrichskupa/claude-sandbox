@@ -1403,3 +1403,44 @@ button.danger:hover {
   outline: 1px solid var(--accent, #7fd4ff);
   outline-offset: -1px;
 }
+
+/* --- History ------------------------------------------------------------
+ *
+ * Sixth panel in the left corner. Every other chart in the interface shows
+ * the last ten days; these four show every closed year, which is the window
+ * the player's decisions actually live in.
+ */
+#history-toggle {
+  position: absolute;
+  left: 424px;
+  top: 74px;
+  z-index: 2;
+  font-weight: 600;
+  padding: 7px 16px;
+}
+
+#history-panel {
+  left: 12px;
+  top: 112px;
+  width: 340px;
+  max-height: calc(100vh - 232px);
+  overflow-y: auto;
+  padding: 12px;
+  display: none;
+}
+
+#history-panel.visible {
+  display: block;
+}
+
+#history-panel .chart-block {
+  margin-bottom: 12px;
+}
+
+.hist-caption {
+  margin-top: 5px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}

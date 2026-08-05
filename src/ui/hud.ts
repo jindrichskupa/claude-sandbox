@@ -35,6 +35,7 @@ import { PoliticsPanel } from './politicsPanel'
 import { ObjectivesPanel } from './objectivesPanel'
 import { AccountsPanel, ledgerBlock } from './accountsPanel'
 import { NewsPanel } from './newsPanel'
+import { HistoryPanel } from './historyPanel'
 import { operatingMargin } from '@sim/economy/assetLedger'
 import { rooftopOutputMw, rooftopPotentialMw, rooftopSplit } from '@sim/city/rooftop'
 import { cycleLifeUsed, energyCapacityMwh, isStorage, ratedEnergyMwh } from '@sim/dispatch/storage'
@@ -108,6 +109,7 @@ export class Hud {
   readonly objectivesPanel: ObjectivesPanel
   readonly accountsPanel: AccountsPanel
   readonly newsPanel: NewsPanel
+  readonly historyPanel: HistoryPanel
 
   private selectedNodeId: string | null = null
   private selectedEdgeId: string | null = null
@@ -274,6 +276,10 @@ export class Hud {
       },
     })
 
+    this.historyPanel = new HistoryPanel(root, world, {
+      onOpen: () => this.soloPanel('history'),
+    })
+
     this.hint = el('div', 'panel')
     this.hint.id = 'hint'
     root.appendChild(this.hint)
@@ -294,12 +300,15 @@ export class Hud {
    * `setOpen(false)` on the others only, never `setOpen(true)` on the keeper, which would
    * recurse straight back into here.
    */
-  private soloPanel(keep: 'build' | 'politics' | 'objectives' | 'accounts' | 'news' | 'none'): void {
+  private soloPanel(
+    keep: 'build' | 'politics' | 'objectives' | 'accounts' | 'news' | 'history' | 'none',
+  ): void {
     if (keep !== 'build') this.buildPanel.setOpen(false)
     if (keep !== 'politics') this.politicsPanel.setOpen(false)
     if (keep !== 'objectives') this.objectivesPanel.setOpen(false)
     if (keep !== 'accounts') this.accountsPanel.setOpen(false)
     if (keep !== 'news') this.newsPanel.setOpen(false)
+    if (keep !== 'history') this.historyPanel.setOpen(false)
     this.selectedNodeId = null
     this.selectedEdgeId = null
     this.renderInspector()
@@ -312,6 +321,7 @@ export class Hud {
     this.objectivesPanel.setOpen(false)
     this.accountsPanel.setOpen(false)
     this.newsPanel.setOpen(false)
+    this.historyPanel.setOpen(false)
   }
 
   private readonly onPointerDown = (): void => {
@@ -448,6 +458,7 @@ export class Hud {
     this.objectivesPanel.render()
     this.accountsPanel.render()
     this.newsPanel.render()
+    this.historyPanel.render()
 
     const history = world.recentHistory(240)
     if (history.length > 1) {

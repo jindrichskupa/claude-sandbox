@@ -32,6 +32,12 @@ import { routeLine, simplifyRoute } from '@sim/grid/routing'
 export const TILE_SCALE = 2
 export const TILE_PX = TILE_SOURCE_PX * TILE_SCALE
 
+/**
+ * The radius around a node's centre that belongs to the node no matter what crosses it.
+ * Roughly the drawn sprite: everything outside it is arbitrated by distance. See `pickAt`.
+ */
+export const NODE_CORE_PX = TILE_PX * 0.45
+
 const CATEGORY_COLOURS: Record<string, number> = {
   thermal: 0xc86a3a,
   nuclear: 0xb455c8,
@@ -808,6 +814,14 @@ export class MapView {
 
   /** Nearest node to a world-space point, for click handling on empty ground. */
   nodeAtWorld(wx: number, wy: number, maxDistancePx = 22): GridNode | null {
+    return this.nearestNode(wx, wy, maxDistancePx)?.node ?? null
+  }
+
+  private nearestNode(
+    wx: number,
+    wy: number,
+    maxDistancePx: number,
+  ): { node: GridNode; dist: number } | null {
     let best: GridNode | null = null
     let bestDist = maxDistancePx
     for (const node of this.world.network.allNodes()) {
@@ -819,18 +833,25 @@ export class MapView {
         best = node
       }
     }
-    return best
+    return best ? { node: best, dist: bestDist } : null
   }
 
   /**
-   * The line or heat main nearest a point, if the point is close enough to be a deliberate click.
+   * How far a point is from a corridor.
    *
-   * Lines were the only thing on the map you could not select, so the one asset whose behaviour
-   * the player most needs to understand — where it is congested, how long it is, what it costs in
-   * losses — was also the only one they could not ask about. Tested segment by segment along the
-   * routed corridor rather than against the straight line between endpoints, because after the
-   * routing milestone those are frequently nowhere near each other.
+   * Measured segment by segment along the routed path rather than against the straight line
+   * between endpoints, because after the routing milestone those are frequently nowhere near
+   * each other.
    */
+  private edgeDistance(edge: GridEdge, wx: number, wy: number): number {
+    const path = this.edgePath(edge)
+    let nearest = Infinity
+    for (let i = 1; i < path.length; i++) {
+      nearest = Math.min(nearest, distanceToSegment(wx, wy, path[i - 1]!, path[i]!))
+    }
+    return nearest
+  }
+
   /**
    * Every edge under the cursor, nearest first.
    *
@@ -842,12 +863,8 @@ export class MapView {
   edgesAtWorld(wx: number, wy: number, maxDistancePx = 14): GridEdge[] {
     const hits: Array<{ edge: GridEdge; dist: number }> = []
     for (const edge of this.world.network.allEdges()) {
-      const path = this.edgePath(edge)
-      let nearest = Infinity
-      for (let i = 1; i < path.length; i++) {
-        nearest = Math.min(nearest, distanceToSegment(wx, wy, path[i - 1]!, path[i]!))
-      }
-      if (nearest < maxDistancePx) hits.push({ edge, dist: nearest })
+      const dist = this.edgeDistance(edge, wx, wy)
+      if (dist < maxDistancePx) hits.push({ edge, dist })
     }
     hits.sort((a, b) => a.dist - b.dist)
     return hits.map((h) => h.edge)
@@ -866,7 +883,35 @@ export class MapView {
     const current = hits.findIndex((e) => e.id === this.selectedEdgeId)
     return hits[current === -1 ? 0 : (current + 1) % hits.length] ?? null
   }
+
+  /**
+   * What a click selects: the node under it, the corridor under it, or nothing.
+   *
+   * Nodes used to win every tie within a full tile of their centre. That is harmless on a long
+   * corridor and fatal on a short one — a station a tile and a half from its city has no point
+   * along the line between them that is not inside somebody's node radius, so the line could
+   * not be clicked at all. Spreading the map out helps, but it cannot be the whole answer: a
+   * heat main is short *because* a heat main more than about thirty kilometres long loses more
+   * than it delivers, so the shortest edges on the map are the ones physics insists on.
+   *
+   * The rule that works is a small core, about the size of the sprite, that always belongs to
+   * the node; outside it, whichever is genuinely nearer wins. Clicking a station still selects
+   * the station, and clicking between two stations selects what runs between them.
+   */
+  pickAt(wx: number, wy: number): MapPick | null {
+    const near = this.nearestNode(wx, wy, TILE_PX)
+    if (near && near.dist <= NODE_CORE_PX) return { kind: 'node', node: near.node }
+    const edge = this.edgeAtWorld(wx, wy)
+    if (!edge) return near ? { kind: 'node', node: near.node } : null
+    if (near && near.dist < this.edgeDistance(edge, wx, wy)) {
+      return { kind: 'node', node: near.node }
+    }
+    return { kind: 'edge', edge }
+  }
 }
+
+/** What `pickAt` found under the cursor. */
+export type MapPick = { kind: 'node'; node: GridNode } | { kind: 'edge'; edge: GridEdge }
 
 /** Perpendicular distance from a point to a line segment, clamped to the segment's ends. */
 function distanceToSegment(

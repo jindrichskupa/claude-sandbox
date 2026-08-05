@@ -435,17 +435,13 @@ async function main(): Promise<void> {
 
     if (handleBuildClick(e.clientX, e.clientY)) return
 
-    // A click rather than a drag: select whatever is under the cursor. Nodes win ties, because
-    // every line ends at one and a click near a substation almost always means the substation.
+    // A click rather than a drag: select whatever is under the cursor. The map owns the
+    // arbitration between a station and the line that ends at it — see `pickAt`.
     const rect = canvas.getBoundingClientRect()
     const world2 = map.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top)
-    const node = map.nodeAtWorld(world2.x, world2.y, TILE_PX)
-    if (node) {
-      hud.selectNode(node.id)
-      return
-    }
-    const edge = map.edgeAtWorld(world2.x, world2.y)
-    if (edge) hud.selectEdge(edge.id)
+    const pick = map.pickAt(world2.x, world2.y)
+    if (pick?.kind === 'node') hud.selectNode(pick.node.id)
+    else if (pick?.kind === 'edge') hud.selectEdge(pick.edge.id)
     else hud.selectNode(null)
   })
 
