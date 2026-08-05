@@ -487,10 +487,10 @@ async function main(): Promise<void> {
   app.ticker.add((ticker) => {
     const dt = Math.min(0.25, ticker.deltaMS / 1000)
 
-    // A finished scenario stops the clock. Once the objectives have been judged there is nothing
-    // left for another hour to change, and letting it run on would quietly overwrite the result
-    // the player is still reading.
-    const playable = !world.finances.bankrupt && world.outcome === 'playing'
+    // A finished scenario stops the clock, unless the player has asked to carry on. The verdict
+    // stands either way — this is about whether the hours keep passing, not about whether the
+    // brief was met. Bankruptcy is the one ending with no "carry on": there is no utility left.
+    const playable = !world.finances.bankrupt && (world.outcome === 'playing' || world.freePlay)
     if (!playable) skip = null
 
     if (skip) {

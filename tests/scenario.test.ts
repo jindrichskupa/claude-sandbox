@@ -35,6 +35,7 @@ function context(overrides: Partial<ObjectiveContext> = {}): ObjectiveContext {
     plants: [],
     finances,
     lifetime: emptyLedger(),
+    recentYear: emptyLedger(),
     year: 2000,
     endYear: 2025,
     ...overrides,
@@ -57,11 +58,12 @@ describe('objectives', () => {
       required: true,
     }
     // Nine hundred MWh unserved out of a million: still inside a 0.1% allowance, but only just.
-    const lifetime = emptyLedger()
-    lifetime.energySoldMwh = 1_000_000
-    lifetime.energyUnservedMwh = 900
+    // Measured over the year, which is the window this condition is judged on.
+    const recentYear = emptyLedger()
+    recentYear.energySoldMwh = 1_000_000
+    recentYear.energyUnservedMwh = 900
 
-    const [progress] = evaluateObjectives([objective], context({ lifetime }))
+    const [progress] = evaluateObjectives([objective], context({ recentYear }))
     expect(progress!.status).toBe('pending')
     // Ten percent of the allowance left, not ninety percent of the way to winning.
     expect(progress!.progress).toBeLessThan(0.2)
@@ -80,12 +82,45 @@ describe('objectives', () => {
     const cold = emptyLedger()
     cold.heatUnservedMwh = 5
 
+    // Heat has no tolerance and should not: a town without heat in February is burst pipework,
+    // and no later year makes that up.
     const failed = evaluateObjectives([objective], context({ lifetime: cold }))
     expect(failed[0]!.status).toBe('failed')
 
     // A later year in which nothing goes wrong does not restore it.
     const recovered = evaluateObjectives([objective], context({ lifetime: cold }), failed)
     expect(recovered[0]!.status).toBe('failed')
+  })
+
+  it('gives a tolerant objective one bad year and not two', () => {
+    // The difference between a hard brief and a coin toss. The opening scenario's reliability
+    // target is breached in its third year by two forced outages coinciding in a peak hour, with
+    // a healthy fleet — see `breachTolerance` in `ObjectiveDef`.
+    const objective: ObjectiveDef = {
+      id: 'lights',
+      descriptionKey: 'x',
+      condition: { kind: 'unservedShareBelow', threshold: 0.001 },
+      timing: 'continuous',
+      required: true,
+      breachTolerance: 1,
+    }
+    const bad = emptyLedger()
+    bad.energySoldMwh = 1_000_000
+    bad.energyUnservedMwh = 5_000 // 0.5%, well over the limit
+
+    const first = evaluateObjectives([objective], context({ recentYear: bad }))
+    expect(first[0]!.status).toBe('pending')
+    expect(first[0]!.breachYears).toBe(1)
+
+    const second = evaluateObjectives([objective], context({ recentYear: bad }), first)
+    expect(second[0]!.status).toBe('failed')
+
+    // And a good year after the first breach leaves it standing rather than failing it later.
+    const good = emptyLedger()
+    good.energySoldMwh = 1_000_000
+    const recovered = evaluateObjectives([objective], context({ recentYear: good }), first)
+    expect(recovered[0]!.status).toBe('pending')
+    expect(recovered[0]!.breachYears).toBe(1)
   })
 
   it('leaves an end-of-scenario objective pending until the clock runs out', () => {
@@ -178,8 +213,8 @@ describe('the opening scenario brief', () => {
     // What lets the panel show a number that is moving between annual judgements.
     const world = buildWorld(FIRST_REGION)
     const before = measure({ kind: 'unservedShareBelow', threshold: 0.001 }, world.objectiveContext())
-    world.lifetimeLedger.energySoldMwh += 1_000_000
-    world.lifetimeLedger.energyUnservedMwh += 900
+    world.yearLedger.energySoldMwh += 1_000_000
+    world.yearLedger.energyUnservedMwh += 900
     const after = measure({ kind: 'unservedShareBelow', threshold: 0.001 }, world.objectiveContext())
     expect(before.value).toBe(0)
     expect(after.value).toBeCloseTo(900 / 1_000_900, 9)
@@ -196,10 +231,17 @@ describe('the opening scenario brief', () => {
     lifetime.energySoldMwh = 100e6
     lifetime.energyUnservedMwh = 10 // Comfortably inside the 0.1% allowance.
     lifetime.co2Tonnes = 40e6 // 0.4 t/MWh, under the optional 0.6 target.
+    // The ratio conditions are judged on the year rather than the run — see `ObjectiveContext` —
+    // so a winnable ending needs a good *year*, which is also what the brief actually asks for.
+    const recentYear = emptyLedger()
+    recentYear.energySoldMwh = 4e6
+    recentYear.energyUnservedMwh = 1
+    recentYear.co2Tonnes = 1.6e6
     const ctx: ObjectiveContext = {
       plants: world.plants,
       finances: world.finances,
       lifetime,
+      recentYear,
       year: FIRST_REGION.endYear,
       endYear: FIRST_REGION.endYear,
     }
@@ -239,6 +281,7 @@ describe('the opening scenario brief', () => {
       plants: world.plants,
       finances: world.finances,
       lifetime: world.lifetimeLedger,
+      recentYear: world.yearLedger,
       year: FIRST_REGION.endYear,
       endYear: FIRST_REGION.endYear,
     }

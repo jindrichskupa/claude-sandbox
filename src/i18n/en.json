@@ -445,5 +445,9 @@
   "upcoming.scenarioEnds": "The scenario is judged, {year}",
   "news.blackoutAnon": "Demand is going unserved: {mw} MW short",
   "news.heatFailureAnon": "A town is losing its heat supply",
-  "ui.overdue": "{years} years overdue"
+  "ui.overdue": "{years} years overdue",
+  "ui.keepPlaying": "Keep playing",
+  "ui.keepPlayingNote": "The verdict stands. The clock runs on so you can see where the strategy ends up.",
+  "ui.objectiveAtRisk": "One bad year — another fails it",
+  "ui.freePlay": "Free play — the scenario has been judged"
 }

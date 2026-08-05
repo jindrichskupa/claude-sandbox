@@ -251,6 +251,10 @@ export const FIRST_REGION: ScenarioContent = {
       condition: { kind: 'unservedShareBelow', threshold: 0.001 },
       timing: 'continuous',
       required: true,
+      // One bad year is survivable, two is not. Measured, the limit is breached in this
+      // scenario's *third* year by two forced outages coinciding in a peak hour, with a healthy
+      // fleet and a 69% reserve margin. A brief that a coin toss can end is not a hard brief.
+      breachTolerance: 1,
     },
     {
       id: 'keep-the-heat-on',

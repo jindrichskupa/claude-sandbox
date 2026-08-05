@@ -267,6 +267,24 @@ export class World {
    */
   readonly news = new NewsDesk()
 
+  /**
+   * Whether the player has asked to carry on after the verdict.
+   *
+   * A scenario that stops the clock the moment its brief is blown is answering a question nobody
+   * asked. The player is running a forty-year strategy; being told in 2004 that they have missed
+   * an unserved-energy target does not make the other twenty years uninteresting, and for a
+   * strategy played deliberately — all nuclear, all renewables, no carbon price survives contact
+   * with reality — the interesting part is precisely what happens *after* the brief fails.
+   *
+   * The verdict stands: `outcome` is not reset, the objectives keep their statuses, and the end
+   * screen said what it said. This only means the hours keep passing.
+   *
+   * Bankruptcy is deliberately not covered. A utility whose creditors have taken it is not a
+   * utility any more, and there is nothing left to play — the model has no owner to make
+   * decisions and no balance sheet to make them against.
+   */
+  freePlay = false
+
   /** How each objective stands. Re-judged when the year closes; a breach is permanent. */
   objectives: ObjectiveProgress[] = []
   outcome: ScenarioOutcome = 'playing'
@@ -1611,10 +1629,17 @@ export class World {
    * unserved-energy allowance drain would be reading a figure up to a year out of date.
    */
   objectiveContext(): ObjectiveContext {
+    // The year *including* the month that has not closed yet, for the same reason the accounts
+    // panel needed it: a player watching their allowance drain on the fourth of January should
+    // not be shown a blank.
+    const recentYear = emptyLedger()
+    addLedger(recentYear, this.yearLedger)
+    addLedger(recentYear, this.openLedger)
     return {
       plants: this.plants,
       finances: this.finances,
       lifetime: this.lifetimeLedger,
+      recentYear,
       year: this.date.year,
       endYear: this.scenario.endYear,
     }

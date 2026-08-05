@@ -67,6 +67,20 @@ export interface ObjectiveDef {
    * sandbox, which is a legitimate thing to author and should not need a special case.
    */
   required: boolean
+  /**
+   * How many breached years a continuous objective survives before it is failed for good.
+   *
+   * Content rather than a global constant, because the right answer differs by *kind of harm*
+   * and an author is the one who knows which. A reliability target measured to a tenth of a
+   * percent is breached by a coincidence of two forced outages in one peak hour — measured, in
+   * the opening scenario's third year, with a healthy fleet and a 69% reserve margin — and
+   * failing a thirty-year run for that is a coin toss with the run riding on it. A town left
+   * without heat in February is burst pipework, and one is one too many.
+   *
+   * Absent means zero: fail on the first breach, which is the stricter reading and the right
+   * default for anything an author has not thought about.
+   */
+  breachTolerance?: number
 }
 
 export type ObjectiveStatus = 'pending' | 'met' | 'failed'
@@ -79,14 +93,41 @@ export interface ObjectiveProgress {
   /** The measured value and the target, for the panel to show without re-deriving them. */
   value: number
   target: number
+  /**
+   * Years in which a continuous objective was breached.
+   *
+   * The tolerance that makes the difference between a hard game and an unfair one. Measured over
+   * a played run, the opening scenario's 0.1% unserved limit is breached in its *third year* by a
+   * coincidence of two forced outages in a peak hour — with a 69% reserve margin and a full,
+   * healthy fleet. Failing the run for that is not difficulty, it is a coin toss with the run
+   * riding on it.
+   *
+   * So one bad year is a warning and the second is the failure. That is also the honest reading
+   * of what such a brief means: a regulator does not revoke a licence for one bad winter, and it
+   * absolutely does for two.
+   */
+  breachYears: number
 }
+
+
 
 /** Everything an objective may look at. Passed in so evaluation stays a pure function. */
 export interface ObjectiveContext {
   plants: PlantAsset[]
   finances: Finances
-  /** Totals since the scenario began, which is the window most objectives are about. */
+  /** Totals since the scenario began. */
   lifetime: PeriodLedger
+  /**
+   * Totals for the year in progress.
+   *
+   * The window the ratio conditions are measured over, and the change is not cosmetic. Measured
+   * over a lifetime, one bad fortnight in 1997 sits in the denominator for the next twenty-eight
+   * years: the player cannot recover from it by running the system well, only by outlasting it,
+   * and the brief that says "keep unserved energy below 0.1%" turns out to mean "never have a bad
+   * fortnight, ever". A year is what a regulator actually judges and what a player can actually
+   * act on.
+   */
+  recentYear: PeriodLedger
   /** The year now, and the year the scenario is judged. */
   year: number
   endYear: number
@@ -106,11 +147,14 @@ export function measure(
 ): { value: number; target: number; satisfied: boolean } {
   switch (condition.kind) {
     case 'unservedShareBelow': {
-      const total = context.lifetime.energySoldMwh + context.lifetime.energyUnservedMwh
-      const share = total > 0 ? context.lifetime.energyUnservedMwh / total : 0
+      const total = context.recentYear.energySoldMwh + context.recentYear.energyUnservedMwh
+      const share = total > 0 ? context.recentYear.energyUnservedMwh / total : 0
       return { value: share, target: condition.threshold, satisfied: share < condition.threshold }
     }
     case 'noUnservedHeat': {
+      // Heat stays on the lifetime window, and deliberately. A town without electricity for an
+      // evening is an inconvenience the following year can make up for; a town without heat in
+      // February is burst pipework, and there is no such thing as making that up.
       const cold = context.lifetime.heatUnservedMwh
       return { value: cold, target: 0, satisfied: cold <= 1e-6 }
     }
@@ -135,8 +179,8 @@ export function measure(
       return { value: mw, target: condition.mw, satisfied: mw >= condition.mw }
     }
     case 'carbonIntensityBelow': {
-      const sold = context.lifetime.energySoldMwh
-      const intensity = sold > 0 ? context.lifetime.co2Tonnes / sold : 0
+      const sold = context.recentYear.energySoldMwh
+      const intensity = sold > 0 ? context.recentYear.co2Tonnes / sold : 0
       return { value: intensity, target: condition.tPerMwh, satisfied: intensity < condition.tPerMwh }
     }
     case 'cashAtLeast':
@@ -209,8 +253,18 @@ export function evaluateObjectives(
 
     // Nothing rescues an objective that has already been failed for good.
     if (prior?.status === 'failed') {
-      return { id: objective.id, status: 'failed', progress: 0, value: measured.value, target: measured.target }
+      return {
+        id: objective.id,
+        status: 'failed',
+        progress: 0,
+        value: measured.value,
+        target: measured.target,
+        breachYears: prior.breachYears,
+      }
     }
+
+    const breachYears =
+      (prior?.breachYears ?? 0) + (objective.timing === 'continuous' && !measured.satisfied ? 1 : 0)
 
     // Neither kind is *decided* before the scenario ends, and for the same reason: an objective
     // that is currently satisfied is not an objective that has been achieved. Reporting "met" in
@@ -218,15 +272,17 @@ export function evaluateObjectives(
     // something they can still lose — which, for a capacity target they are about to demolish
     // half of, is precisely the wrong thing to say.
     //
-    // The difference between the two is what happens on a breach: a continuous objective fails
-    // for good the moment it is broken, an end-of-scenario one simply is not satisfied yet.
+    // The difference between the two is what happens on a breach: a continuous objective is
+    // failed for good once it has been broken in more years than the tolerance allows, an
+    // end-of-scenario one simply is not satisfied yet.
     let status: ObjectiveStatus
-    if (objective.timing === 'continuous' && !measured.satisfied) {
+    const tolerance = objective.breachTolerance ?? 0
+    if (objective.timing === 'continuous' && breachYears > tolerance) {
       status = 'failed'
     } else if (context.year < context.endYear) {
       status = 'pending'
     } else {
-      status = measured.satisfied ? 'met' : 'failed'
+      status = measured.satisfied && breachYears <= tolerance ? 'met' : 'failed'
     }
 
     return {
@@ -235,6 +291,7 @@ export function evaluateObjectives(
       progress: progressOf(objective.condition, measured),
       value: measured.value,
       target: measured.target,
+      breachYears,
     }
   })
 }

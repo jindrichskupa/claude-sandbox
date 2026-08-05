@@ -51,6 +51,8 @@ export interface PlayOptions {
   untilYear?: number
   /** Called once a year with a one-line summary, for a harness that wants to print progress. */
   onYear?: (line: string) => void
+  /** Called after every hour, for a probe that wants to measure the run rather than summarise it. */
+  onTick?: () => void
 }
 
 export interface PlayResult {
@@ -182,6 +184,7 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
 
   while (world.date.year < untilYear && !world.finances.bankrupt) {
     world.step()
+    options.onTick?.()
     const demand = world.lastDispatch?.totalDemandMw ?? 0
     if (demand > peakDemandMw) peakDemandMw = demand
 

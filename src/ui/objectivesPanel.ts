@@ -75,7 +75,7 @@ function describe(condition: ObjectiveCondition, value: number, target: number):
  */
 function hasReading(condition: ObjectiveCondition, context: ObjectiveContext): boolean {
   if (condition.kind !== 'unservedShareBelow' && condition.kind !== 'carbonIntensityBelow') return true
-  return context.lifetime.energySoldMwh > 0
+  return context.recentYear.energySoldMwh > 0
 }
 
 export interface ObjectivesPanelCallbacks {
@@ -166,6 +166,7 @@ export class ObjectivesPanel {
 
     const head = el('div', 'obj-head')
     head.appendChild(el('div', 'obj-scenario', t(world.scenario.nameKey)))
+    if (world.freePlay) head.appendChild(el('div', 'obj-clock bad', t('ui.freePlay')))
     const yearsLeft = Math.max(0, world.scenario.endYear - context.year)
     head.appendChild(
       el(
@@ -206,6 +207,12 @@ export class ObjectivesPanel {
           t(measured.satisfied ? 'ui.objectiveOnTrack' : 'ui.objectiveNotYet'),
         ),
       )
+    }
+    // The warning that the tolerance year has been spent. A player who has had one bad year and
+    // does not know it is a player about to lose a run they think is going fine.
+    const breaches = this.world.objectives.find((o) => o.id === objective.id)?.breachYears ?? 0
+    if (status === 'pending' && breaches > 0) {
+      meta.appendChild(el('span', 'obj-track bad', t('ui.objectiveAtRisk')))
     }
     if (!objective.required) meta.appendChild(el('span', 'obj-optional', t('ui.objectiveOptional')))
     const numbers = measurable ? describe(objective.condition, measured.value, measured.target) : t('ui.noReadingYet')
@@ -262,6 +269,23 @@ export class ObjectivesPanel {
     }
 
     const actions = el('div', 'obj-saves')
+
+    // Carrying on after the verdict. Offered for every ending except bankruptcy, because a
+    // player running a deliberate strategy — all nuclear, all renewables, no replacement at all —
+    // has most of their answer in the years *after* the brief fails, and stopping the clock
+    // takes it away from them. What it does not do is reopen the verdict.
+    if (!this.world.finances.bankrupt) {
+      const carryOn = el('button', undefined, t('ui.keepPlaying'))
+      carryOn.id = 'keep-playing'
+      carryOn.title = t('ui.keepPlayingNote')
+      carryOn.addEventListener('click', () => {
+        this.world.freePlay = true
+        this.endDismissed = true
+        this.gameOver.classList.remove('visible')
+      })
+      actions.appendChild(carryOn)
+    }
+
     const dismiss = el('button', undefined, t('ui.close'))
     dismiss.addEventListener('click', () => {
       this.endDismissed = true
