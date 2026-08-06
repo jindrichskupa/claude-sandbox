@@ -189,9 +189,11 @@ async function main(): Promise<void> {
     new Hud(overlay, world, {
       onSetSpeed: (s) => {
         // A run that has ended does not advance whatever this says, so rather than accept a
-        // click that visibly does nothing, put the verdict back — the offer to carry on is on
-        // it. Bankruptcy is the one ending with nothing behind the door.
-        if (world.outcome !== 'playing' && !world.freePlay && !world.finances.bankrupt) {
+        // click that visibly does nothing, put the verdict back. Bankruptcy is included: there
+        // is no carrying on from it, but "the utility is bankrupt" is still an answer, and it is
+        // a great deal better than a speed button that does nothing and says nothing.
+        const ended = world.finances.bankrupt || (world.outcome !== 'playing' && !world.freePlay)
+        if (ended) {
           hud.objectivesPanel.showVerdict()
           hud.update()
           return

@@ -240,7 +240,11 @@ export class ObjectivesPanel {
    */
   private renderEndScreen(): void {
     const outcome = this.world.outcome
-    if (outcome === 'playing' || this.endDismissed) {
+    // Bankruptcy counts as an ending here even though the verdict itself is only pronounced when
+    // the year closes. It has to: the clock stops the hour the money runs out, and waiting until
+    // January to say why left a player watching a frozen game through a summer that never came —
+    // which is exactly the silence this panel exists to break.
+    if ((outcome === 'playing' && !this.world.finances.bankrupt) || this.endDismissed) {
       this.gameOver.classList.remove('visible')
       return
     }

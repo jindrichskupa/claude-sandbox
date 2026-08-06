@@ -151,6 +151,13 @@ describe('who earns and who loses', () => {
 
     // The two orderings are not the same ordering. Somewhere in the fleet is an asset the tariff
     // undervalues — which is the whole reason for showing both.
-    expect(byMarket.at(-1)!.id).not.toBe(byTariff.at(-1)!.id)
+    //
+    // Stated over the whole ranking rather than over its top, which is where it used to be
+    // asserted. That was fine while the tariff was set from the clearing price and had no
+    // particular relationship to what anything cost; now that it is set from the cost of
+    // service, the two bases agree about the *best* asset more often than not — which is not a
+    // regression but the point of a cost-reflective tariff. Where they still part company is
+    // further down, over assets whose value is locational rather than operational.
+    expect(byMarket.map((r) => r.id)).not.toEqual(byTariff.map((r) => r.id))
   }, 900_000)
 })

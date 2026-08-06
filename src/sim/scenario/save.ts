@@ -38,7 +38,7 @@ import type { ObjectiveProgress, ScenarioOutcome } from './objectives'
  * filling the gaps with defaults produces a game that looks fine and behaves subtly wrongly,
  * which is worse than a clear refusal — especially in a game where a run is measured in hours.
  */
-export const SAVE_VERSION = 9
+export const SAVE_VERSION = 10
 
 export interface ScheduledSpendData {
   ownerId: string
@@ -71,8 +71,6 @@ export interface SaveData {
   termPriceSum: number
   termPriceTicks: number
   /** The regulator's window: prices in the hours the system actually served. */
-  tariffPriceSum: number
-  tariffVolumeMwh: number
   termGenerationByFuel: Array<[string, number]>
   director: DirectorState
   objectives: ObjectiveProgress[]

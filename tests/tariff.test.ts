@@ -21,6 +21,14 @@
  *      a cold December evening are not equal evidence about what it costs to serve load, and
  *      since load and price are correlated, weighting by the hour biases the tariff low exactly
  *      where the money is.
+ *
+ * Both of those were about the *clearing price*, and the tariff no longer resets against the
+ * clearing price at all — it resets against what providing the service cost, which is what a
+ * regulator actually does and what `economy/tariff.ts` explains at length. The two properties
+ * above still hold and are still tested, because both would still be bugs. What follows them is
+ * the property whose absence made the game unwinnable: a utility running its inherited fleet
+ * competently has to be able to break even. It could not, and every strategy that spent money
+ * therefore died sooner than one that spent none.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -30,6 +38,7 @@ import { TICKS_PER_YEAR } from '@sim/core/time'
 import { LifecyclePhase } from '@sim/assets/types'
 import { mothballPlant } from '@sim/build/commands'
 import { ledgerProfit } from '@sim/economy/economy'
+import { rateBase } from '@sim/economy/tariff'
 
 /** Run a world for a year and report what the regulator did with the tariff. */
 function afterOneYear(cripple: boolean): { tariff: number; unservedMwh: number } {
@@ -78,43 +87,47 @@ describe('the regulated tariff', () => {
     expect(crippled.tariff).toBeLessThan(400)
   })
 
-  it('weights the average by energy delivered rather than by the hour', () => {
-    // The accumulator is private, so this recovers what the regulator must have used by inverting
-    // the reset arithmetic, and checks it against the two candidate averages computed here from
-    // the same hours. Weighted and unweighted differ by a few percent — small enough that only a
-    // reconstruction like this can tell them apart, and large enough to decide solvency over
-    // thirty years.
+  it('lets a utility that runs its inherited fleet competently break even', () => {
+    // The property whose absence made the scenario unwinnable, and the reason the tariff was
+    // rewritten. The old reset paid short-run marginal cost plus a supply margin to a firm that
+    // owns its own generation, so it recovered no fixed cost and no capital: by 1997 the tariff
+    // had fallen to its floor, the utility lost money on every megawatt-hour it sold, and every
+    // strategy that spent money died sooner than one that spent none.
+    //
+    // Measured over the years before the carbon price steps, which is the part of the run where
+    // nothing unusual is happening and a competent operator ought simply to be solvent.
     const world = buildWorld(FIRST_REGION)
-    const before = world.state.regulatedTariffPerMwh
+    for (let i = 0; i < TICKS_PER_YEAR * 4; i++) world.step()
 
-    let weightedSum = 0
-    let volume = 0
-    let flatSum = 0
-    let servedHours = 0
-    for (let i = 0; i < TICKS_PER_YEAR; i++) {
-      world.step()
-      const snap = world.recentHistory(1)[0]!
-      if (snap.unservedMw > 0.01) continue
-      const served = Math.max(0, snap.demandMw - snap.unservedMw)
-      weightedSum += snap.pricePerMwh * served
-      volume += served
-      flatSum += snap.pricePerMwh
-      servedHours++
+    const settled = world.yearbook.slice(1)
+    expect(settled.length).toBeGreaterThan(1)
+    for (const year of settled) {
+      expect(`${year.year} profit ${Math.round(year.profit / 1e6)}m`).toBe(
+        `${year.year} profit ${Math.round(Math.max(0, year.profit) / 1e6)}m`,
+      )
     }
-    const weighted = weightedSum / volume
-    const unweighted = flatSum / servedHours
 
-    // Load and price are positively correlated in any system with a peak, so the weighted mean
-    // must be the higher of the two. If this ever fails the scenario has no peak worth the name
-    // and the rest of the assertion means nothing.
-    expect(weighted).toBeGreaterThan(unweighted)
+    // And it is a *tariff*, not a rescue: still in the region of what the energy costs to make,
+    // rather than whatever number makes the accounts work.
+    expect(world.state.regulatedTariffPerMwh).toBeGreaterThan(40)
+    expect(world.state.regulatedTariffPerMwh).toBeLessThan(150)
+  })
 
-    // Invert `tariff = before + (reset - before) * 0.6` to recover the reset the regulator used,
-    // then invert the retail margin to get back to the wholesale average behind it.
-    const after = world.state.regulatedTariffPerMwh
-    const impliedWholesale = (before + (after - before) / 0.6) / 1.35
+  it('does not let the player raise it by starting projects', () => {
+    // Work in progress is outside the rate base, exactly as a regulator would have it. Without
+    // that, announcing a station would raise everybody's bill before it generated anything —
+    // and building things you never finish would be a strategy.
+    const world = buildWorld(FIRST_REGION)
+    const edges = [...world.network.allEdges()]
+    const inService = rateBase(world.plants, edges, () => 1000)
+    expect(inService.replacementCost).toBeGreaterThan(0)
+    expect(inService.depreciationPerYear).toBeGreaterThan(0)
 
-    expect(Math.abs(impliedWholesale - weighted)).toBeLessThan(Math.abs(impliedWholesale - unweighted))
+    // Put one operating station back into construction and the base must shrink by exactly it.
+    const moved = world.plants.find((p) => p.phase === LifecyclePhase.Operating)!
+    moved.phase = LifecyclePhase.Building
+    const underway = rateBase(world.plants, edges, () => 1000)
+    expect(underway.replacementCost).toBeLessThan(inService.replacementCost)
   })
 })
 

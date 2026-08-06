@@ -65,15 +65,6 @@ export interface EconomicsDef {
    * utility spreads actually move by after a repudiation.
    */
   confidenceRatePenalty: Sourced<number>
-  /**
-   * Margin the regulated retail tariff carries over the wholesale price it is reset against.
-   *
-   * Covers networks, supply and the allowed return. Without a tariff that tracks costs at all,
-   * a carbon price would be a pure loss to the utility rather than something the market passes
-   * through — which would make every decarbonisation policy a death sentence instead of a policy,
-   * and would be the largest thumb on the scale in the game.
-   */
-  retailMarginOverWholesale: Sourced<number>
   /** The tariff reset never falls below this, so a collapse in wholesale does not bankrupt anyone. */
   tariffFloorPerMwh: Sourced<number>
 }
@@ -92,6 +83,5 @@ export const ECONOMICS: EconomicsDef = {
   unservedHeatPenaltyPerMwh: sourced(550, 'EUR/MWh_th', 'game-design', 2024, 'Same share of lost value as the electrical penalty'),
   insurancePremiumRate: sourced(0.006, 'fraction', 'game-design', 2024, 'Of insured capital value, per year'),
   confidenceRatePenalty: sourced(1.0, 'fraction', 'eu-energy-policy', 2022, 'A full loss of confidence roughly doubles the cost of debt'),
-  retailMarginOverWholesale: sourced(0.35, 'fraction', 'iea-weo', 2023, 'Networks, supply costs and allowed return over the wholesale price'),
   tariffFloorPerMwh: sourced(55, 'EUR/MWh', 'iea-weo', 2023, 'Regulated tariffs are sticky downwards'),
 }
