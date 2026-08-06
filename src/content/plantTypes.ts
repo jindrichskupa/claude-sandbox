@@ -20,6 +20,7 @@ export type PlantTypeId =
   | 'hydro'
   | 'pumped'
   | 'wind'
+  | 'offshore_wind'
   | 'solar'
   | 'battery'
   | 'gas_chp'
@@ -493,6 +494,54 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     refurbishMonths: sourced(8, 'months', 'engineering-standard', 2023),
     refurbishEfficiencyGain: sourced(0.05, 'fraction', 'engineering-standard', 2023),
     refurbishCapacityGain: sourced(0.25, 'fraction', 'engineering-standard', 2023),
+    chp: null,
+    storage: null,
+    heatOnly: null,
+  },
+
+  /**
+   * Offshore wind.
+   *
+   * Not a bigger onshore farm: a different investment with a different shape. Roughly twice the
+   * capital per kilowatt and twice the fixed cost, because everything has to be put there by
+   * ship and everything that goes wrong has to be reached by ship — which is also why it is the
+   * least reliable machine on the list, since a fault in February waits for a weather window.
+   * Decommissioning costs several times what a turbine on land does, for the same reason.
+   *
+   * What it buys is the resource. Over open water there is nothing to slow the wind down, and
+   * because power goes with the cube of speed, a site with no roughness upwind of it is worth
+   * far more than the difference in wind speed suggests. That advantage is entirely locational —
+   * it comes from `windSiteFactor` at the site, not from anything in this table — which is
+   * exactly why the siting rule below it is what makes this technology interesting.
+   */
+  offshore_wind: {
+    id: 'offshore_wind',
+    nameKey: 'plant.offshore_wind',
+    category: 'wind',
+    fuel: 'none',
+    capacityMw: sourced(120, 'MW', 'irena-costs', 2022, 'Offshore farms are built large; the vessels and cables do not scale down'),
+    capexPerKw: sourced(2900, 'EUR/kW', 'irena-costs', 2022, 'Global weighted average; foundations, array cable and export cable included'),
+    fixedOpexPerKwYear: sourced(85, 'EUR/kW/yr', 'irena-costs', 2022, 'Crew transfer vessels and marine access'),
+    varOpexPerMwh: sourced(1, 'EUR/MWh', 'irena-costs', 2022),
+    efficiency: sourced(1, 'fraction', 'game-design', Y, 'No fuel; the wind curve does the work'),
+    rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y),
+    minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    buildTimeMonths: sourced(36, 'months', 'irena-costs', 2022, 'Consent, cable route and a build season that closes in winter'),
+    designLifeYears: sourced(27, 'years', 'irena-costs', 2022),
+    decommissionCostPerKw: sourced(220, 'EUR/kW', 'engineering-standard', 2023, 'Jack-up vessels again, and the foundations have to come out'),
+    decommissionYears: sourced(2, 'years', 'engineering-standard', 2023),
+    remediationYears: sourced(1, 'years', 'engineering-standard', 2023),
+    recyclingRecoveryPerKw: sourced(25, 'EUR/kW', 'engineering-standard', 2023, 'More steel to recover than onshore, and the same unrecyclable blades'),
+    annualEfficiencyDecay: sourced(0.004, 'fraction', 'irena-costs', 2022, 'Salt and cavitation are harder on a blade than dust'),
+    forcedOutageRate: sourced(0.06, 'fraction', 'engineering-standard', 2023, 'Not that it breaks more often, but that repairs wait for the sea'),
+    weatherDependence: 'wind',
+    cooling: 'none',
+    availableFromYear: sourced(2002, 'count', 'engineering-standard', 2023, 'Horns Rev I, the first farm at utility scale'),
+    refurbishCostFraction: sourced(0.6, 'fraction', 'engineering-standard', 2023, 'Repowering; the foundations and the export cable are the parts worth keeping'),
+    refurbishLifeExtension: sourced(0.65, 'fraction', 'engineering-standard', 2023),
+    refurbishMonths: sourced(14, 'months', 'engineering-standard', 2023),
+    refurbishEfficiencyGain: sourced(0.05, 'fraction', 'engineering-standard', 2023),
+    refurbishCapacityGain: sourced(0.3, 'fraction', 'engineering-standard', 2023),
     chp: null,
     storage: null,
     heatOnly: null,

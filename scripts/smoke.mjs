@@ -778,6 +778,53 @@ try {
   await page.screenshot({ path: join(OUT, '24-history.png') })
   await page.evaluate(() => window.game.hud.historyPanel.setOpen(false))
 
+  // --- The tab row ------------------------------------------------------
+  // Six toggles and the save controls in one flex row. Worth a browser check because the thing
+  // that broke it was a *measured* property: the toggles were positioned individually at
+  // hand-written offsets, and an unread badge on one of them pushed it over its neighbour. The
+  // test is therefore geometric — no two toggles may overlap, and the gaps must be equal.
+  const tabs = await page.evaluate(() => {
+    const row = document.getElementById('panel-tabs')
+    const buttons = [...row.querySelectorAll(':scope > button')]
+    const boxes = buttons.map((b) => b.getBoundingClientRect())
+    const gaps = []
+    for (let i = 1; i < boxes.length; i++) gaps.push(Math.round(boxes[i].left - boxes[i - 1].right))
+    return {
+      count: buttons.length,
+      labels: buttons.map((b) => b.textContent.trim()),
+      gaps,
+      tops: [...new Set(boxes.map((b) => Math.round(b.top)))],
+      saveVisible: !!document.getElementById('save-button')?.getBoundingClientRect().width,
+      loadVisible: !!document.getElementById('load-button')?.getBoundingClientRect().width,
+    }
+  })
+  console.log('tabs:', tabs)
+  if (tabs.count !== 6) throw new Error(`Expected six panel toggles, found ${tabs.count}`)
+  if (tabs.tops.length !== 1) throw new Error(`The toggles are not on one line: tops ${tabs.tops}`)
+  if (new Set(tabs.gaps).size !== 1) throw new Error(`Uneven gaps between toggles: ${tabs.gaps}`)
+  if (tabs.gaps.some((g) => g < 1)) throw new Error(`Toggles are touching or overlapping: ${tabs.gaps}`)
+  if (!tabs.saveVisible || !tabs.loadVisible) throw new Error('Save and load are not on the tab row')
+
+  // And the same must hold once News is carrying an unread badge, which is what broke it.
+  const tabsWithBadge = await page.evaluate(() => {
+    const g = window.game
+    for (let i = 0; i < 3; i++) {
+      g.world.reportNews({ category: 'grid', importance: 2, titleKey: 'news.lineEnergised', params: { from: 'A', to: 'B', kv: 220 } })
+    }
+    g.hud.newsPanel.collect(g.world.news.drain())
+    const row = document.getElementById('panel-tabs')
+    const boxes = [...row.querySelectorAll(':scope > button')].map((b) => b.getBoundingClientRect())
+    const gaps = []
+    for (let i = 1; i < boxes.length; i++) gaps.push(Math.round(boxes[i].left - boxes[i - 1].right))
+    return { gaps, badge: document.querySelector('.news-badge')?.textContent }
+  })
+  console.log('tabs with badge:', tabsWithBadge)
+  if (new Set(tabsWithBadge.gaps).size !== 1) {
+    throw new Error(`The unread badge broke the row: ${tabsWithBadge.gaps}`)
+  }
+
+  await page.screenshot({ path: join(OUT, '25-tabs.png') })
+
   // --- Save and load ----------------------------------------------------
   // The property that matters is the one the unit tests prove: a loaded game continues
   // identically. What only a browser can show is that the load survives the *renderer* — that
@@ -826,6 +873,56 @@ try {
   if (resumed <= loaded.tick) throw new Error('The loaded game did not resume')
 
   await page.screenshot({ path: join(OUT, '14-after-load.png') })
+
+  // --- A run that ended, and did not say so ------------------------------
+  // The worst bug this game has had. When a run ends the clock stops, and dismissing the
+  // verdict panel used to be a one-way door: no panel, no hours passing, speed buttons that
+  // did nothing, and nothing anywhere saying why. Saving and reloading produced the same state
+  // from a clean start, because the decision to carry on was not in the save file.
+  const frozen = await page.evaluate(async () => {
+    const g = window.game
+    g.world.outcome = 'lost'
+    g.world.freePlay = false
+    g.hud.update()
+    // Dismiss the verdict the way a player would — the Close button specifically, not every
+    // button that is not "keep playing": the panel also offers Load, and clicking that restored
+    // a save whose run had not ended, which made this check pass for the wrong reason.
+    document.getElementById('dismiss-verdict').click()
+    const before = g.world.tick
+    g.hud.setSpeed(3)
+    document.querySelectorAll('.speed-controls button')[2].click()
+    await new Promise((r) => setTimeout(r, 600))
+    return {
+      stalled: g.world.tick === before,
+      verdictBack: document.getElementById('game-over').classList.contains('visible'),
+      inert: document.querySelectorAll('.speed-controls button.inert').length,
+      canCarryOn: !!document.getElementById('keep-playing'),
+    }
+  })
+  console.log('ended run:', frozen)
+  if (!frozen.stalled) throw new Error('A finished run kept running')
+  if (!frozen.verdictBack) throw new Error('A dead speed click left the player with no explanation')
+  if (frozen.inert === 0) throw new Error('The speed controls do not show that the clock has stopped')
+  if (!frozen.canCarryOn) throw new Error('There is no way back into the run')
+
+  await page.screenshot({ path: join(OUT, '26-ended.png') })
+
+  // Carrying on must survive a save and a reload, which is what it did not do.
+  const carried = await page.evaluate(() => {
+    const g = window.game
+    document.getElementById('keep-playing').click()
+    g.save()
+    g.load()
+    return { freePlay: g.world.freePlay, outcome: g.world.outcome }
+  })
+  console.log('carried on:', carried)
+  if (!carried.freePlay) throw new Error('Carrying on did not survive the save')
+
+  await page.evaluate(() => {
+    const g = window.game
+    g.world.outcome = 'playing'
+    g.world.freePlay = false
+  })
 
   // --- The end of a run -------------------------------------------------
   // Forced rather than played out: reaching 2025 honestly is thirty simulated years, and the

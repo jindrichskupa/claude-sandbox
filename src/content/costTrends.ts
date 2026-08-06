@@ -340,6 +340,25 @@ export const COST_TRENDS: Record<PlantTypeId, CostTrendDef> = {
       qualityCostPerDecade: sourced(0.07, 'fraction', IRENA, 2022, 'A bigger machine costs more per kilowatt to build and install'),
     },
   },
+  offshore_wind: {
+    structure: structure(0.44, 0.44, 0.12, 'The turbine is under half of it; foundations, cables and vessels are the rest'),
+    learning: {
+      // Faster than onshore on both counts, and for a reason that is about age rather than
+      // cleverness: onshore wind had already had its steep decades by the time this started, so
+      // offshore spent the 2010s doing what onshore did in the 1990s. The equipment share is not
+      // only the turbine — it carries the monopile and the export cable, and those fell hard as
+      // the industry stopped adapting oil-and-gas kit and started building for the job.
+      ratePerDoubling: sourced(0.15, 'fraction', IRENA, 2022, 'Turbine, foundation and cable together; the whole package was new'),
+      installRatePerDoubling: sourced(0.11, 'fraction', IRENA, 2022, 'Purpose-built jack-up vessels and a serial supply chain — fast for installation, still behind the equipment'),
+      worldInstalled1995Mw: sourced(5, 'MW', IRENA, 2022, 'Vindeby and little else; effectively a standing start'),
+      worldGrowthPerYear: sourced(0.28, 'fraction', IRENA, 2022, 'From nothing to tens of gigawatts inside twenty-five years'),
+    },
+    progress: {
+      efficiencyGainPerDecade: sourced(0.11, 'fraction', IRENA, 2022, 'Rotor growth offshore ran ahead of onshore; there is no road to move the blade along'),
+      lifeGainPerDecade: sourced(0.09, 'fraction', IRENA, 2022),
+      qualityCostPerDecade: sourced(0.09, 'fraction', IRENA, 2022, 'Deeper water and longer export cables as the near sites fill up'),
+    },
+  },
   solar: {
     structure: structure(0.62, 0.20, 0.18, 'Modules and inverters, plus mounting, wiring and land'),
     learning: {

@@ -153,7 +153,9 @@ async function main(): Promise<void> {
       hud.setHint(t('ui.loadFailed'))
       return
     }
-    speed = 0
+    // The speed carries across. Forcing a pause here was meant to be considerate and read as a
+    // freeze instead: the clock stopped for no stated reason immediately after an action the
+    // player took, which is exactly how a bug looks.
     attach()
     hud.setHint(t('ui.loaded'))
   }
@@ -186,6 +188,14 @@ async function main(): Promise<void> {
   const makeHud = (): Hud =>
     new Hud(overlay, world, {
       onSetSpeed: (s) => {
+        // A run that has ended does not advance whatever this says, so rather than accept a
+        // click that visibly does nothing, put the verdict back — the offer to carry on is on
+        // it. Bankruptcy is the one ending with nothing behind the door.
+        if (world.outcome !== 'playing' && !world.freePlay && !world.finances.bankrupt) {
+          hud.objectivesPanel.showVerdict()
+          hud.update()
+          return
+        }
         speed = s
         hud.setSpeed(s)
       },
@@ -515,6 +525,7 @@ async function main(): Promise<void> {
     // brief was met. Bankruptcy is the one ending with no "carry on": there is no utility left.
     const playable = !world.finances.bankrupt && (world.outcome === 'playing' || world.freePlay)
     if (!playable) skip = null
+    hud.setRunning(playable)
 
     if (skip) {
       // Run as hard as this frame's budget allows, checking after every hour whether the world

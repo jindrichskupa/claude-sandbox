@@ -38,7 +38,7 @@ import type { ObjectiveProgress, ScenarioOutcome } from './objectives'
  * filling the gaps with defaults produces a game that looks fine and behaves subtly wrongly,
  * which is worse than a clear refusal — especially in a game where a run is measured in hours.
  */
-export const SAVE_VERSION = 8
+export const SAVE_VERSION = 9
 
 export interface ScheduledSpendData {
   ownerId: string
@@ -77,6 +77,16 @@ export interface SaveData {
   director: DirectorState
   objectives: ObjectiveProgress[]
   outcome: ScenarioOutcome
+  /**
+   * Whether the player asked to carry on past the verdict.
+   *
+   * Part of the saved game because it decides whether the clock runs. It was left out, and the
+   * consequence was the worst kind of bug: a run that had been carried on past a failed brief
+   * came back from its own save frozen — the hours stopped, the speed buttons did nothing, and
+   * nothing on screen said why. A verdict is a fact about the run and so is the decision to keep
+   * playing after it.
+   */
+  freePlay: boolean
   /**
    * Per-asset accounts. Genuinely irrecoverable: they are the accumulated history of every hour
    * the run has played, and nothing short of replaying the run would rebuild them. Dropping them

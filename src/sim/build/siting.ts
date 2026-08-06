@@ -12,7 +12,7 @@
 
 import { PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
 import { sourced, type Sourced } from '@content/schema'
-import { flatness, isBuildable, riverIndexAt, waterAvailability, windIndexAt, type TerrainMap } from '../map/terrain'
+import { flatness, isBuildable, riverIndexAt, tileAt, Tile, waterAvailability, windIndexAt, type TerrainMap } from '../map/terrain'
 import type { CityAsset } from '../assets/types'
 import type { Network } from '../grid/network'
 
@@ -63,7 +63,36 @@ export const SITING = {
    * the whole map, a heat plant from the edge of one town.
    */
   heatSourceCityDistance: sourced(3, 'count', 'euro-chp-practice', 2021, 'Around 30 km; the longest real transmission mains reach about this'),
+  /**
+   * How far offshore a wind farm may stand, in tiles.
+   *
+   * A fixed foundation is a monopile driven into the seabed, and how deep the water is decides
+   * whether that is buildable at all. There is no bathymetry in this map, so distance from shore
+   * stands in for depth — which is the right proxy on a real coastal shelf and the reason nearly
+   * every farm built before floating foundations sits within a few tens of kilometres of land.
+   * It also stands in honestly for the export cable, which is the other thing that makes a far
+   * site dearer than a near one.
+   */
+  offshoreShoreDistance: sourced(4, 'count', 'engineering-standard', 2023, 'About 40 km; beyond that fixed foundations give way to floating ones'),
+  /** Exposure below which even an offshore site is not worth the vessels. */
+  offshoreMinimumExposure: sourced(0.6, 'fraction', 'irena-costs', 2022),
 } as const satisfies Record<string, Sourced<number>>
+
+/** Distance in tiles to the nearest land, for something that has to stand in the sea. */
+function distanceToShore(terrain: TerrainMap, x: number, y: number, limit: number): number {
+  const radius = Math.ceil(limit)
+  let best = Infinity
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const nx = x + dx
+      const ny = y + dy
+      if (nx < 0 || ny < 0 || nx >= terrain.width || ny >= terrain.height) continue
+      if (tileAt(terrain, nx, ny) === Tile.Water) continue
+      best = Math.min(best, Math.hypot(dx, dy))
+    }
+  }
+  return best
+}
 
 function distanceToNearestCity(context: SiteContext): number {
   let best = Infinity
@@ -108,6 +137,25 @@ function reject(reasonKey: string, reasonParams?: Record<string, string | number
  */
 export function judgeSite(typeId: PlantTypeId, context: SiteContext): SiteVerdict {
   const { terrain, x, y } = context
+
+  // The one technology the general ground rule is wrong about, and it is wrong about it in both
+  // directions: an offshore farm cannot be built on land, and water is the only place it can go.
+  // Handled before the gate rather than inside the switch below, because the gate is what would
+  // have rejected it.
+  if (typeId === 'offshore_wind') {
+    if (tileAt(terrain, x, y) !== Tile.Water) return reject('build.mustBeAtSea')
+    const shore = distanceToShore(terrain, x, y, SITING.offshoreShoreDistance.value)
+    if (shore > SITING.offshoreShoreDistance.value) {
+      return reject('build.tooFarOffshore', { tiles: SITING.offshoreShoreDistance.value })
+    }
+    const exposure = windIndexAt(terrain, x, y)
+    if (exposure < SITING.offshoreMinimumExposure.value) return reject('build.tooSheltered')
+    // Further out is windier and further from anything that objects to it, right up to the
+    // point where the foundation stops being possible — so the good sites and the buildable
+    // ones pull against each other, which is the decision worth having.
+    return accept(exposure * (0.6 + 0.4 * Math.min(1, shore / SITING.offshoreShoreDistance.value)))
+  }
+
   if (!isBuildable(terrain, x, y)) return reject('build.unsuitableGround')
 
   const type = PLANT_TYPES[typeId]

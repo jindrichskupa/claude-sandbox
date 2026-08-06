@@ -504,6 +504,22 @@ describe('the save file envelope', () => {
     }
   })
 
+  it('remembers that the player chose to carry on past the verdict', () => {
+    // This was the bug behind the worst symptom this game has produced: a run carried on past a
+    // failed brief came back from its own save with the clock stopped, the speed controls inert
+    // and nothing on screen saying why — indistinguishable from a crash. The decision to keep
+    // playing is a fact about the run, so it belongs in the file with the rest of them.
+    const world = buildWorld(FIRST_REGION)
+    for (let i = 0; i < 200; i++) world.step()
+    world.outcome = 'lost'
+    world.freePlay = true
+
+    const parsed = parseSaveFile(JSON.stringify(makeSaveFile(FIRST_REGION.id, world.toSaveData(), '2026-01-01')))
+    const loaded = loadWorld(FIRST_REGION, parsed.data)
+    expect(loaded.outcome).toBe('lost')
+    expect(loaded.freePlay).toBe(true)
+  })
+
   it('knows every scenario by the id its saves record', () => {
     for (const scenario of SCENARIO_LIST) {
       expect(scenarioById(scenario.id)).toBe(scenario)

@@ -115,20 +115,6 @@ export class ObjectivesPanel {
     this.body = el('div')
     this.root.appendChild(this.body)
 
-    // Save and load live at the foot of this panel rather than in the top bar. They belong to
-    // the run as a whole, which is what this panel is about, and a top bar that grew two more
-    // buttons would push the numbers the player actually watches off to one side.
-    const saves = el('div', 'obj-saves')
-    const save = el('button', undefined, t('ui.save'))
-    save.id = 'save-button'
-    save.addEventListener('click', () => this.callbacks.onSave())
-    saves.appendChild(save)
-    const load = el('button', undefined, t('ui.load'))
-    load.id = 'load-button'
-    load.addEventListener('click', () => this.callbacks.onLoad())
-    saves.appendChild(load)
-    this.root.appendChild(saves)
-
     parent.appendChild(this.root)
 
     this.gameOver = el('div', 'panel')
@@ -152,6 +138,19 @@ export class ObjectivesPanel {
 
   /** Called after a load, since the new world may be back in play. */
   reset(): void {
+    this.endDismissed = false
+  }
+
+  /**
+   * Put the verdict back on screen.
+   *
+   * Dismissing it used to be a one-way door. The clock stops when a run ends, so a player who
+   * closed the panel without choosing to carry on was left with a frozen game, dead speed
+   * buttons and nothing anywhere saying why — the single worst thing an interface can do, since
+   * it is indistinguishable from a crash. Now anything that would have been a dead click brings
+   * the verdict back, and the way to keep playing is on it.
+   */
+  showVerdict(): void {
     this.endDismissed = false
   }
 
@@ -287,6 +286,7 @@ export class ObjectivesPanel {
     }
 
     const dismiss = el('button', undefined, t('ui.close'))
+    dismiss.id = 'dismiss-verdict'
     dismiss.addEventListener('click', () => {
       this.endDismissed = true
       this.gameOver.classList.remove('visible')

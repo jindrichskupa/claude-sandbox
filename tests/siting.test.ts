@@ -12,7 +12,7 @@ import { buildWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { PLANT_TYPE_IDS, PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
 import { judgeSite, SITING } from '@sim/build/siting'
-import { isBuildable, riverIndexAt, waterAvailability, windIndexAt } from '@sim/map/terrain'
+import { isBuildable, riverIndexAt, tileAt, Tile, waterAvailability, windIndexAt } from '@sim/map/terrain'
 
 function world(seed = FIRST_REGION.seed) {
   return buildWorld({ ...FIRST_REGION, seed, startYear: 2020 })
@@ -156,6 +156,50 @@ describe('the rules mean what they say', () => {
     }
     // The best-rated site must also be the most exposed one, or the rating means nothing.
     expect(bestExposure).toBeGreaterThan(SITING.windMinimumExposure.value)
+  })
+
+  it('puts offshore wind at sea, near enough to shore to stand up', () => {
+    // The one technology whose rule is the inverse of every other. It is worth testing for the
+    // same reason it was worth adding: it is the only thing that makes the water on the map
+    // something other than a hole in it.
+    const w = world()
+    const sites = acceptableTiles(w, 'offshore_wind')
+    expect(sites.length).toBeGreaterThan(0)
+
+    for (const site of sites) {
+      expect(tileAt(w.terrain, site.x, site.y), `${site.x},${site.y}`).toBe(Tile.Water)
+      expect(windIndexAt(w.terrain, site.x, site.y)).toBeGreaterThanOrEqual(
+        SITING.offshoreMinimumExposure.value,
+      )
+    }
+
+    // And nowhere on land, however windy the ridge.
+    for (let y = 0; y < w.scenario.mapHeight; y++) {
+      for (let x = 0; x < w.scenario.mapWidth; x++) {
+        if (tileAt(w.terrain, x, y) === Tile.Water) continue
+        expect(judgeSite('offshore_wind', context(w, x, y)).ok, `${x},${y}`).toBe(false)
+      }
+    }
+  })
+
+  it('makes the sea windier than the average hillside, which is the whole point of going there', () => {
+    // Offshore wind costs twice what onshore does per kilowatt and more than twice to maintain.
+    // The only thing that can pay for that is the resource, so if the model rated open water as
+    // sheltered — which a purely topographic exposure measure does, since the sea is the lowest
+    // ground on the map — the technology would be strictly worse than a ridge and no player
+    // would ever have a reason to build it.
+    const w = world()
+    const land: number[] = []
+    const sea: number[] = []
+    for (let y = 0; y < w.scenario.mapHeight; y++) {
+      for (let x = 0; x < w.scenario.mapWidth; x++) {
+        const wind = windIndexAt(w.terrain, x, y)
+        if (tileAt(w.terrain, x, y) === Tile.Water) sea.push(wind)
+        else land.push(wind)
+      }
+    }
+    const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!
+    expect(median(sea)).toBeGreaterThan(median(land))
   })
 
   it('gives a reason for every refusal', () => {

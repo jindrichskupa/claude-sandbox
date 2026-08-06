@@ -286,6 +286,43 @@ export class Hud {
       onOpen: () => this.soloPanel('history'),
     })
 
+    // --- The tab row ---
+    //
+    // Each panel makes its own toggle button and knows nothing about where it sits; the row is
+    // assembled here, because where six buttons go relative to one another is a layout question
+    // and no single panel can answer it. They used to be positioned individually at hard-coded
+    // offsets, which held together only as long as every label was the width it was on the day
+    // it was written — and stopped the moment News grew an unread badge, since a button that
+    // changes width cannot be pinned by its left edge without the row coming apart.
+    //
+    // Order is the order the player meets them: what you build, who is in office, what you were
+    // asked for, what it earned, what happened, and how the whole run looks. Saving is at the
+    // far end, separated: it acts on the run rather than showing part of it, and it was
+    // previously buried at the foot of the objectives panel where nobody found it.
+    const tabs = el('div')
+    tabs.id = 'panel-tabs'
+    for (const id of [
+      'build-toggle',
+      'politics-toggle',
+      'objectives-toggle',
+      'accounts-toggle',
+      'news-toggle',
+      'history-toggle',
+    ]) {
+      const toggle = root.querySelector(`#${id}`)
+      if (toggle) tabs.appendChild(toggle)
+    }
+    const saves = el('div', 'tab-saves')
+    const saveButton = el('button', undefined, t('ui.save'))
+    saveButton.id = 'save-button'
+    saveButton.addEventListener('click', () => this.callbacks.onSave())
+    const loadButton = el('button', undefined, t('ui.load'))
+    loadButton.id = 'load-button'
+    loadButton.addEventListener('click', () => this.callbacks.onLoad())
+    saves.append(saveButton, loadButton)
+    tabs.appendChild(saves)
+    root.appendChild(tabs)
+
     this.hint = el('div', 'panel')
     this.hint.id = 'hint'
     root.appendChild(this.hint)
@@ -354,6 +391,20 @@ export class Hud {
     for (const [value, button] of this.speedButtons) {
       button.classList.toggle('active', value === speed)
     }
+  }
+
+  /**
+   * Whether the hours are passing, so the speed controls can say so.
+   *
+   * A stopped clock the player did not ask for is the one state an interface must never leave
+   * unexplained. When a run has ended and the player has not chosen to carry on, the speeds are
+   * greyed rather than merely inert, and clicking one brings the verdict back — see `main.ts`.
+   */
+  setRunning(running: boolean): void {
+    for (const button of this.speedButtons.values()) {
+      button.classList.toggle('inert', !running)
+    }
+    this.clock.classList.toggle('stopped', !running)
   }
 
   selectNode(nodeId: string | null, focus = false): void {

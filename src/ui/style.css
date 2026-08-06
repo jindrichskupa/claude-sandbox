@@ -399,14 +399,6 @@ button.active {
 
 /* ---- Build panel ------------------------------------------------------ */
 
-#build-toggle {
-  position: absolute;
-  left: 12px;
-  top: 74px;
-  z-index: 2;
-  font-weight: 600;
-  padding: 7px 16px;
-}
 
 #build-panel {
   left: 12px;
@@ -693,14 +685,6 @@ button.danger:hover {
  * Shares the left corner with the build panel and the inspector: all three
  * are things you open, read and close, and only one of them at a time.
  */
-#politics-toggle {
-  position: absolute;
-  left: 92px;
-  top: 74px;
-  z-index: 2;
-  font-weight: 600;
-  padding: 7px 16px;
-}
 
 #politics-panel {
   left: 12px;
@@ -834,14 +818,6 @@ button.danger:hover {
  * the last annual verdict, the line is what the meter reads right now, and
  * they can disagree — which is the moment the player most needs to look.
  */
-#objectives-toggle {
-  position: absolute;
-  left: 174px;
-  top: 74px;
-  z-index: 2;
-  font-weight: 600;
-  padding: 7px 16px;
-}
 
 #objectives-panel {
   left: 12px;
@@ -1048,14 +1024,6 @@ button.danger:hover {
  * describes. Losses sort to the top and their bars run left, so the answer
  * to "what is bleeding?" is a shape before it is a number.
  */
-#accounts-toggle {
-  position: absolute;
-  left: 268px;
-  top: 74px;
-  z-index: 2;
-  font-weight: 600;
-  padding: 7px 16px;
-}
 
 #accounts-panel {
   left: 12px;
@@ -1210,14 +1178,6 @@ button.danger:hover {
  * whether it is open or not. The cards are the point: a notification that
  * only exists inside a panel you have to open is a log, not news.
  */
-#news-toggle {
-  position: absolute;
-  left: 352px;
-  top: 74px;
-  z-index: 2;
-  font-weight: 600;
-  padding: 7px 16px;
-}
 
 .news-badge {
   display: none;
@@ -1418,14 +1378,6 @@ button.danger:hover {
  * the last ten days; these four show every closed year, which is the window
  * the player's decisions actually live in.
  */
-#history-toggle {
-  position: absolute;
-  left: 424px;
-  top: 74px;
-  z-index: 2;
-  font-weight: 600;
-  padding: 7px 16px;
-}
 
 #history-panel {
   left: 12px;
@@ -1451,4 +1403,54 @@ button.danger:hover {
   line-height: 1.45;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* --- The tab row --------------------------------------------------------
+ *
+ * One flex row rather than six absolutely-positioned buttons. The old
+ * arrangement pinned each toggle by its left edge at a hand-measured offset,
+ * which survived exactly as long as every label stayed the width it was when
+ * the offset was written — and came apart the moment News grew an unread
+ * badge, because a button that changes width cannot be pinned that way.
+ */
+#panel-tabs {
+  position: absolute;
+  left: 12px;
+  top: 70px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#panel-tabs > button {
+  font-weight: 600;
+  padding: 7px 14px;
+  white-space: nowrap;
+}
+
+/* Saving acts on the run rather than showing part of it, so it sits apart from
+ * the panels and hard against the other end of the row. */
+#panel-tabs .tab-saves {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.news-badge {
+  /* Reserves its own space inside the button, so the row does not shift when an
+   * unread count appears or clears. */
+  min-width: 14px;
+  text-align: center;
+}
+
+/* A speed control on a run whose clock has stopped. Greyed rather than removed:
+ * clicking one brings the verdict back, which is where the way to carry on is. */
+.speed-controls button.inert {
+  opacity: 0.4;
+}
+
+#clock.stopped {
+  opacity: 0.55;
 }

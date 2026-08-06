@@ -2083,6 +2083,7 @@ export class World {
       director: this.director.state,
       objectives: this.objectives,
       outcome: this.outcome,
+      freePlay: this.freePlay,
       books: this.books.toJSON(),
       news: this.news.toJSON(),
       yearbook: this.yearbook,
@@ -2152,6 +2153,9 @@ export class World {
     Object.assign(this.director.state, clone(data.director))
     this.objectives = clone(data.objectives)
     this.outcome = data.outcome
+    // Older saves predate the field. Absent means "never carried on", which is the safe
+    // reading: it re-offers the verdict rather than silently resuming a run the player ended.
+    this.freePlay = data.freePlay ?? false
     this.books.loadJSON(clone(data.books))
     this.news.loadJSON(clone(data.news))
     this.yearbook.length = 0

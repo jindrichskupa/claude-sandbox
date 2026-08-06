@@ -151,23 +151,40 @@ function computeWindExposure(
 
       let sum = 0
       let n = 0
+      let water = 0
       for (let dy = -radius; dy <= radius; dy++) {
         for (let dx = -radius; dx <= radius; dx++) {
           const nx = x + dx
           const ny = y + dy
           if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
           sum += elevation[ny * width + nx]!
+          if (tiles[ny * width + nx] === Tile.Water) water++
           n++
         }
       }
       const prominence = here - sum / Math.max(1, n)
+      /** How much of the surrounding window is open water: fetch, in one number. */
+      const openness = water / Math.max(1, n)
 
       // Trees take the energy out of the lowest hundred metres of the atmosphere.
       const forestPenalty = tiles[i] === Tile.Forest ? 0.14 : 0
       // A little noise so identical terrain is not identically rated.
       const roughness = (fbm(seed + 104729, x / 19, y / 19) - 0.5) * 0.16
 
-      windIndex[i] = Math.max(0, Math.min(1, 0.5 + prominence * 4.5 - forestPenalty + roughness))
+      // Prominence is the wrong measure at sea, and wrong in the worst direction: the water is
+      // the lowest part of the map, so a purely topographic score rates the open sea as
+      // sheltered as a valley floor. What decides wind at hub height is surface roughness and
+      // fetch, and water has no roughness — no trees, no buildings, no hills upwind. So a sea
+      // tile is scored on how much open water surrounds it instead, which puts every offshore
+      // site above the median hillside and the ones well out from the coast at the top of the
+      // range. That is the actual reason the industry went to sea at two and a half times the
+      // capital cost, and without it an offshore farm would be strictly worse than a ridge.
+      const exposure =
+        tiles[i] === Tile.Water
+          ? 0.76 + 0.24 * openness + roughness * 0.5
+          : 0.5 + prominence * 4.5 - forestPenalty + roughness
+
+      windIndex[i] = Math.max(0, Math.min(1, exposure))
     }
   }
 }
