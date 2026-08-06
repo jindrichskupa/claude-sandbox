@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  CARBON_PHASE_IN_YEARS,
   ELECTION_TERM_YEARS,
   fuelVolatility,
   POLICY_REGIMES,
@@ -370,6 +371,69 @@ describe('fuel geopolitics', () => {
 // ---------------------------------------------------------------------------
 // The whole thing running
 // ---------------------------------------------------------------------------
+
+describe('a carbon price arrives over a term, not overnight', () => {
+  it('phases in from what the last government left, and says where it is going', () => {
+    // The unfairest thing in the game, and it was invisible until the economics were measured.
+    // A government arriving in 1999 with 60 EUR/t took this scenario's carbon bill from 6 to 59
+    // EUR/MWh between one month and the next — larger than the whole tariff at the time, on a
+    // coal fleet with fifty-year lives. Nothing in the run gave any warning and nothing the
+    // player could start would arrive in time. This project's own fairness rule says political
+    // change must have a run-up; a step function is what that rule exists to forbid.
+    const world = buildWorld(FIRST_REGION)
+    world.state.carbonPriceAtTakeover = 5
+    world.state.regimeTookOfficeTick = world.tick
+    world.state.policyRegimeId = 'clean_firm'
+
+    const target = REGIMES_BY_ID.get('clean_firm')!.levers.carbonPricePerTonne.value
+    const start = world.carbonPriceInForce()
+    expect(start).toBeCloseTo(5, 6)
+
+    // Strictly increasing, never overshooting, and arrived in full by the end of the term.
+    let previous = start
+    for (let year = 1; year <= CARBON_PHASE_IN_YEARS.value; year++) {
+      for (let i = 0; i < TICKS_PER_YEAR; i++) world.step()
+      const now = world.carbonPriceInForce()
+      expect(now).toBeGreaterThan(previous)
+      expect(now).toBeLessThanOrEqual(target + 1e-6)
+      previous = now
+    }
+    expect(previous).toBeCloseTo(target, 3)
+
+    // And it stays there rather than running on past what was legislated.
+    for (let i = 0; i < TICKS_PER_YEAR; i++) world.step()
+    expect(world.carbonPriceInForce()).toBeCloseTo(target, 3)
+  }, 300_000)
+
+  it('phases down too, when a government cuts it', () => {
+    // Symmetry matters here more than it looks. A one-directional ramp would be a thumb on the
+    // scale: it would make raising the carbon price gentle and cutting it instantaneous, so the
+    // fossil-facing regimes would be strictly kinder to the player than the decarbonising ones.
+    const world = buildWorld(FIRST_REGION)
+    world.state.carbonPriceAtTakeover = 60
+    world.state.regimeTookOfficeTick = world.tick
+    world.state.policyRegimeId = 'energy_security'
+
+    const target = REGIMES_BY_ID.get('energy_security')!.levers.carbonPricePerTonne.value
+    expect(target).toBeLessThan(60)
+    for (let i = 0; i < TICKS_PER_YEAR; i++) world.step()
+    const afterAYear = world.carbonPriceInForce()
+    expect(afterAYear).toBeLessThan(60)
+    expect(afterAYear).toBeGreaterThan(target)
+  }, 300_000)
+
+  it('does not phase in the price the scenario opens with', () => {
+    // The player inherits a system that has been living with its carbon price for years, so the
+    // opening government's price is in force from the first hour. Ramping it up from the
+    // scenario's own base would invent a discount nobody legislated — and note that those are
+    // two different numbers here: the scenario's base is zero and the liberal government of 1995
+    // charges five, which is exactly the distinction this asserts.
+    const world = buildWorld(FIRST_REGION)
+    const opening = REGIMES_BY_ID.get(FIRST_REGION.initialRegimeId)!.levers.carbonPricePerTonne.value
+    expect(opening).not.toBe(FIRST_REGION.carbonPricePerTonne)
+    expect(world.carbonPriceInForce()).toBeCloseTo(opening, 6)
+  })
+})
 
 describe('politics in a real scenario', () => {
   it('does not let the carbon price compound with itself', () => {

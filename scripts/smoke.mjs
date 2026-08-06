@@ -67,6 +67,19 @@ let exitCode = 0
 try {
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' })
 
+  // A new run opens paused behind the opening brief, which is the point of it — so the first
+  // thing this does is what a player does: read it and press Begin. Everything after this point
+  // is the game running, and the brief gets its own checks further down.
+  await page.waitForFunction(() => document.getElementById('brief-begin') !== null, { timeout: 20_000 })
+  const openedPaused = await page.evaluate(() => ({
+    tick: window.game.world.tick,
+    briefUp: document.getElementById('briefing').classList.contains('visible'),
+  }))
+  console.log('opened paused:', openedPaused)
+  if (!openedPaused.briefUp) throw new Error('A new run did not open with the brief')
+  if (openedPaused.tick > 2) throw new Error('The clock ran while the brief was still up')
+  await page.evaluate(() => document.getElementById('brief-begin').click())
+
   // Wait for the game to have booted and run some ticks.
   await page.waitForFunction(() => window.game?.world?.tick > 0, { timeout: 20_000 })
   await page.waitForTimeout(2500)
@@ -777,6 +790,61 @@ try {
 
   await page.screenshot({ path: join(OUT, '24-history.png') })
   await page.evaluate(() => window.game.hud.historyPanel.setOpen(false))
+
+  // --- The opening brief ------------------------------------------------
+  // The first thing a new player sees. Checked in a browser because two of its properties are
+  // only true on screen: that it holds the clock while it is up, and that every line has its
+  // numbers substituted rather than showing a raw placeholder at somebody's first impression.
+  const brief = await page.evaluate(() => {
+    const g = window.game
+    g.hud.briefingPanel.open()
+    const panel = document.getElementById('briefing')
+    const lines = [...panel.querySelectorAll('.brief-line')].map((d) => d.textContent)
+    return {
+      visible: panel.classList.contains('visible'),
+      lines,
+      unfilled: lines.filter((l) => /[{}]/.test(l)).length,
+      empty: lines.filter((l) => !l.trim()).length,
+      hasBegin: !!document.getElementById('brief-begin'),
+      reopenable: !!document.getElementById('brief-reopen'),
+    }
+  })
+  console.log('brief:', brief)
+  if (!brief.visible) throw new Error('The opening brief did not open')
+  if (brief.lines.length < 4) throw new Error(`The brief said almost nothing: ${brief.lines.length} lines`)
+  if (brief.unfilled > 0) throw new Error(`A brief line still has a placeholder in it: ${brief.lines}`)
+  if (brief.empty > 0) throw new Error('A brief line rendered empty')
+  if (!brief.hasBegin || !brief.reopenable) throw new Error('The brief cannot be dismissed or reopened')
+
+  await page.screenshot({ path: join(OUT, '27-brief.png') })
+
+  // Closing it hands the clock back.
+  const afterBrief = await page.evaluate(async () => {
+    const g = window.game
+    document.getElementById('brief-begin').click()
+    const before = g.world.tick
+    await new Promise((r) => setTimeout(r, 700))
+    return {
+      hidden: !document.getElementById('briefing').classList.contains('visible'),
+      advanced: g.world.tick > before,
+    }
+  })
+  console.log('after brief:', afterBrief)
+  if (!afterBrief.hidden) throw new Error('The brief did not close')
+  if (!afterBrief.advanced) throw new Error('Closing the brief did not start the clock')
+
+  // And the standing line names the thing this scenario is about, with a place to click.
+  const concern = await page.evaluate(() => {
+    const line = document.getElementById('concern')
+    return {
+      visible: line.classList.contains('visible'),
+      text: line.textContent,
+      clickable: line.classList.contains('clickable'),
+    }
+  })
+  console.log('concern:', concern)
+  if (!concern.visible) throw new Error('Nothing was raised as needing attention')
+  if (/[{}]/.test(concern.text)) throw new Error(`The concern line has a placeholder in it: ${concern.text}`)
 
   // --- The tab row ------------------------------------------------------
   // Six toggles and the save controls in one flex row. Worth a browser check because the thing

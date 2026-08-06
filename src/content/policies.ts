@@ -256,6 +256,25 @@ export const REGIMES_BY_ID = new Map(POLICY_REGIMES.map((r) => [r.id, r]))
 export const ELECTION_TERM_YEARS = sourced(4, 'years', 'eu-energy-policy', 2020, 'A typical parliamentary term')
 
 /**
+ * How long a new government's carbon price takes to arrive in full.
+ *
+ * A government does not change the price of carbon on the morning it takes office. It legislates
+ * a trajectory, and the trajectory lands over its term — which is what every real carbon price
+ * has done, and what the schemes that tried to do otherwise were forced to retreat to.
+ *
+ * The game needs it for a sharper reason than realism. The opening scenario's fleet is coal and
+ * lignite, and a government arriving in 1999 with 60 EUR/t took the carbon bill from 6 to 59
+ * EUR/MWh between one month and the next — larger than the entire tariff at the time, on assets
+ * with fifty-year lives, with no warning and no available response. This project's own fairness
+ * rule says political changes must have a run-up that the player can see and act on; a step
+ * function is the one thing that rule exists to forbid.
+ *
+ * A term rather than a decade, because the point is to give the player time to respond, not to
+ * make the policy toothless. Four years is one refurbishment and most of a gas station.
+ */
+export const CARBON_PHASE_IN_YEARS = sourced(4, 'years', 'eu-energy-policy', 2021, 'Carbon prices are legislated as a trajectory, not a step')
+
+/**
  * What a regime's levers actually do to a technology, on a signed scale where positive means
  * "this regime makes this technology more attractive to build".
  *

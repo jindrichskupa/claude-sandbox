@@ -52,7 +52,11 @@ function policyMod(
  * Recomputed monthly rather than hourly, which is what `Tier.Monthly` on `Layer.Policy` already
  * assumes: governments do not change their minds between two o'clock and three.
  */
-export function policyModifiers(regimeId: string, scenarioCarbonPrice: number): PolicyEntry[] {
+export function policyModifiers(
+  regimeId: string,
+  scenarioCarbonPrice: number,
+  carbonPriceInForce = REGIMES_BY_ID.get(regimeId)?.levers.carbonPricePerTonne.value ?? scenarioCarbonPrice,
+): PolicyEntry[] {
   const regime = REGIMES_BY_ID.get(regimeId)
   if (!regime) return []
   const levers = regime.levers
@@ -60,12 +64,19 @@ export function policyModifiers(regimeId: string, scenarioCarbonPrice: number): 
 
   // Carbon price is an absolute offset from whatever the scenario started with, so the chain
   // reads as "base 0, policy +85" rather than as a number that appeared from nowhere.
-  const carbonDelta = levers.carbonPricePerTonne.value - scenarioCarbonPrice
+  //
+  // The price *in force* is not the price this government legislated: it phases in over its
+  // term — see `carbonPriceInForce` in `world.ts` and the note on `CARBON_PHASE_IN_YEARS`. The
+  // reason string still names the destination, because that is what the player needs in order
+  // to act: knowing the price is on its way to sixty is the whole point of it not arriving all
+  // at once.
+  const carbonDelta = carbonPriceInForce - scenarioCarbonPrice
   if (Math.abs(carbonDelta) > 1e-9) {
     out.push({
       targetId: 'world',
-      mod: policyMod(regime, Param.CarbonPricePerTonne, Op.AddAbs, carbonDelta, 'reason.carbonPrice', {
-        price: Math.round(levers.carbonPricePerTonne.value),
+      mod: policyMod(regime, Param.CarbonPricePerTonne, Op.AddAbs, carbonDelta, 'reason.carbonPriceRising', {
+        price: Math.round(carbonPriceInForce),
+        target: Math.round(levers.carbonPricePerTonne.value),
       }),
     })
   }

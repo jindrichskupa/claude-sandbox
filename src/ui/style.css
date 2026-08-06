@@ -1454,3 +1454,73 @@ button.danger:hover {
 #clock.stopped {
   opacity: 0.55;
 }
+
+/* --- The opening brief and the standing concern ------------------------
+ *
+ * The brief sits over the map with the clock paused behind it. Not a modal:
+ * a player may want to look at what they have inherited while reading about
+ * it, and a modal says "answer me" about something that is not a question.
+ */
+#briefing {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  width: min(560px, calc(100vw - 48px));
+  padding: 22px 26px;
+  display: none;
+}
+
+#briefing.visible {
+  display: block;
+}
+
+#briefing h2 {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.brief-line {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 9px;
+  text-wrap: pretty;
+}
+
+/* The standing line. Bottom-left, clear of the hint in the centre and of the
+ * news cards, because it is the one piece of text that is *always* true rather
+ * than something that just happened. */
+#concern {
+  position: absolute;
+  left: 12px;
+  bottom: 128px;
+  z-index: 2;
+  max-width: 340px;
+  padding: 9px 13px;
+  font-size: 11px;
+  line-height: 1.5;
+  display: none;
+  border-left: 3px solid var(--warn);
+}
+
+#concern.visible {
+  display: block;
+}
+
+#concern.clickable {
+  cursor: pointer;
+}
+
+#concern b {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--warn);
+}

@@ -90,8 +90,11 @@ async function main(): Promise<void> {
   let hud!: Hud
   let map!: MapView
   let attached = false
+  let briefingShown = false
 
   let speed: Speed = 1
+  /** What to resume at once the opening brief is closed. */
+  const speedBeforeBriefing: Speed = 1
   /** A run-until-something-happens in progress, with where it started from and how far it has got. */
   let skip: { ticksRun: number } | null = null
 
@@ -183,6 +186,16 @@ async function main(): Promise<void> {
     hud.setSpeed(speed)
     map.syncToWorld()
     hud.update()
+    // Shown once per session, on the first attach only: a load is not a new run, and a briefing
+    // that reappears every time the player restores a save is an interruption rather than help.
+    if (!briefingShown) {
+      briefingShown = true
+      speed = 0
+      hud.setSpeed(0)
+      hud.briefingPanel.open()
+    } else {
+      hud.briefingPanel.markShown()
+    }
   }
 
   const makeHud = (): Hud =>
@@ -231,6 +244,13 @@ async function main(): Promise<void> {
       },
       onSave: save,
       onLoad: load,
+      // The brief holds the clock until the player has read it. Starting a thirty-year run at
+      // the same instant the player first sees the map takes a decision away from them before
+      // they know there was one.
+      onBriefingClosed: () => {
+        speed = speedBeforeBriefing
+        hud.setSpeed(speed)
+      },
       onSkip: () => {
         // Pressing it again while it is running means "stop here", which is the only sensible
         // second meaning and saves a separate control.

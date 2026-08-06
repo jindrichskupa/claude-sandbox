@@ -42,7 +42,7 @@ import { weatherModifiers, WEATHER_SOURCE } from './weather/effects'
 import { generateTerrain, windSiteFactor, type TerrainMap } from './map/terrain'
 import { planStorage, settleStorage, isStorage, FORECAST_WINDOW_HOURS, type StoragePlan } from './dispatch/storage'
 import { dispatchHeat, isHeatStore, settleHeatStore, type HeatResult } from './heat/heat'
-import { ELECTION_TERM_YEARS, REGIMES_BY_ID } from '@content/policies'
+import { CARBON_PHASE_IN_YEARS, ELECTION_TERM_YEARS, REGIMES_BY_ID } from '@content/policies'
 import { initialFuelIndices, policyModifiers, POLICY_SOURCE, stepFuelPrices, importExposure } from './policy/regime'
 import {
   confidenceAfterBreach,
@@ -131,6 +131,14 @@ export interface WorldState {
   investorConfidence: number
   /** When the government next has to face the voters. */
   nextElectionTick: number
+  /**
+   * When the government in office took it, and what the carbon price was that day.
+   *
+   * Together these are the whole of the phase-in: a government legislates a carbon price and it
+   * arrives over its term, starting from whatever its predecessor left. See `carbonPriceInForce`.
+   */
+  regimeTookOfficeTick: number
+  carbonPriceAtTakeover: number
   /** Vote share per regime at the last election, for the polling display. */
   polls: Record<string, number>
   /**
@@ -365,6 +373,10 @@ export class World {
       contracts: [],
       investorConfidence: 1,
       nextElectionTick: Math.round(ELECTION_TERM_YEARS.value * TICKS_PER_YEAR),
+      // The scenario's opening government is not "new": its price is the one the player inherits
+      // and has been living with, so it is in force from the first hour rather than phasing in.
+      regimeTookOfficeTick: -Math.round(CARBON_PHASE_IN_YEARS.value * TICKS_PER_YEAR),
+      carbonPriceAtTakeover: scenario.carbonPricePerTonne,
       polls: {},
       regulatedTariffPerMwh: scenario.tariffPerMwh,
       techLevel: {},
@@ -1601,12 +1613,39 @@ export class World {
     return this.plantDisplayName(plantId)
   }
 
-  private nodeName(nodeId: string): string {
+  nodeName(nodeId: string): string {
     return this.displayName(nodeId)
   }
 
   private applyRegime(): void {
-    this.registry.setSource(POLICY_SOURCE, policyModifiers(this.state.policyRegimeId, this.scenario.carbonPricePerTonne))
+    this.registry.setSource(
+      POLICY_SOURCE,
+      policyModifiers(this.state.policyRegimeId, this.scenario.carbonPricePerTonne, this.carbonPriceInForce()),
+    )
+  }
+
+  /**
+   * The carbon price actually being charged, on its way to the one this government legislated.
+   *
+   * A government does not change the price of carbon on the morning it takes office; it passes a
+   * trajectory, and the trajectory lands over its term. Without that, a 1999 election took this
+   * scenario's carbon bill from 6 to 59 EUR/MWh between one month and the next — bigger than the
+   * whole tariff at the time, on a coal fleet with fifty-year lives, with no warning and nothing
+   * the player could do about it in the time available. This project's own fairness rule says
+   * political change has to have a run-up the player can see and act on.
+   *
+   * Interpolated from what was in force when the government took office rather than from the
+   * scenario's opening price, so a government that cuts the price phases *down* by the same rule.
+   * Nothing here is hidden from the pipeline: this only decides the value of the modifier the
+   * policy layer registers, and `explain()` shows both the price in force and where it is going.
+   */
+  carbonPriceInForce(): number {
+    const target =
+      REGIMES_BY_ID.get(this.state.policyRegimeId)?.levers.carbonPricePerTonne.value ??
+      this.scenario.carbonPricePerTonne
+    const years = Math.max(0, (this.tick - this.state.regimeTookOfficeTick) / TICKS_PER_YEAR)
+    const phase = Math.max(0, Math.min(1, years / CARBON_PHASE_IN_YEARS.value))
+    return this.state.carbonPriceAtTakeover + (target - this.state.carbonPriceAtTakeover) * phase
   }
 
   /**
@@ -1742,6 +1781,10 @@ export class World {
     this.state.polls = result.shares
 
     const previousId = this.state.policyRegimeId
+    // Captured before the new government's modifiers are registered, because the phase-in starts
+    // from what the outgoing one left behind, not from the scenario's opening price.
+    this.state.carbonPriceAtTakeover = this.carbonPriceInForce()
+    this.state.regimeTookOfficeTick = this.tick
     this.state.policyRegimeId = result.winnerId
     this.state.nextElectionTick = this.tick + Math.round(ELECTION_TERM_YEARS.value * TICKS_PER_YEAR)
     this.termPriceSum = 0
@@ -1783,6 +1826,22 @@ export class World {
         share: Math.round((result.shares[result.winnerId] ?? 0) * 100),
       },
     })
+    // Where this government is taking the price of carbon, and by when. The single most
+    // consequential thing an incoming government does to a fleet, and the player has to hear it
+    // as an intention with a date rather than discover it as a bill.
+    const incomingTarget = incoming?.levers.carbonPricePerTonne.value ?? this.scenario.carbonPricePerTonne
+    if (Math.abs(incomingTarget - this.state.carbonPriceAtTakeover) > 1) {
+      this.postNews({
+        category: 'politics',
+        importance: NewsImportance.Major,
+        titleKey: incomingTarget > this.state.carbonPriceAtTakeover ? 'news.carbonRising' : 'news.carbonFalling',
+        params: {
+          from: Math.round(this.state.carbonPriceAtTakeover),
+          to: Math.round(incomingTarget),
+          years: CARBON_PHASE_IN_YEARS.value,
+        },
+      })
+    }
     if (revoked > 0) {
       this.postNews({
         category: 'politics',

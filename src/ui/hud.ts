@@ -36,6 +36,7 @@ import { ObjectivesPanel } from './objectivesPanel'
 import { AccountsPanel, ledgerBlock } from './accountsPanel'
 import { NewsPanel } from './newsPanel'
 import { HistoryPanel } from './historyPanel'
+import { BriefingPanel } from './briefingPanel'
 import { operatingMargin } from '@sim/economy/assetLedger'
 import { rooftopOutputMw, rooftopPotentialMw, rooftopSplit } from '@sim/city/rooftop'
 import { cycleLifeUsed, energyCapacityMwh, isStorage, ratedEnergyMwh } from '@sim/dispatch/storage'
@@ -73,6 +74,8 @@ export interface HudCallbacks {
   onUpgradeVoltage: (edgeId: string) => void
   onDemolishLine: (edgeId: string) => void
   onSkip: () => void
+  /** The player has read the opening brief, so the clock can start. */
+  onBriefingClosed: () => void
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -110,6 +113,7 @@ export class Hud {
   readonly accountsPanel: AccountsPanel
   readonly newsPanel: NewsPanel
   readonly historyPanel: HistoryPanel
+  readonly briefingPanel: BriefingPanel
 
   private selectedNodeId: string | null = null
   private selectedEdgeId: string | null = null
@@ -286,6 +290,17 @@ export class Hud {
       onOpen: () => this.soloPanel('history'),
     })
 
+    this.briefingPanel = new BriefingPanel(root, world, {
+      onBegin: () => this.callbacks.onBriefingClosed(),
+      onGoTo: (subjectId, kind) => {
+        if (kind === 'edge') this.selectEdge(subjectId, true)
+        else if (kind === 'plant') {
+          const plant = this.world.plants.find((p) => p.id === subjectId)
+          if (plant) this.selectNode(plant.nodeId, true)
+        } else this.selectNode(subjectId, true)
+      },
+    })
+
     // --- The tab row ---
     //
     // Each panel makes its own toggle button and knows nothing about where it sits; the row is
@@ -313,6 +328,12 @@ export class Hud {
       if (toggle) tabs.appendChild(toggle)
     }
     const saves = el('div', 'tab-saves')
+    // The brief, back on demand. A player who wants "what was I asked to do again" three hours
+    // in should not have to remember what a panel said once at the start.
+    const briefButton = el('button', undefined, t('brief.reopen'))
+    briefButton.id = 'brief-reopen'
+    briefButton.addEventListener('click', () => this.briefingPanel.open())
+    saves.appendChild(briefButton)
     const saveButton = el('button', undefined, t('ui.save'))
     saveButton.id = 'save-button'
     saveButton.addEventListener('click', () => this.callbacks.onSave())
@@ -516,6 +537,7 @@ export class Hud {
     this.accountsPanel.render()
     this.newsPanel.render()
     this.historyPanel.render()
+    this.briefingPanel.render()
 
     const history = world.recentHistory(240)
     if (history.length > 1) {
