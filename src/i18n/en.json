@@ -93,6 +93,7 @@
   "ui.loadCurve": "Load and generation",
   "ui.mix": "Generation mix",
   "ui.overloaded": "Overloaded",
+  "ui.mainsSameScale": "Heat mains use the same scale.",
   "ui.blackout": "Unserved demand",
   "ui.years": "years",
   "ui.bankrupt": "The utility is bankrupt.",

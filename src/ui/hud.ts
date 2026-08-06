@@ -19,7 +19,7 @@ import { LIFECYCLE_KEYS, LifecyclePhase, isDispatchable } from '@sim/assets/type
 import { ageYears } from '@sim/assets/aging'
 import { Layer, LAYER_KEYS, Op, Param, PARAM_KEYS, type Explanation } from '@sim/params/types'
 import { drawLoadCurve, drawMix, drawPrice } from './charts'
-import { nodeLabel } from '@render/mapView'
+import { LOADING_STOPS, nodeLabel } from '@render/mapView'
 import {
   nextVoltage,
   quoteLineDemolition,
@@ -218,19 +218,25 @@ export class Hud {
     const lineLegend = el('div', 'panel')
     lineLegend.id = 'legend-lines'
     lineLegend.appendChild(el('b', undefined, t('ui.lines')))
+    // Swatches taken from the renderer's own stops rather than copied, because a legend that
+    // has drifted from what it explains is worse than none: it is confidently wrong.
     for (const [colour, label] of [
-      ['#5c7a8a', '0%'],
-      ['#5fc27e', '50%'],
-      ['#e8b23a', '90%'],
-      ['#e2483d', t('ui.overloaded')],
+      [LOADING_STOPS[0], '0%'],
+      [LOADING_STOPS[1], '50%'],
+      [LOADING_STOPS[2], '90%'],
+      [LOADING_STOPS[3], t('ui.overloaded')],
     ] as const) {
       const row = el('div')
       const swatch = el('span', 'swatch')
-      swatch.style.background = colour
+      swatch.style.background = `#${colour.toString(16).padStart(6, '0')}`
       row.appendChild(swatch)
       row.appendChild(document.createTextNode(label))
       lineLegend.appendChild(row)
     }
+    // Heat mains read on the same scale. They used to have one of their own, running brown to
+    // orange, which shared no vocabulary with this and — over the range these networks actually
+    // run at — was a single hue from empty to full.
+    lineLegend.appendChild(el('div', 'legend-note', t('ui.mainsSameScale')))
     root.appendChild(lineLegend)
 
     // --- Build panel and its hint line ---

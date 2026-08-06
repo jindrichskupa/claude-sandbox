@@ -18,6 +18,7 @@ import { buildWorld, loadWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { scenarioById, SCENARIO_LIST } from '@content/scenarios/index'
 import { LifecyclePhase } from '@sim/assets/types'
+import { generateTerrain, tileAt, Tile } from '@sim/map/terrain'
 import {
   evaluateObjectives,
   measure,
@@ -461,6 +462,21 @@ describe('the save file envelope', () => {
       loaded.step()
     }
     expect(loaded.finances.cash).toBeCloseTo(world.finances.cash, 6)
+  })
+
+  it('does not stand anything in open water', () => {
+    // Three of the eastern nodes — a coal station, a heat plant and an entire town — sat on sea
+    // tiles, several of them a good way offshore. Nothing in the game could have been built
+    // there: `judgeSite` refuses water for every technology, so the scenario was asking of its
+    // own map something it forbids the player. They are now on the coast, which is where a
+    // harbour station and a bay town belong anyway.
+    for (const scenario of SCENARIO_LIST) {
+      const terrain = generateTerrain(scenario.seed, scenario.mapWidth, scenario.mapHeight)
+      for (const node of scenario.nodes) {
+        const tile = tileAt(terrain, node.x, node.y)
+        expect(`${node.id} ${Tile[tile]}`).not.toContain('Water')
+      }
+    }
   })
 
   it('leaves every power line a middle the player can click', () => {

@@ -371,6 +371,14 @@ button.active {
   max-width: 300px;
 }
 
+#legend-lines .legend-note {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 #legend-lines b {
   color: var(--text);
   display: block;

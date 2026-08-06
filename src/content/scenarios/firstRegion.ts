@@ -132,7 +132,7 @@ export const FIRST_REGION: ScenarioContent = {
     { id: 'n_rivermouth', kind: 'city', x: 28, y: 22, name: 'Rivermouth' },
     { id: 'n_ironvale', kind: 'city', x: 12, y: 10, name: 'Ironvale' },
     { id: 'n_northgate', kind: 'city', x: 20, y: 4, name: 'Northgate' },
-    { id: 'n_southbay', kind: 'city', x: 33, y: 27, name: 'Southbay' },
+    { id: 'n_southbay', kind: 'city', x: 26, y: 28, name: 'Southbay' },
 
     // Generation sites.
     // Spread deliberately. Everything around the capital used to sit within a tile or two of
@@ -140,14 +140,14 @@ export const FIRST_REGION: ScenarioContent = {
     // than the station sprites at their ends — nothing the player could point at. Distances
     // here are chosen so every power line has a middle that belongs to the line.
     { id: 'n_blackridge', kind: 'plant', x: 8, y: 14, name: 'Blackridge' },
-    { id: 'n_oldharbour', kind: 'plant', x: 31, y: 26, name: 'Old Harbour' },
+    { id: 'n_oldharbour', kind: 'plant', x: 28, y: 16, name: 'Old Harbour' },
     { id: 'n_gorge', kind: 'plant', x: 16, y: 3, name: 'Gorge' },
     { id: 'n_eastfield', kind: 'plant', x: 24, y: 18, name: 'Eastfield' },
     { id: 'n_millbrook', kind: 'plant', x: 24, y: 24, name: 'Millbrook' },
     // The two municipal heating plants. Both stand on the edge of the town they heat, because
     // a heat main loses too much to run any further than that.
     { id: 'n_ironworks', kind: 'plant', x: 14, y: 12, name: 'Ironworks' },
-    { id: 'n_quayside', kind: 'plant', x: 30, y: 24, name: 'Quayside' },
+    { id: 'n_quayside', kind: 'plant', x: 30, y: 20, name: 'Quayside' },
 
     // Switching stations.
     { id: 'n_central', kind: 'substation', x: 20, y: 15, name: 'Central' },

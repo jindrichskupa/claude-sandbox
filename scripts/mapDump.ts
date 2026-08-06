@@ -16,8 +16,9 @@ for (let y = 0; y < m.height; y++) {
   for (let x = 0; x < m.width; x++) {
     const k = marks.get(`${x},${y}`)
     if (k) { row += k; continue }
-    const r = riverIndexAt(m, x, y)
-    row += r > 0.35 ? 'r' : glyph[m.tiles[y * m.width + x]!]
+    const tile = m.tiles[y * m.width + x]!
+    if (tile === Tile.Water) { row += '~'; continue }
+    row += riverIndexAt(m, x, y) > 0.35 ? 'r' : glyph[tile]
   }
   console.log(row)
 }

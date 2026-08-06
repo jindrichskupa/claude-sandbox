@@ -70,6 +70,28 @@ function offsetPath(
   })
 }
 
+/** Anything on the map that exists but is not carrying: under construction, faulted, switched out. */
+export const OUT_OF_SERVICE = 0x7fd4ff
+
+/** The loading scale, in the four stops the legend names. */
+export const LOADING_STOPS = [0x6d7a84, 0x5fc27e, 0xe8b23a, 0xe2483d] as const
+
+/**
+ * How full something is, as a colour: idle grey, comfortable green, amber as headroom runs out,
+ * red at the limit.
+ *
+ * One scale for conductors and heat mains alike. They are different objects carrying different
+ * commodities, but "how close is this to being full" is the same question about both, and the
+ * player should not have to learn two vocabularies to ask it. What distinguishes a main from a
+ * line on screen is its shape — thicker, offset from the centreline, laid under the conductors.
+ */
+export function loadingColour(loading: number): number {
+  const [idle, easy, tight, full] = LOADING_STOPS
+  if (loading < 0.5) return lerpColour(idle, easy, loading / 0.5)
+  if (loading < 0.9) return lerpColour(easy, tight, (loading - 0.5) / 0.4)
+  return lerpColour(tight, full, Math.min(1, (loading - 0.9) / 0.1))
+}
+
 function lerpColour(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 0xff
   const ag = (a >> 8) & 0xff
@@ -392,12 +414,21 @@ export class MapView {
   /**
    * District heating mains.
    *
-   * Drawn as a thick warm band rather than a thin conductor, because that is what they are:
-   * a pair of half-metre steel pipes in a trench, not a wire in the air. The colour runs from
-   * a dull ember when the main is idle to a bright orange when it is full, so a network at its
-   * limit reads at a glance — and since a heat main loses the same heat whether it is loaded or
-   * not, an idle one being dull is exactly the wrong intuition to encourage, which is why even
-   * an empty pipe is drawn solid.
+   * Drawn as a thick band rather than a thin conductor, because that is what they are: a pair of
+   * half-metre steel pipes in a trench, not a wire in the air. Shape carries the commodity, and
+   * colour carries loading on the same scale as a power line — see `loadingColour`.
+   *
+   * The mains used to have a scale of their own, running from a dull ember to a bright orange.
+   * Two things were wrong with it. It shared no vocabulary with the conductors, so the one legend
+   * on screen explained half the network and quietly misled about the other half: amber on a line
+   * means "nearly full", and amber on a main meant nothing of the kind. And measured over a year
+   * these mains run between three and sixty per cent of capacity, which on a brown-to-orange ramp
+   * is one hue from end to end — a main with nothing in it looked exactly like a main at its
+   * limit. What the scale is *for* is being able to tell those apart.
+   *
+   * Still drawn solid when idle, though, unlike a conductor: a heat main loses the same heat
+   * whether it is carrying anything or not, and a pipe that faded away when empty would teach
+   * precisely the wrong thing about why they are expensive.
    */
   private drawHeatPipes(): void {
     const g = this.heatLayer
@@ -416,7 +447,7 @@ export class MapView {
       const loading = capacity > 0 ? Math.min(1, flow / capacity) : 0
 
       const width = edge.dn === 700 ? 5 : edge.dn === 400 ? 4 : 3
-      const colour = lerpColour(0x6b4634, 0xe8802a, loading)
+      const colour = loadingColour(loading)
 
       const stroke = (style: { width: number; color: number; alpha?: number }) => {
         g.moveTo(path[0]!.x, path[0]!.y)
@@ -425,7 +456,7 @@ export class MapView {
       }
 
       if (!edge.energised) {
-        drawDashedPath(g, path, 8, 6, { width, color: 0xe8802a, alpha: 0.45 })
+        drawDashedPath(g, path, 8, 6, { width, color: OUT_OF_SERVICE, alpha: 0.5 })
         continue
       }
       stroke({ width: width + 2, color: 0x160e08, alpha: 0.65 })
@@ -447,12 +478,7 @@ export class MapView {
 
       // Thicker for higher voltage: the backbone should read as the backbone.
       const width = edge.kv === 400 ? 3 : edge.kv === 220 ? 2 : 1.5
-      const colour =
-        loading < 0.5
-          ? lerpColour(0x6d7a84, 0x5fc27e, loading / 0.5)
-          : loading < 0.9
-            ? lerpColour(0x5fc27e, 0xe8b23a, (loading - 0.5) / 0.4)
-            : lerpColour(0xe8b23a, 0xe2483d, Math.min(1, (loading - 0.9) / 0.1))
+      const colour = loadingColour(loading)
 
       const stroke = (style: { width: number; color: number; alpha?: number }) => {
         g.moveTo(path[0]!.x, path[0]!.y)
@@ -461,7 +487,7 @@ export class MapView {
       }
 
       if (!edge.energised) {
-        drawDashedPath(g, path, 8, 6, { width, color: 0x7fd4ff, alpha: 0.6 })
+        drawDashedPath(g, path, 8, 6, { width, color: OUT_OF_SERVICE, alpha: 0.6 })
         continue
       }
 
