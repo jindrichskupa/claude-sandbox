@@ -18,11 +18,13 @@ import type { World } from '@sim/world'
 import { LIFECYCLE_KEYS, LifecyclePhase, isDispatchable } from '@sim/assets/types'
 import { ageYears } from '@sim/assets/aging'
 import { Layer, LAYER_KEYS, Op, Param, PARAM_KEYS, type Explanation } from '@sim/params/types'
-import { drawLoadCurve, drawMix, drawPrice } from './charts'
+import { drawLoadCurve, drawMix, drawPrice, mixLegend } from './charts'
 import { LOADING_STOPS, nodeLabel } from '@render/mapView'
+import { nodeInService } from '@sim/grid/network'
 import {
   nextVoltage,
   quoteLineDemolition,
+  substationBaysFree,
   quoteLineRenewal,
   quoteLineUpgrade,
   quoteRefurbishment,
@@ -184,19 +186,7 @@ export class Hud {
     this.priceCanvas = makeChart('ui.price')
     this.mixCanvas = makeChart('ui.mix')
 
-    const legend = el('div', 'legend')
-    for (const [category, colour] of [
-      ['nuclear', '#b455c8'],
-      ['hydro', '#3f9fd0'],
-      ['thermal', '#c86a3a'],
-      ['wind', '#63c8a8'],
-      ['solar', '#e0c04a'],
-      ['storage', '#9aa3b0'],
-    ] as const) {
-      const span = el('span', undefined, t(`category.${category}`))
-      span.style.color = colour
-      legend.appendChild(span)
-    }
+    const legend = mixLegend(t)
     charts.appendChild(legend)
     root.appendChild(charts)
 
@@ -711,8 +701,56 @@ export class Hud {
     const lines = this.world.network.edgesOf(nodeId)
 
     this.inspector.appendChild(
-      el('div', 'subtitle', city ? t('ui.cities') : plants.length ? t('ui.plants') : t('ui.lines')),
+      el(
+        'div',
+        'subtitle',
+        city
+          ? t('ui.cities')
+          : plants.length
+            ? t('ui.plants')
+            : node.kind === 'substation'
+              ? t('ui.substations')
+              : t('ui.lines'),
+      ),
     )
+
+    // The switching station itself, rather than only the lines hanging off it. A station used to
+    // be the one thing on the map with nothing to inspect — the player paid three different prices
+    // for one and then had no way of telling which they had bought.
+    if (node.kind === 'substation' && node.kvLevels?.length) {
+      const block = el('div', 'asset')
+      block.appendChild(this.kv(t('ui.stationVoltage'), `${node.kvLevels.join(' / ')} kV`))
+
+      const inService = nodeInService(node, this.world.tick)
+      if (!inService) {
+        const months = Math.ceil(Math.max(0, node.inServiceTick! - this.world.tick) / TICKS_PER_MONTH)
+        block.appendChild(el('div', 'asset-building', t('ui.stationReadyIn', { months })))
+      } else {
+        // Bays used against bays built, one row per voltage yard on the site. The bar is what makes
+        // the limit a thing the player can plan against instead of a refusal they meet when they
+        // try to build, which is far too late to be useful.
+        for (const kv of node.kvLevels) {
+          const total = LINE_TYPES[kv].substationBays.value
+          const free = Math.max(0, substationBaysFree(this.world, node, kv))
+          const used = total - free
+          const bar = el('div', 'bar')
+          const fill = el('div')
+          const share = Math.min(1, used / Math.max(1, total))
+          fill.style.width = `${share * 100}%`
+          fill.style.background = share > 0.9 ? '#e2483d' : share > 0.7 ? '#e8b23a' : '#5fc27e'
+          bar.appendChild(fill)
+          block.appendChild(bar)
+          block.appendChild(this.kv(t('ui.stationBays', { kv }), `${used} / ${total}`))
+        }
+      }
+
+      const opex = node.kvLevels.reduce(
+        (sum, kv) => sum + LINE_TYPES[kv].substationFixedOpexPerYear.value,
+        0,
+      )
+      block.appendChild(this.kv(t('ui.fixedOpex'), `${formatMoney(opex)} / ${t('ui.year')}`))
+      this.inspector.appendChild(block)
+    }
 
     if (city) {
       const served = dispatch?.servedMw.get(city.id) ?? 0

@@ -9,11 +9,11 @@
 
 import { FUELS, type FuelId } from '@content/fuels'
 import { LINE_TYPES } from '@content/lineTypes'
-import { heatCapacityOf, PLANT_TYPES } from '@content/plantTypes'
+import { heatCapacityOf, mixBand, PLANT_TYPES } from '@content/plantTypes'
 import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
 import { RandomSource } from './core/rng'
 import { isMonthBoundary, isYearBoundary, TICKS_PER_YEAR, tickToDate, type GameDate } from './core/time'
-import { Network, PLAYER, type NodeId } from './grid/network'
+import { Network, nodeInService, PLAYER, type NodeId } from './grid/network'
 import { IslandCache } from './grid/islands'
 import {
   advanceLineCondition,
@@ -1032,7 +1032,8 @@ export class World {
       if (mw <= 0) continue
       const type = PLANT_TYPES[plant.typeId]
       this.termGenerationByFuel.set(type.fuel, (this.termGenerationByFuel.get(type.fuel) ?? 0) + mw)
-      this.yearMix[type.category] = (this.yearMix[type.category] ?? 0) + mw
+      const band = mixBand(plant.typeId)
+      this.yearMix[band] = (this.yearMix[band] ?? 0) + mw
     }
     if (result.totalRooftopExportMw > 0) {
       this.yearMix.solar = (this.yearMix.solar ?? 0) + result.totalRooftopExportMw
@@ -1254,6 +1255,21 @@ export class World {
       }
     }
 
+    // A switching station finishing. Kept on the node, like the second-circuit upgrade below and
+    // for the same reason: the nodes are saved wholesale, so a field on the node survives a save
+    // with no format work, and there is exactly one place that decides whether it is in service.
+    for (const node of this.network.allNodes()) {
+      if (node.inServiceTick === undefined || this.tick !== node.inServiceTick) continue
+      this.postNews({
+        category: 'grid',
+        importance: NewsImportance.Major,
+        titleKey: 'news.substationBuilt',
+        params: { kv: node.kvLevels?.join('/') ?? '' },
+        subjectId: node.id,
+        subjectKind: 'node',
+      })
+    }
+
     // A second circuit strung on towers that are already standing. Kept on the edge rather than
     // in a side table because, unlike energising, it is a change to what the line *is* — and the
     // edges are saved wholesale, so it survives a save without any format work at all.
@@ -1271,6 +1287,18 @@ export class World {
       }
       const uprated = edge.kv !== wasKv
       const renewed = !uprated && edge.circuits === wasCircuits
+      // A voltage rebuild replaces the switchgear at both ends — the quote charged for two new
+      // stations, and this is where they arrive. Without it a station would end up hosting a
+      // voltage it is not built for, which is the thing the connection rules exist to prevent.
+      if (uprated && edge.kv !== 0) {
+        for (const nodeId of [edge.from, edge.to]) {
+          const node = this.network.requireNode(nodeId)
+          if (node.kind !== 'substation' || !node.kvLevels) continue
+          if (!node.kvLevels.includes(edge.kv)) {
+            node.kvLevels = [...node.kvLevels, edge.kv].sort((a, b) => a - b)
+          }
+        }
+      }
       delete edge.upgradeAtTick
       delete edge.upgradeToCircuits
       delete edge.upgradeToKv
@@ -1331,6 +1359,25 @@ export class World {
       const cost = perYear * (ticks / TICKS_PER_YEAR)
       this.openLedger.fixedOpex += cost
       this.books.for(edge.id).open.fixedOpex += cost
+    }
+
+    // And the switching stations, for the same reason. Switchgear maintenance, protection
+    // testing, the site, and the transformer's no-load losses — which are real energy, burned
+    // continuously for as long as the station is energised. Charged from the day it enters
+    // service, not from the day it was ordered: nothing is standing there losing anything yet.
+    for (const node of this.network.allNodes()) {
+      if (node.kind !== 'substation' || !node.kvLevels?.length) continue
+      if (!nodeInService(node, this.tick)) continue
+      // Every level on the site costs something to keep: a transformer station is two compounds
+      // sharing a fence, and both need their switchgear tested.
+      const perYear =
+        node.kvLevels.reduce(
+          (sum, kv) => sum + nominal(LINE_TYPES[kv].substationFixedOpexPerYear, this.date.year),
+          0,
+        ) * this.state.maintenanceLevel
+      const cost = perYear * (ticks / TICKS_PER_YEAR)
+      this.openLedger.fixedOpex += cost
+      this.books.for(node.id).open.fixedOpex += cost
     }
 
     if (this.state.insured) chargeInsurance(this.openLedger, this.plants, ticks)
@@ -1915,8 +1962,13 @@ export class World {
     if (this.yearLedger.energySoldMwh >= this.minimumTariffSampleMwh()) {
       const reset = revenueRequirementPerMwh({
         ledger: this.yearLedger,
-        rateBase: rateBase(this.plants, [...this.network.allEdges()], (plant) =>
-          this.params.getOr(`quote:${plant.typeId}`, Param.CapexPerKw, PLANT_TYPES[plant.typeId].capexPerKw.value),
+        rateBase: rateBase(
+          this.plants,
+          [...this.network.allEdges()],
+          (plant) =>
+            this.params.getOr(`quote:${plant.typeId}`, Param.CapexPerKw, PLANT_TYPES[plant.typeId].capexPerKw.value),
+          this.network.allNodes(),
+          this.tick,
         ),
         energySoldMwh: this.yearLedger.energySoldMwh,
       })
@@ -2036,8 +2088,8 @@ export class World {
     for (const plant of this.plants) {
       const mw = result.generationMw.get(plant.id) ?? 0
       if (mw <= 0) continue
-      const cat = PLANT_TYPES[plant.typeId].category
-      mixMw[cat] = (mixMw[cat] ?? 0) + mw
+      const band = mixBand(plant.typeId)
+      mixMw[band] = (mixMw[band] ?? 0) + mw
     }
     // Rooftop counts in the mix, because on the chart the player is reading it is generation
     // that arrived and displaced something. Only the exported half: self-consumed energy never

@@ -17,9 +17,26 @@ import {
   beginSubstationConstruction,
   quoteLine,
   quoteSubstation,
+  substationBaysFree,
 } from '@sim/build/commands'
 import { LINE_TYPES } from '@content/lineTypes'
 import { isBuildable } from '@sim/map/terrain'
+import { nodeInService } from '@sim/grid/network'
+import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
+
+const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
+
+/**
+ * Put a station into service without simulating the years it takes.
+ *
+ * Winding the clock forward would be honest and would also make these tests run for minutes each,
+ * because a 400 kV compound is four years of hourly ticks. The build phase itself is tested
+ * directly above.
+ */
+function finish(world: ReturnType<typeof buildWorld>, nodeId: string): string {
+  world.network.requireNode(nodeId).inServiceTick = world.tick
+  return nodeId
+}
 
 function emptyGround(world: ReturnType<typeof buildWorld>, skip = 0) {
   let seen = 0
@@ -92,6 +109,10 @@ describe('building a substation', () => {
     const hub = built.nodeId!
     expect(world.network.requireNode(hub).kind).toBe('substation')
 
+    // Not yet, though: the compound is being dug. This is the part that used to be missing.
+    expect(quoteLine(world, 'n_central', hub, 220, 1).reasonKey).toBe('build.substationNotReady')
+    finish(world, hub)
+
     // A line can now be run to a place of the player's choosing.
     const quote = quoteLine(world, 'n_central', hub, 220, 1)
     expect(quote.ok, quote.reasonKey ?? '').toBe(true)
@@ -105,9 +126,8 @@ describe('building a substation', () => {
   })
 
   it('carries nothing until a line reaches it', () => {
-    // There is deliberately no half-built state for the node itself, and this is why that is
-    // safe: on its own a substation is a place for lines to meet, and the first line to arrive
-    // takes years. A node with no edges cannot affect the flow problem at all.
+    // A station with no edges cannot affect the flow problem at all, which is why the build phase
+    // needs nothing from the solver: it is one field on the node, checked where lines are quoted.
     const world = buildWorld(FIRST_REGION)
     const site = emptyGround(world)
     const built = beginSubstationConstruction(world, 220, site.x, site.y)
@@ -119,5 +139,94 @@ describe('building a substation', () => {
     if (before !== undefined) {
       expect(world.lastDispatch!.totalGenerationMw).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('a station is an asset, not a point', () => {
+  it('takes years to build, and says so before it is asked', () => {
+    // Every other asset in the game has a lead time. The substation used to be the exception: it
+    // arrived the instant it was paid for, while its money was already being spread over a build
+    // like everything else's. The refusal is the visible half of the fix, and it names the reason
+    // rather than saying no.
+    const world = buildWorld(FIRST_REGION)
+    const site = emptyGround(world)
+    const built = beginSubstationConstruction(world, 400, site.x, site.y)
+    const node = world.network.requireNode(built.nodeId!)
+
+    expect(node.inServiceTick).toBe(world.tick + built.quote.buildTicks!)
+    expect(nodeInService(node, world.tick)).toBe(false)
+    expect(nodeInService(node, node.inServiceTick! - 1)).toBe(false)
+    expect(nodeInService(node, node.inServiceTick!)).toBe(true)
+
+    // Long enough to be a decision rather than a formality — a 400 kV compound is years of work.
+    expect(built.quote.buildTicks! / TICKS_PER_YEAR).toBeGreaterThan(1)
+  })
+
+  it('is built for a voltage, and refuses the ones it is not', () => {
+    // Before this, `kv` was charged for at three prices and then never consulted again: the player
+    // bought a 400 kV station, got the same dot as a 110 kV one, and could hang anything off it.
+    const world = buildWorld(FIRST_REGION)
+    const site = emptyGround(world)
+    const hub = finish(world, beginSubstationConstruction(world, 110, site.x, site.y).nodeId!)
+    expect(world.network.requireNode(hub).kvLevels).toEqual([110])
+
+    const wrong = quoteLine(world, 'n_northsub', hub, 220, 1)
+    expect(wrong.ok).toBe(false)
+    expect(wrong.reasonKey).toBe('build.wrongVoltage')
+    // And the message says which voltage it *is*, so the player can act on it.
+    expect(wrong.reasonParams?.kv).toBe('110')
+
+    expect(quoteLine(world, 'n_northsub', hub, 110, 1).ok).toBe(true)
+  })
+
+  it('runs out of bays, one yard per voltage', () => {
+    // A bay per circuit, and each voltage on the site has its own switchyard. The northern station
+    // is the case that matters: 220 kV in from the centre, 110 kV out to Northgate and the Gorge.
+    // Its levels are read off the lines the scenario hung on it, so the data cannot disagree with
+    // the map.
+    const world = buildWorld(FIRST_REGION)
+    const north = world.network.requireNode('n_northsub')
+    expect(north.kvLevels).toEqual([110, 220])
+
+    // Three 110 kV circuits already: two to Northgate, one to the Gorge.
+    const used110 = LINE_TYPES[110].substationBays.value - substationBaysFree(world, north, 110)
+    expect(used110).toBe(3)
+    expect(substationBaysFree(world, north, 220)).toBe(LINE_TYPES[220].substationBays.value - 1)
+
+    // Fill the 110 kV yard, and only the 110 kV yard.
+    const site = emptyGround(world)
+    const spare = finish(world, beginSubstationConstruction(world, 110, site.x, site.y).nodeId!)
+    let built = 0
+    while (substationBaysFree(world, north, 110) > 0) {
+      const line = beginLineConstruction(world, 'n_northsub', spare, 110, 1)
+      if (!line.ok) break
+      // A fresh partner each time, since the same pair may only be joined once at a voltage.
+      const next = emptyGround(world, ++built)
+      finish(world, beginSubstationConstruction(world, 110, next.x, next.y).nodeId!)
+    }
+    const full = quoteLine(world, 'n_northsub', spare, 110, 1)
+    expect(full.ok).toBe(false)
+    expect(['build.substationFull', 'build.alreadyConnected']).toContain(full.reasonKey)
+
+    // The 220 kV yard is untouched by any of that: separate compound, separate bays.
+    expect(substationBaysFree(world, north, 220)).toBe(LINE_TYPES[220].substationBays.value - 1)
+  })
+
+  it('costs money to keep standing, from the day it is finished and not before', () => {
+    // Switchgear maintenance, protection testing, the site, and the transformer's no-load losses.
+    // A station that is merely ordered is losing nothing yet, so it is charged nothing yet.
+    const world = buildWorld(FIRST_REGION)
+    const site = emptyGround(world)
+    const hub = beginSubstationConstruction(world, 220, site.x, site.y).nodeId!
+
+    for (let i = 0; i < TICKS_PER_MONTH * 2; i++) world.step()
+    expect(world.books.window(hub, 'lifetime').fixedOpex).toBe(0)
+
+    finish(world, hub)
+    for (let i = 0; i < TICKS_PER_MONTH * 2; i++) world.step()
+    const charged = world.books.window(hub, 'lifetime').fixedOpex
+    expect(charged).toBeGreaterThan(0)
+    // Roughly two months of the annual figure, and never a whole year's worth of it.
+    expect(charged).toBeLessThan(LINE_TYPES[220].substationFixedOpexPerYear.value)
   })
 })

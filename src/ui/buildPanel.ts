@@ -283,6 +283,19 @@ export class BuildPanel {
         `${formatMoney(type.substationCapex.value)} · ${type.substationBuildMonths.value} ${t('ui.months')}`,
       ),
     )
+    // What the price actually buys, which used to be nothing at all: three voltages, three prices,
+    // and the same dot on the map with anything allowed to hang off it. The busbar rating is the
+    // number that decides between them, so it belongs next to the price rather than three clicks
+    // away in the station's own panel.
+    main.appendChild(
+      el(
+        'div',
+        'build-meta',
+        `${t('ui.stationBays', { kv })} ${type.substationBays.value} · ${formatMoney(
+          type.substationFixedOpexPerYear.value,
+        )}/${t('ui.year')}`,
+      ),
+    )
     main.appendChild(el('div', 'build-note', t('ui.substationNote')))
     row.appendChild(main)
 

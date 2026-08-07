@@ -470,6 +470,32 @@ try {
   console.log('substation placed by clicking the map:', nodesBefore, '->', nodesAfter)
   if (nodesAfter.subs < 1) throw new Error('Clicking the map did not place a substation')
 
+  // ...and it is a compound being dug, not a finished one. It used to arrive the instant it was
+  // paid for, the one asset in the game with no lead time, and a line could be hung on it the same
+  // hour. The refusal has to name the reason, because "no" on its own reads as a bug.
+  const station = await page.evaluate(() => {
+    const g = window.game
+    const node = g.world.network.allNodes().find((n) => n.id.startsWith('n_sub_'))
+    const other = g.world.network.getNode('n_central')
+    const quote = g.build.quoteLine(g.world, other.id, node.id, 220, 1)
+    g.hud.selectNode(node.id, false)
+    const inspector = document.getElementById('inspector')
+    return {
+      kvLevels: node.kvLevels,
+      monthsOut: Math.round((node.inServiceTick - g.world.tick) / (8760 / 12)),
+      refusal: quote.ok ? null : quote.reasonKey,
+      inspectorText: inspector.textContent,
+    }
+  })
+  console.log('station under construction:', station)
+  if (station.refusal !== 'build.substationNotReady') {
+    throw new Error(`A half-built station accepted a line: ${station.refusal ?? 'quoted ok'}`)
+  }
+  if (!(station.monthsOut > 0)) throw new Error('The station was in service the hour it was ordered')
+  if (!station.inspectorText.includes('In service in')) {
+    throw new Error('The inspector did not say when the station would be finished')
+  }
+
   // --- Lines are things you can ask about --------------------------------
   // Clock stopped, so the panel is not rebuilding under the automation between locating a
   // button and pressing it. A person does not need this — a press freezes the rebuild for its
@@ -760,7 +786,7 @@ try {
     // even on an empty chart. Each chart is asked for its own series colour instead.
     const series = [
       [0xc8, 0x6a, 0x3a], // emissions
-      [0xc8, 0x6a, 0x3a], // thermal — the mix band this fleet certainly has
+      [0x6b, 0x3a, 0x24], // lignite — the mix band this fleet certainly has
       [0xe2, 0x48, 0x3d], // unserved
       [0x5f, 0xc2, 0x7e], // cash
     ]

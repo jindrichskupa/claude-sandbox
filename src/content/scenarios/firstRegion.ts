@@ -21,6 +21,15 @@ export interface NodeSpec {
   x: number
   y: number
   name?: string
+  /**
+   * The voltages an inherited switching station is built for.
+   *
+   * Left out on purpose in the ordinary case: the levels are then read off the lines the scenario
+   * actually hangs on the station, which cannot disagree with the map. Write it only for a station
+   * that is built for a level it does not yet host — a 400 kV compound waiting for its first
+   * 400 kV line — because that is the one thing the lines cannot tell us.
+   */
+  kvLevels?: VoltageLevel[]
 }
 
 export interface CitySpec {

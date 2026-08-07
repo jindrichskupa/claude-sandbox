@@ -51,6 +51,14 @@ export interface LineTypeDef {
   /** Cost of the substation at each end. */
   substationCapex: Sourced<number>
   /**
+   * What a station of this voltage costs to own, per year, whatever flows through it.
+   *
+   * Switchgear maintenance, protection testing, the site, and the transformer's no-load losses —
+   * which are real energy, burned continuously for as long as the station is energised, and are
+   * why an unused substation is not a free option to hold.
+   */
+  substationFixedOpexPerYear: Sourced<number>
+  /**
    * How long a switching station takes to build, on its own.
    *
    * Not per kilometre, unlike the line: a substation is a compound with switchgear in it and its
@@ -58,6 +66,32 @@ export interface LineTypeDef {
    * voltage for the same reason the capital cost does — a 400 kV bay is a very large machine.
    */
   substationBuildMonths: Sourced<number>
+  /**
+   * How many line bays a station of this voltage is built with, per voltage level on the site.
+   *
+   * A bay is the countable thing in a switchyard: one circuit, its breaker, its disconnectors, its
+   * protection, its slice of land along the bus. A compound is laid out for a number of them and
+   * running out of bays is the ordinary reason a real station cannot take another line. Counting
+   * bays rather than megawatts also means a double-circuit line costs two, which is what it does.
+   *
+   * Per voltage level, because a transformer station is two switchyards sharing a fence: the
+   * scenario's northern station has a 220 kV yard facing the centre and a 110 kV yard facing
+   * Northgate and the Gorge, and neither one's bays are available to the other. Adding a level to
+   * a station therefore buys real room — and costs its own fixed opex, which is charged the
+   * same way.
+   *
+   * Falls with voltage because a 400 kV bay is enormous, and that is the trade the price ladder is
+   * meant to express: fewer, far larger connections. Before this, `kv` on a station was charged
+   * for at three prices and then never consulted again.
+   *
+   * Deliberately a limit on what may be *connected* rather than on what may flow. A throughput
+   * limit would be the more faithful model, and it would mean splitting every node into two
+   * halves inside the min-cost flow so a capacity arc could sit between them — which changes the
+   * solver, the nodal prices that come out of it as dual variables, and every arc endpoint in
+   * `dispatch.ts`. That is its own piece of work. This one is a real engineering constraint, it
+   * is checkable at the moment the player asks for the connection, and it can tell them why.
+   */
+  substationBays: Sourced<number>
   buildTimeMonthsPer100Km: Sourced<number>
   /** Base probability per year that a given kilometre suffers a fault. */
   faultRatePerKmYear: Sourced<number>
@@ -78,6 +112,8 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     repairHours: sourced(14, 'hours', 'entsoe-factsheet', Y),
     refurbishCostFraction: sourced(0.35, 'fraction', 'entsoe-factsheet', Y, 'Re-conductoring on standing towers'),
     substationCapex: sourced(4_000_000, 'EUR', 'entsoe-factsheet', Y),
+    substationBays: sourced(10, 'count', 'engineering-standard', Y, 'Feeder bays on a distribution-level busbar'),
+    substationFixedOpexPerYear: sourced(120_000, 'EUR', 'entsoe-factsheet', Y),
     substationBuildMonths: sourced(12, 'months', 'entsoe-factsheet', Y),
     buildTimeMonthsPer100Km: sourced(18, 'months', 'entsoe-factsheet', Y),
     faultRatePerKmYear: sourced(0.004, 'fraction', 'entsoe-factsheet', Y),
@@ -94,6 +130,8 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     repairHours: sourced(18, 'hours', 'entsoe-factsheet', Y),
     refurbishCostFraction: sourced(0.32, 'fraction', 'entsoe-factsheet', Y),
     substationCapex: sourced(9_000_000, 'EUR', 'entsoe-factsheet', Y),
+    substationBays: sourced(8, 'count', 'engineering-standard', Y, 'Line bays on a 220 kV double busbar'),
+    substationFixedOpexPerYear: sourced(260_000, 'EUR', 'entsoe-factsheet', Y),
     substationBuildMonths: sourced(18, 'months', 'entsoe-factsheet', Y),
     buildTimeMonthsPer100Km: sourced(24, 'months', 'entsoe-factsheet', Y),
     faultRatePerKmYear: sourced(0.003, 'fraction', 'entsoe-factsheet', Y),
@@ -110,6 +148,8 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     repairHours: sourced(26, 'hours', 'entsoe-factsheet', Y, 'Bigger machines, worse access, longer outages'),
     refurbishCostFraction: sourced(0.30, 'fraction', 'entsoe-factsheet', Y),
     substationCapex: sourced(20_000_000, 'EUR', 'entsoe-factsheet', Y),
+    substationBays: sourced(6, 'count', 'engineering-standard', Y, 'A 400 kV bay is very large; fewer fit a compound'),
+    substationFixedOpexPerYear: sourced(600_000, 'EUR', 'entsoe-factsheet', Y),
     substationBuildMonths: sourced(30, 'months', 'entsoe-factsheet', Y, 'Consents and switchgear lead times, not concrete'),
     buildTimeMonthsPer100Km: sourced(36, 'months', 'entsoe-factsheet', Y, 'Permitting dominates, not construction'),
     faultRatePerKmYear: sourced(0.002, 'fraction', 'entsoe-factsheet', Y),

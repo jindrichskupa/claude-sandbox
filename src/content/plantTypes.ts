@@ -785,3 +785,21 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
 }
 
 export const PLANT_TYPE_IDS = Object.keys(PLANT_TYPES) as PlantTypeId[]
+
+/**
+ * Which band of the generation mix a technology belongs in.
+ *
+ * The category for everything except a thermal plant, where it is the *fuel*. Lumping lignite,
+ * hard coal and gas together under "thermal" was the chart's largest omission: those three are the
+ * whole of the decision the opening scenario is about, they have wildly different carbon and
+ * marginal cost, and the player was watching one brown band that could not tell them whether the
+ * lignite had come off or not. Nuclear stays its own band rather than becoming "uranium", because
+ * that is how everyone reads a dispatch stack.
+ */
+export function mixBand(typeId: PlantTypeId): string {
+  const type = PLANT_TYPES[typeId]
+  return type.category === 'thermal' ? type.fuel : type.category
+}
+
+/** Bands the mix chart stacks, bottom to top: baseload low, weather-driven above it. */
+export const MIX_BANDS = ['nuclear', 'lignite', 'coal', 'biomass', 'gas', 'hydro', 'wind', 'solar', 'storage']

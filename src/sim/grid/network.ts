@@ -41,6 +41,37 @@ export interface GridNode {
   nameIndex?: number
   /** Free-form display name for places that are named rather than keyed, such as cities. */
   name?: string
+
+  /**
+   * The voltages a switching station is built for.
+   *
+   * Only on substations, and a *set* rather than a single level, because a real station very
+   * often is one: the scenario's northern station carries 220 kV in from the centre and hands
+   * 110 kV out to Northgate and the Gorge, which is what a transformer station is for. A single
+   * field could not describe it without lying about half the lines already hanging off it.
+   *
+   * Before this, `kv` was charged for at three prices and then never consulted again: a player
+   * bought a 400 kV station, got the same dot on the map as a 110 kV one, and could hang anything
+   * off it. Now the levels decide what may connect and how much of it, so the price buys
+   * something. A station the player builds starts with the one level they paid for.
+   */
+  kvLevels?: VoltageLevel[]
+  /**
+   * When the station enters service. Undefined for anything the scenario placed, which was
+   * commissioned before the run began.
+   *
+   * A station under construction is on the map — it has been consented and the ground is being
+   * dug — and is not yet a place a line may be connected to. Until this existed, a substation was
+   * the one thing in the game that appeared the instant it was paid for, while a plant got a
+   * construction phase and a line was created de-energised. The money was already being spread
+   * over the build; only the thing being bought arrived early.
+   */
+  inServiceTick?: number
+}
+
+/** Whether a node is a place a line may be connected to now, rather than one day. */
+export function nodeInService(node: GridNode, tick: number): boolean {
+  return node.inServiceTick === undefined || tick >= node.inServiceTick
 }
 
 export interface GridEdge {

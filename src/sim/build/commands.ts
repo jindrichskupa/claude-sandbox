@@ -20,7 +20,7 @@ import { lifeFraction } from '../assets/aging'
 import { designLifeFactor, realDecommissioningFactor } from '../tech/costs'
 import { isWorthRenewing } from '../grid/aging'
 import { nominal } from '../tech/money'
-import { PLAYER, tileDistance, type GridEdge, type GridNode, type NodeId } from '../grid/network'
+import { nodeInService, PLAYER, tileDistance, type GridEdge, type GridNode, type NodeId } from '../grid/network'
 import { judgeSite } from './siting'
 import { isBuildable } from '../map/terrain'
 import { routeLine, simplifyRoute } from '../grid/routing'
@@ -210,7 +210,28 @@ export function beginPlantConstruction(
 // Lines
 // ---------------------------------------------------------------------------
 
-/** What a line between two existing nodes would cost. */
+/**
+ * How many bays a switching station has left at one voltage.
+ *
+ * A bay per circuit, so a double-circuit line takes two — which is what it does in a real
+ * switchyard. Counts lines still under construction as well as energised ones, because a bay that
+ * has been committed is a bay that is spoken for.
+ *
+ * Each level on the site has its own yard and its own bays; see `substationBays`. Returns
+ * `Infinity` for anything that is not a station built for this voltage, so the caller can treat
+ * "no limit here" and "room here" the same way.
+ */
+export function substationBaysFree(world: World, node: GridNode, kv: VoltageLevel): number {
+  if (node.kind !== 'substation' || !node.kvLevels?.includes(kv)) return Infinity
+  let used = 0
+  for (const edgeId of world.network.edgesOf(node.id)) {
+    const edge = world.network.requireEdge(edgeId)
+    if (edge.commodity !== 'electric' || edge.kv !== kv) continue
+    used += Math.max(1, edge.circuits)
+  }
+  return LINE_TYPES[kv].substationBays.value - used
+}
+
 export function quoteLine(world: World, fromId: NodeId, toId: NodeId, kv: VoltageLevel, circuits = 1): Quote {
   if (fromId === toId) return refuse('build.sameNode')
   const from = world.network.getNode(fromId)
@@ -222,6 +243,20 @@ export function quoteLine(world: World, fromId: NodeId, toId: NodeId, kv: Voltag
     .map((id) => world.network.requireEdge(id))
     .some((e) => (e.from === toId || e.to === toId) && e.kv === kv)
   if (duplicate) return refuse('build.alreadyConnected')
+
+  // Both ends have to be places a line can actually be connected to, and a switching station is
+  // three things before it is that: finished, built for this voltage, and not already full.
+  for (const node of [from, to]) {
+    if (!nodeInService(node, world.tick)) return refuse('build.substationNotReady')
+    if (node.kind !== 'substation' || !node.kvLevels?.length) continue
+    if (!node.kvLevels.includes(kv)) {
+      return refuse('build.wrongVoltage', { kv: node.kvLevels.join('/') })
+    }
+    const free = substationBaysFree(world, node, kv)
+    if (Math.max(1, circuits) > free) {
+      return refuse('build.substationFull', { bays: Math.max(0, free), kv })
+    }
+  }
 
   // The line follows the cheapest corridor it can find rather than the straight line, so
   // going around a ridge is a real option rather than an imaginary one.
@@ -268,11 +303,11 @@ export function quoteSubstation(world: World, kv: VoltageLevel, x: number, y: nu
 /**
  * Put a substation on the map.
  *
- * The node appears at once and there is deliberately no half-built state for it, which is worth
- * explaining because every other asset has one. A substation on its own does nothing whatever: it
- * is a place for lines to meet, and the first line to reach it takes years. Giving the node its
- * own energised flag would mean teaching the island decomposition and the flow solver about a
- * third kind of not-yet-real thing, in order to model a delay that the lines already impose.
+ * The node appears the day it is consented and becomes connectable only when it is finished, which
+ * is a change from how it used to work: the site was usable the instant it was paid for, the one
+ * asset in the game that arrived early while its money was already being spread over a build like
+ * everything else. `inServiceTick` is the whole of the delay — the island decomposition and the
+ * flow solver never see the node, because a station with no lines on it is not in any island.
  */
 export function beginSubstationConstruction(
   world: World,
@@ -291,15 +326,24 @@ export function beginSubstationConstruction(
     ownerId: PLAYER,
     x,
     y,
-    nameKey: `line.${kv}`,
+    // Its own key, not the line's: a station called "220 kV line 6" is the kind of small wrongness
+    // that makes a player stop trusting the labels.
+    nameKey: `substation.${kv}`,
     nameIndex: serial,
+    kvLevels: [kv],
+    // On the map from the day it is consented, connectable only when it is finished. It was
+    // previously usable the instant it was paid for — the one thing in the game that arrived
+    // early, while its money was already being spread across the build like everything else.
+    inServiceTick: world.tick + quote.buildTicks,
   })
   world.scheduleSpending(nodeId, quote.totalCost, quote.buildTicks, 'capex')
+  // Two headlines, because they are two facts: work has started, and years later it is
+  // finished and can be used. The second is the one the player is waiting for.
   world.reportNews({
-    category: 'grid',
+    category: 'construction',
     importance: NewsImportance.Notable,
-    titleKey: 'news.substationBuilt',
-    params: { kv },
+    titleKey: 'news.substationStarted',
+    params: { kv, months: Math.round(quote.buildTicks / TICKS_PER_MONTH) },
     subjectId: nodeId,
     subjectKind: 'node',
   })
@@ -326,6 +370,15 @@ export function quoteLineUpgrade(world: World, edgeId: string): Quote {
   if (!edge.energised) return refuse('build.stillBuilding')
   if (edge.upgradeAtTick !== undefined) return refuse('build.alreadyUpgrading')
   if (edge.circuits >= MAX_CIRCUITS) return refuse('build.maxCircuits', { circuits: MAX_CIRCUITS })
+
+  // A second circuit needs a second bay at each end, exactly as a new line does. The cost line
+  // below has always charged for that switchgear; the room for it was never checked.
+  for (const nodeId of [edge.from, edge.to]) {
+    const node = world.network.requireNode(nodeId)
+    if (substationBaysFree(world, node, edge.kv) < 1) {
+      return refuse('build.substationFull', { bays: 0, kv: edge.kv })
+    }
+  }
 
   const type = LINE_TYPES[edge.kv]
   const totalCost =
@@ -486,6 +539,17 @@ export function quoteVoltageUpgrade(world: World, edgeId: string): Quote {
 
   const next = nextVoltage(edge.kv)
   if (next === null) return refuse('build.alreadyHighestVoltage')
+
+  // The price below includes a new station at each end, so a station that has no yard at the new
+  // voltage gets one — that is what is being bought. What it cannot do is squeeze the circuits into
+  // a yard at that voltage which is already full.
+  for (const nodeId of [edge.from, edge.to]) {
+    const node = world.network.requireNode(nodeId)
+    const free = substationBaysFree(world, node, next)
+    if (free < Math.max(1, edge.circuits)) {
+      return refuse('build.substationFull', { bays: Math.max(0, free), kv: next })
+    }
+  }
 
   const from = LINE_TYPES[edge.kv]
   const to = LINE_TYPES[next]

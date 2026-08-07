@@ -14,7 +14,7 @@ import { LINE_TYPES } from '@content/lineTypes'
 import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
 import { PLANT_TYPES } from '@content/plantTypes'
 import type { World } from '@sim/world'
-import type { GridEdge, GridNode } from '@sim/grid/network'
+import { nodeInService, type GridEdge, type GridNode } from '@sim/grid/network'
 import { isDispatchable } from '@sim/assets/types'
 import { Tile, type TerrainMap } from '@sim/map/terrain'
 import { judgeSite } from '@sim/build/siting'
@@ -625,6 +625,14 @@ export class MapView {
         } else if (building) {
           ring.circle(0, 0, TILE_PX * 0.5).stroke({ width: 2, color: 0x7fd4ff, alpha: 0.5 })
         }
+      } else if (node.kind === 'substation' && !nodeInService(node, this.world.tick)) {
+        // A compound being dug looks like one, in the same faded blue a plant under construction
+        // wears. Without this the station the player has just paid four years for is on the map
+        // looking exactly like the finished one next to it, and the refusal when they try to
+        // connect a line to it reads as a bug.
+        sprite.alpha = 0.5
+        sprite.tint = 0x9aa4ae
+        ring.circle(0, 0, TILE_PX * 0.5).stroke({ width: 2, color: 0x7fd4ff, alpha: 0.5 })
       }
 
       if (node.id === this.selectedNodeId) {

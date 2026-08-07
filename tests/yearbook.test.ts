@@ -12,6 +12,8 @@ import { describe, expect, it } from 'vitest'
 import { buildWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { turningPoint, type YearRecord } from '@sim/economy/yearbook'
+import { MIX_BANDS } from '@content/plantTypes'
+import en from '@i18n/en.json'
 
 const HOURS_PER_YEAR = 8760
 
@@ -42,6 +44,19 @@ describe('the yearbook', () => {
       expect(year.firmCapacityMw).toBeLessThanOrEqual(year.totalCapacityMw + 1e-9)
       expect(Object.values(year.mixMwh).reduce((a, b) => a + b, 0)).toBeGreaterThan(0)
       expect(year.regimeId).toBeTruthy()
+
+      // The mix is split by fuel where the fuel is the decision. One "thermal" band lumped lignite,
+      // hard coal and gas together — the three things the opening scenario is entirely about, with
+      // wildly different carbon and marginal cost — so the chart could not say whether the lignite
+      // had come off or merely been turned down.
+      expect(Object.keys(year.mixMwh)).not.toContain('thermal')
+      expect(year.mixMwh.lignite).toBeGreaterThan(0)
+      expect(year.mixMwh.coal).toBeGreaterThan(0)
+      // And every band the recorder emits is one the chart knows how to draw and label.
+      for (const band of Object.keys(year.mixMwh)) {
+        expect(MIX_BANDS, band).toContain(band)
+        expect((en as Record<string, string>)[`category.${band}`], band).toBeTruthy()
+      }
     }
   })
 

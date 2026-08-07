@@ -31,7 +31,7 @@
 import { formatMoney, t } from '@i18n/index'
 import type { World } from '@sim/world'
 import { turningPoint, type YearRecord } from '@sim/economy/yearbook'
-import { drawYearBars, drawYearMix } from './charts'
+import { drawYearBars, drawYearMix, mixLegend } from './charts'
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -88,25 +88,14 @@ export class HistoryPanel {
       block.appendChild(canvas)
       const caption = el('div', 'hist-caption')
       block.appendChild(caption)
+      // The legend belongs under the chart it explains, not at the foot of the panel where it was:
+      // three charts down from the mix, below the fold, describing bands the reader has stopped
+      // looking at.
+      if (key === 'ui.histMix') block.appendChild(mixLegend(t))
       this.body.appendChild(block)
       this.canvases.push(canvas)
       this.captions.push(caption)
     }
-
-    const legend = el('div', 'legend')
-    for (const [category, colour] of [
-      ['nuclear', '#b455c8'],
-      ['hydro', '#3f9fd0'],
-      ['thermal', '#c86a3a'],
-      ['wind', '#63c8a8'],
-      ['solar', '#e0c04a'],
-      ['storage', '#9aa3b0'],
-    ] as const) {
-      const span = el('span', undefined, t(`category.${category}`))
-      span.style.color = colour
-      legend.appendChild(span)
-    }
-    this.body.appendChild(legend)
 
     parent.appendChild(this.root)
   }

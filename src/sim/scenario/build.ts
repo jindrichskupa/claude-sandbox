@@ -10,6 +10,7 @@
 import type { ScenarioContent } from '@content/scenarios/firstRegion'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { TICKS_PER_YEAR } from '../core/time'
+import type { VoltageLevel } from '@content/lineTypes'
 import { PLAYER, type GridEdge, type GridNode } from '../grid/network'
 import { routeLine, simplifyRoute } from '../grid/routing'
 import { LifecyclePhase, type CityAsset, type PlantAsset } from '../assets/types'
@@ -53,6 +54,7 @@ export function buildWorld(content: ScenarioContent): World {
       y: spec.y,
     }
     if (spec.name) node.name = spec.name
+    if (spec.kvLevels) node.kvLevels = [...spec.kvLevels]
     world.network.addNode(node)
   }
 
@@ -82,6 +84,25 @@ export function buildWorld(content: ScenarioContent): World {
       route: simplifyRoute(route),
     }
     world.network.addEdge(edge)
+  }
+
+  // What the inherited switching stations are built for, read off the lines hanging on them
+  // rather than written down twice. Two reasons to derive it: the scenario cannot then contradict
+  // its own map, and the northern station is genuinely a transformer station — 220 kV in from the
+  // centre, 110 kV out to Northgate and the Gorge — which a hand-written single level would have
+  // described wrongly. A station the scenario gave an explicit list keeps it.
+  //
+  // The inherited stations have to be constrained for the same reason the player's are. Leaving
+  // them unlimited while limiting the ones the player pays for would make building your own
+  // station a penalty, which is backwards.
+  for (const node of world.network.allNodes()) {
+    if (node.kind !== 'substation' || node.kvLevels) continue
+    const levels = new Set<VoltageLevel>()
+    for (const edgeId of world.network.edgesOf(node.id)) {
+      const edge = world.network.requireEdge(edgeId)
+      if (edge.commodity === 'electric' && edge.kv !== 0) levels.add(edge.kv)
+    }
+    if (levels.size) node.kvLevels = [...levels].sort((a, b) => a - b)
   }
 
   // Heat mains. Same graph as the power lines, and routed the same way — a buried pipe follows

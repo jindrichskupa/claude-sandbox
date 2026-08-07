@@ -63,7 +63,7 @@ import { HEAT_PIPE_TYPES, type PipeSize } from '@content/heatPipeTypes'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { sourced, type Sourced } from '@content/schema'
 import { LifecyclePhase, type PlantAsset } from '../assets/types'
-import type { GridEdge } from '../grid/network'
+import { nodeInService, type GridEdge, type GridNode } from '../grid/network'
 import type { PeriodLedger } from './economy'
 
 export const REGULATION = {
@@ -112,6 +112,8 @@ export function rateBase(
   plants: PlantAsset[],
   edges: GridEdge[],
   capexPerKw: (plant: PlantAsset) => number,
+  nodes: GridNode[] = [],
+  tick = 0,
 ): RateBase {
   let replacementCost = 0
   let depreciationPerYear = 0
@@ -138,6 +140,21 @@ export function rateBase(
     }
     replacementCost += cost
     depreciationPerYear += cost / Math.max(5, life)
+  }
+
+  // The switching stations, on the same basis as everything else. Left out until they became
+  // assets in their own right, which was defensible while a station was a free dot on the map and
+  // is not now: a compound the player pays for and then maintains for forty years is exactly the
+  // kind of capital a regulated business is entitled to recover. A station still being dug is out,
+  // like a plant under construction and for the same reason.
+  for (const node of nodes) {
+    if (node.kind !== 'substation' || !node.kvLevels?.length) continue
+    if (!nodeInService(node, tick)) continue
+    for (const kv of node.kvLevels) {
+      const line = LINE_TYPES[kv]
+      replacementCost += line.substationCapex.value
+      depreciationPerYear += line.substationCapex.value / Math.max(5, line.designLifeYears.value)
+    }
   }
 
   return { replacementCost, depreciationPerYear }

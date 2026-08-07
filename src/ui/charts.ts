@@ -6,6 +6,7 @@
  * library would be far more code than the two functions below.
  */
 
+import { MIX_BANDS } from '@content/plantTypes'
 import type { TickSnapshot } from '@sim/world'
 import type { YearRecord } from '@sim/economy/yearbook'
 
@@ -23,17 +24,27 @@ export const THEME: ChartTheme = {
   font: '10px system-ui, sans-serif',
 }
 
-const CATEGORY_COLOURS: Record<string, string> = {
+/**
+ * One colour per band of the mix.
+ *
+ * The thermal fuels are separated rather than sharing one brown, because they are the whole of the
+ * decision the opening scenario is about: lignite, hard coal and gas have very different carbon and
+ * very different marginal cost, and a single band could not tell the player whether the lignite had
+ * come off or merely been turned down. They keep a warm family so the stack still reads as "burning
+ * something", and darken with carbon intensity — lignite is the darkest thing on the chart, which
+ * is the one association worth encoding.
+ */
+const BAND_COLOURS: Record<string, string> = {
   nuclear: '#b455c8',
+  lignite: '#6b3a24',
+  coal: '#8f4a28',
+  biomass: '#7f8f3a',
+  gas: '#d98a3c',
   hydro: '#3f9fd0',
-  thermal: '#c86a3a',
   wind: '#63c8a8',
   solar: '#e0c04a',
   storage: '#9aa3b0',
 }
-
-/** Draw order, bottom to top. Baseload at the bottom reads the way a dispatch stack should. */
-const STACK_ORDER = ['nuclear', 'hydro', 'thermal', 'wind', 'solar', 'storage']
 
 function setup(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.clearRect(0, 0, w, h)
@@ -108,7 +119,7 @@ export function drawMix(canvas: HTMLCanvasElement, history: TickSnapshot[]): voi
   let max = 0
   for (const s of history) {
     let total = 0
-    for (const c of STACK_ORDER) total += s.mixMw[c] ?? 0
+    for (const c of MIX_BANDS) total += s.mixMw[c] ?? 0
     max = Math.max(max, total)
   }
   max = Math.max(1, max * 1.05)
@@ -116,8 +127,8 @@ export function drawMix(canvas: HTMLCanvasElement, history: TickSnapshot[]): voi
   const x = (i: number) => (i / (history.length - 1)) * w
   const running = new Array<number>(history.length).fill(0)
 
-  for (const category of STACK_ORDER) {
-    ctx.fillStyle = CATEGORY_COLOURS[category] ?? '#888'
+  for (const category of MIX_BANDS) {
+    ctx.fillStyle = BAND_COLOURS[category] ?? '#888'
     ctx.beginPath()
     // Up along the top of this band...
     for (let i = 0; i < history.length; i++) {
@@ -278,19 +289,39 @@ export function drawYearMix(canvas: HTMLCanvasElement, years: YearRecord[]): voi
   for (let i = 0; i < years.length; i++) {
     const year = years[i]!
     let total = 0
-    for (const c of STACK_ORDER) total += year.mixMwh[c] ?? 0
+    for (const c of MIX_BANDS) total += year.mixMwh[c] ?? 0
     if (total <= 0) continue
 
     let y = plot
-    for (const category of STACK_ORDER) {
+    for (const category of MIX_BANDS) {
       const share = (year.mixMwh[category] ?? 0) / total
       if (share <= 0) continue
       const band = share * (plot - 2)
-      ctx.fillStyle = CATEGORY_COLOURS[category] ?? '#888'
+      ctx.fillStyle = BAND_COLOURS[category] ?? '#888'
       ctx.fillRect(i * slot, y - band, width, band)
       y -= band
     }
   }
 
   drawYearAxis(ctx, w, h, years, '100%')
+}
+
+/**
+ * The mix legend, built from the same table the chart draws from.
+ *
+ * Two panels show a mix chart and both used to carry their own hand-copied list of colours, which
+ * is how a legend ends up describing a chart that has moved on without it — as this one had the
+ * moment the thermal band was split by fuel. Now there is one source, and a band that is added
+ * appears in both legends or in neither.
+ */
+export function mixLegend(t: (key: string) => string): HTMLDivElement {
+  const legend = document.createElement('div')
+  legend.className = 'legend'
+  for (const band of MIX_BANDS) {
+    const span = document.createElement('span')
+    span.textContent = t(`category.${band}`)
+    span.style.color = BAND_COLOURS[band] ?? '#888'
+    legend.appendChild(span)
+  }
+  return legend
 }
