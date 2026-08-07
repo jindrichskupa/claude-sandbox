@@ -795,7 +795,13 @@ export class Hud {
       const heatShort = heat?.unservedHeatMw.get(city.id) ?? 0
       if (heatServed + heatShort > 0.01) {
         block.appendChild(this.kv(t('ui.heatDemand'), formatMwth(heatServed + heatShort)))
-        if (heatShort > 0.01) block.appendChild(this.kv(t('ui.heatUnserved'), formatMwth(heatShort)))
+        if (heatShort > 0.01) {
+          // Marked, as the electrical shortfall above it is. It read as an ordinary grey row
+          // before, which for the one failure the scenario counts as losing is not enough.
+          const row = this.kv(t('ui.heatUnserved'), formatMwth(heatShort))
+          row.classList.add('bad')
+          block.appendChild(row)
+        }
       }
       this.inspector.appendChild(block)
     }

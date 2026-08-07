@@ -173,9 +173,10 @@ export function openingBrief(world: World): BriefLine[] {
  * The most pressing thing, or nothing at all.
  *
  * Ordered by how soon it becomes irreversible rather than by how large it is, because that is the
- * ordering a player cannot work out for themselves without having played the scenario once. A
- * station reaching end of life outranks a thin margin, because building takes years and the margin
- * can be fixed in a season; both outrank money, which is a symptom of the other two.
+ * ordering a player cannot work out for themselves without having played the scenario once. Damage
+ * happening now outranks damage coming: a town without its heat is at the top. Below it, a station
+ * reaching end of life outranks a thin margin, because building takes years and the margin can be
+ * fixed in a season; both outrank money, which is a symptom of the other two.
  *
  * Returns null when there is genuinely nothing — a quiet system should say so by being quiet,
  * and an interface that always has a warning on it has no warnings at all.
@@ -183,7 +184,30 @@ export function openingBrief(world: World): BriefLine[] {
 export function nextConcern(world: World): Concern | null {
   const building = world.plants.some((p) => p.phase === LifecyclePhase.Building)
 
-  // 1. A station at the end of its life with nothing on the way. The one thing that cannot be
+  // 1. A town that is not getting its heat, named — first, because it is the only entry here that
+  //    is damage rather than warning. The others say what will go wrong; this one says what is
+  //    going wrong at this hour, and by the project's own rules a cold town in February is not a
+  //    brownout, it is the scenario's losing condition. Heat also cannot be moved more than a few
+  //    tens of kilometres, so *which* town decides the whole answer — and until this existed the
+  //    player could see that heat was short, from the topbar, and had no way at all of finding out
+  //    where.
+  for (const city of world.cities) {
+    const cold = world.lastHeat?.unservedHeatMw.get(city.id) ?? 0
+    if (cold <= 0.01) continue
+    const demand = cold + (world.lastHeat?.servedHeatMw.get(city.id) ?? 0)
+    return {
+      key: 'concern.cold',
+      params: {
+        city: city.name,
+        mw: Math.round(cold),
+        pct: demand > 0 ? Math.round((cold / demand) * 100) : 100,
+      },
+      subjectId: city.nodeId,
+      subjectKind: 'node',
+    }
+  }
+
+  // 2. A station at the end of its life with nothing on the way. The one thing that cannot be
   //    fixed once it happens, because the replacement takes years the player no longer has.
   for (const plant of world.plants) {
     if (plant.phase !== LifecyclePhase.Operating) continue
@@ -204,7 +228,7 @@ export function nextConcern(world: World): Concern | null {
     }
   }
 
-  // 2. Not enough plant that will actually turn up. Measured against what the system has already
+  // 3. Not enough plant that will actually turn up. Measured against what the system has already
   //    been asked for, so it is a fact about this run rather than a rule of thumb.
   // The highest demand the system has actually been asked for, out of the snapshot ring — which
   // holds a year, and a year is exactly the window a system is sized against.
@@ -220,7 +244,7 @@ export function nextConcern(world: World): Concern | null {
     }
   }
 
-  // 3. The lights went out recently. Last, not first, because by the time this fires the other
+  // 4. The lights went out recently. Late, not first, because by the time this fires the other
   //    two have usually been true for years — it is the symptom, and the player has already been
   //    told about the causes.
   if (world.lastMonthLedger.energyUnservedMwh > 0) {
@@ -230,7 +254,7 @@ export function nextConcern(world: World): Concern | null {
     }
   }
 
-  // 4. Money, once it is clearly going the wrong way rather than merely dipping in a bad month.
+  // 5. Money, once it is clearly going the wrong way rather than merely dipping in a bad month.
   if (world.finances.cash <= 0 && world.finances.debt > 0) {
     return {
       key: 'concern.borrowing',

@@ -81,6 +81,7 @@
   "concern.endOfLife": "{plant} ({mw} MW) has about {years} years left and nothing is being built. A replacement takes {months} months.",
   "concern.pastLife": "{plant} ({mw} MW) is past its design life and nothing is being built to replace it.",
   "concern.thinMargin": "{firm} MW will answer against a peak of {peak} MW. There is no room for an outage.",
+  "concern.cold": "{city} is {pct}% short of the heat it needs — {mw} MW. Heat cannot be moved far, so the answer has to stand near the town.",
   "concern.unserved": "{mwh} MWh went undelivered last month.",
   "concern.borrowing": "Cash is gone and €{debt}m is borrowed. Every month now adds to it.",
   "ui.cash": "Cash",

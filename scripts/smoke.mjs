@@ -123,6 +123,36 @@ try {
   if (whySteps < 3) throw new Error('Modifier explanation did not render')
   await page.screenshot({ path: join(OUT, '03-plant-inspector.png') })
 
+  // --- Every button in the inspector can actually be pressed ---------------
+  // A node with four units makes the inspector taller than the screen, which is fine — it scrolls.
+  // What was not fine is that it ran further down the screen than the other left-hand panels and
+  // so passed *under* the line legend and the standing concern line, both of which sit above it in
+  // the stacking order and swallowed the clicks. The last unit's Refurbish and Mothball were
+  // visible and dead. Nothing about that is visible in a screenshot, which is why it is asserted.
+  const reach = await page.evaluate(() => {
+    const g = window.game
+    const counts = new Map()
+    for (const p of g.world.plants) counts.set(p.nodeId, (counts.get(p.nodeId) ?? 0) + 1)
+    const busiest = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]
+    g.hud.selectNode(busiest[0], true)
+    const inspector = document.getElementById('inspector')
+    const blocked = []
+    for (const button of inspector.querySelectorAll('button')) {
+      // Scroll it into view first: below the fold is not the same as covered, and conflating the
+      // two makes this check pass or fail for the wrong reason.
+      button.scrollIntoView({ block: 'center' })
+      const r = button.getBoundingClientRect()
+      const over = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      if (over && over !== button && !button.contains(over)) {
+        blocked.push(`${button.textContent.trim()} under ${over.closest('[id]')?.id ?? over.tagName}`)
+      }
+    }
+    return { node: busiest[0], units: busiest[1], buttons: inspector.querySelectorAll('button').length, blocked }
+  })
+  console.log('inspector reachability:', reach)
+  if (reach.units < 2) throw new Error('No node with more than one unit; this check proves nothing')
+  if (reach.blocked.length) throw new Error(`Inspector buttons are covered: ${reach.blocked.join(', ')}`)
+
   // --- District heating -------------------------------------------------
   // The heat network has to be visibly running, not merely present in the data model.
   const heat = await page.evaluate(() => {

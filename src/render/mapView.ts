@@ -610,6 +610,22 @@ export class MapView {
         if (dark) {
           ring.circle(0, 0, TILE_PX * 0.55).stroke({ width: 2, color: 0xff6a5c, alpha: 0.85 })
         }
+
+        // A town that is not getting its heat, in the orange the heat network wears everywhere
+        // else. Until now this was the one kind of failure with no mark on the map at all: the
+        // headline said a town was losing its heat supply and then scrolled away, the topbar said
+        // how many megawatts were short but not where, and a player who wanted to run a main to the
+        // right place had nothing to look at. A dashed ring rather than a solid one, so a town that
+        // is both cold and dark shows both and neither hides the other.
+        const cold = city ? (this.world.lastHeat?.unservedHeatMw.get(city.id) ?? 0) : 0
+        if (cold > 0.01) {
+          const r = TILE_PX * 0.7
+          for (let i = 0; i < 8; i++) {
+            const from = (i / 8) * Math.PI * 2
+            ring.arc(0, 0, r, from, from + Math.PI / 8)
+          }
+          ring.stroke({ width: 3, color: 0xe8802a, alpha: 0.95 })
+        }
       } else if (node.kind === 'plant') {
         const plants = this.world.plants.filter((p) => p.nodeId === node.id)
         const running = plants.some((p) => isDispatchable(p) && Math.abs(p.outputMw) > 0.5)
