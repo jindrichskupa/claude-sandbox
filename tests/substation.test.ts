@@ -38,6 +38,21 @@ function finish(world: ReturnType<typeof buildWorld>, nodeId: string): string {
   return nodeId
 }
 
+/** The nearest buildable tile to a node, so a test line is short enough to simulate. */
+function emptyGroundNear(world: ReturnType<typeof buildWorld>, nodeId: string) {
+  const anchor = world.network.requireNode(nodeId)
+  let best: { x: number; y: number; d: number } | null = null
+  for (let y = 0; y < world.scenario.mapHeight; y++) {
+    for (let x = 0; x < world.scenario.mapWidth; x++) {
+      if (!isBuildable(world.terrain, x, y) || world.nodeNear(x, y, 1.5)) continue
+      const d = Math.hypot(x - anchor.x, y - anchor.y)
+      if (!best || d < best.d) best = { x, y, d }
+    }
+  }
+  if (!best) throw new Error('nowhere to put a station, which is itself a bug')
+  return best
+}
+
 function emptyGround(world: ReturnType<typeof buildWorld>, skip = 0) {
   let seen = 0
   for (let y = 0; y < world.scenario.mapHeight; y++) {
@@ -109,11 +124,7 @@ describe('building a substation', () => {
     const hub = built.nodeId!
     expect(world.network.requireNode(hub).kind).toBe('substation')
 
-    // Not yet, though: the compound is being dug. This is the part that used to be missing.
-    expect(quoteLine(world, 'n_central', hub, 220, 1).reasonKey).toBe('build.substationNotReady')
-    finish(world, hub)
-
-    // A line can now be run to a place of the player's choosing.
+    // A line can be run to a place of the player's choosing.
     const quote = quoteLine(world, 'n_central', hub, 220, 1)
     expect(quote.ok, quote.reasonKey ?? '').toBe(true)
     const line = beginLineConstruction(world, 'n_central', hub, 220, 1)
@@ -143,11 +154,10 @@ describe('building a substation', () => {
 })
 
 describe('a station is an asset, not a point', () => {
-  it('takes years to build, and says so before it is asked', () => {
+  it('takes years to build', () => {
     // Every other asset in the game has a lead time. The substation used to be the exception: it
     // arrived the instant it was paid for, while its money was already being spread over a build
-    // like everything else's. The refusal is the visible half of the fix, and it names the reason
-    // rather than saying no.
+    // like everything else's.
     const world = buildWorld(FIRST_REGION)
     const site = emptyGround(world)
     const built = beginSubstationConstruction(world, 400, site.x, site.y)
@@ -161,6 +171,42 @@ describe('a station is an asset, not a point', () => {
     // Long enough to be a decision rather than a formality — a 400 kV compound is years of work.
     expect(built.quote.buildTicks! / TICKS_PER_YEAR).toBeGreaterThan(1)
   })
+
+  it('takes a line before it is finished, and energises it when it is', () => {
+    // The order a real project runs in: the corridor and the compound are two contracts proceeding
+    // side by side, and the line is switched in when both are ready. Refusing to quote the line
+    // until the station was finished — which is how this was first written — left the player idle
+    // through the station's whole build before starting something that takes years of its own.
+    const world = buildWorld(FIRST_REGION)
+    // Close to Central, so the corridor is short enough to simulate to its end in a test.
+    const site = emptyGroundNear(world, 'n_central')
+    const built = beginSubstationConstruction(world, 220, site.x, site.y)
+    const hub = built.nodeId!
+
+    const line = beginLineConstruction(world, 'n_central', hub, 220, 1)
+    expect(line.ok, line.quote.reasonKey ?? '').toBe(true)
+    const edgeId = world.network.edgesOf(hub)[0]!
+    const lineDoneAt = world.tick + line.quote.buildTicks!
+
+    // Push the compound out past the corridor, whichever way round the two happen to fall for
+    // this pair of tiles. It is the *ordering* rule being tested, not the content's durations.
+    const readyAt = lineDoneAt + Math.round(TICKS_PER_MONTH * 3)
+    world.network.requireNode(hub).inServiceTick = readyAt
+
+    // The countdown the inspector shows is the later of the two dates, because that is the one
+    // that is true. Counting down to the line's own completion would run out at a moment when
+    // nothing happens, which is worse than saying nothing at all.
+    expect(world.energisingTick(edgeId)).toBe(readyAt)
+
+    // Wind past the line's own completion. The corridor is finished and still carries nothing,
+    // because the compound at its far end is a building site.
+    while (world.tick <= lineDoneAt) world.step()
+    expect(world.network.requireEdge(edgeId).energised).toBe(false)
+
+    // Then the station enters service, and the line goes live without the player doing anything.
+    while (world.tick <= readyAt) world.step()
+    expect(world.network.requireEdge(edgeId).energised).toBe(true)
+  }, 300_000)
 
   it('is built for a voltage, and refuses the ones it is not', () => {
     // Before this, `kv` was charged for at three prices and then never consulted again: the player

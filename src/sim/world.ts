@@ -612,9 +612,22 @@ export class World {
    * Exposed so the inspector can tell the player when a half-built corridor will start carrying
    * anything. A plant under construction has said so since M1; a line said nothing at all, which
    * made the one asset whose whole point is a long lead time the one you could learn least about.
+   *
+   * The later of the line's own completion and its two ends', because a corridor run to a station
+   * that is still being dug waits for the compound. Reporting only the line's date would count the
+   * player down to a moment when nothing happens, which is worse than saying nothing.
    */
   energisingTick(edgeId: string): number | undefined {
-    return this.energiseAt.get(edgeId)
+    const own = this.energiseAt.get(edgeId)
+    if (own === undefined) return undefined
+    const edge = this.network.getEdge(edgeId)
+    if (!edge) return own
+    let at = own
+    for (const nodeId of [edge.from, edge.to]) {
+      const node = this.network.getNode(nodeId)
+      if (node?.inServiceTick !== undefined) at = Math.max(at, node.inServiceTick)
+    }
+    return at
   }
 
   get date(): GameDate {
@@ -1237,12 +1250,23 @@ export class World {
 
     // A finished line joins the grid. Until then it exists on the map but carries nothing,
     // which is what makes the construction time mean something.
+    //
+    // Both ends have to be finished too, not just the line. A corridor may be run to a station
+    // that is still being dug — that is how the work is really sequenced, the two contracts
+    // proceeding side by side — and it simply waits for the compound before it is switched in.
+    // Forbidding the order instead would have made the player stand idle for the station's whole
+    // build before starting a line that takes years of its own.
     if (this.energiseAt.size > 0) {
       for (const [edgeId, tick] of [...this.energiseAt]) {
         if (this.tick < tick) continue
-        this.energiseAt.delete(edgeId)
         const edge = this.network.getEdge(edgeId)
-        if (!edge) continue
+        if (!edge) {
+          this.energiseAt.delete(edgeId)
+          continue
+        }
+        const ends = [this.network.getNode(edge.from), this.network.getNode(edge.to)]
+        if (ends.some((n) => n && !nodeInService(n, this.tick))) continue
+        this.energiseAt.delete(edgeId)
         this.network.setEnergised(edgeId, true)
         this.postNews({
           category: 'grid',

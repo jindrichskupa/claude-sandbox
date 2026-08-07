@@ -501,27 +501,37 @@ try {
   if (nodesAfter.subs < 1) throw new Error('Clicking the map did not place a substation')
 
   // ...and it is a compound being dug, not a finished one. It used to arrive the instant it was
-  // paid for, the one asset in the game with no lead time, and a line could be hung on it the same
-  // hour. The refusal has to name the reason, because "no" on its own reads as a bug.
+  // paid for, the one asset in the game with no lead time. A corridor may still be run to it —
+  // that is how the work is really sequenced — and waits for the compound before it is switched in,
+  // so the date the inspector counts down to has to be the later of the two.
   const station = await page.evaluate(() => {
     const g = window.game
     const node = g.world.network.allNodes().find((n) => n.id.startsWith('n_sub_'))
     const other = g.world.network.getNode('n_central')
     const quote = g.build.quoteLine(g.world, other.id, node.id, 220, 1)
+    const line = g.build.beginLineConstruction(g.world, other.id, node.id, 220, 1)
+    const edgeId = g.world.network.edgesOf(node.id)[0]
     g.hud.selectNode(node.id, false)
-    const inspector = document.getElementById('inspector')
     return {
       kvLevels: node.kvLevels,
       monthsOut: Math.round((node.inServiceTick - g.world.tick) / (8760 / 12)),
-      refusal: quote.ok ? null : quote.reasonKey,
-      inspectorText: inspector.textContent,
+      lineQuoted: quote.ok,
+      lineStarted: line.ok,
+      energised: edgeId ? g.world.network.getEdge(edgeId).energised : null,
+      energisesAt: edgeId ? g.world.energisingTick(edgeId) : null,
+      stationReadyAt: node.inServiceTick,
+      inspectorText: document.getElementById('inspector').textContent,
     }
   })
   console.log('station under construction:', station)
-  if (station.refusal !== 'build.substationNotReady') {
-    throw new Error(`A half-built station accepted a line: ${station.refusal ?? 'quoted ok'}`)
-  }
   if (!(station.monthsOut > 0)) throw new Error('The station was in service the hour it was ordered')
+  if (!station.lineQuoted || !station.lineStarted) {
+    throw new Error('A line could not be run to a station that is still being built')
+  }
+  if (station.energised !== false) throw new Error('The line went live before its station did')
+  if (!(station.energisesAt >= station.stationReadyAt)) {
+    throw new Error('The energising date ignores the station it is waiting for')
+  }
   if (!station.inspectorText.includes('In service in')) {
     throw new Error('The inspector did not say when the station would be finished')
   }

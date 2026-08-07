@@ -20,7 +20,7 @@ import { lifeFraction } from '../assets/aging'
 import { designLifeFactor, realDecommissioningFactor } from '../tech/costs'
 import { isWorthRenewing } from '../grid/aging'
 import { nominal } from '../tech/money'
-import { nodeInService, PLAYER, tileDistance, type GridEdge, type GridNode, type NodeId } from '../grid/network'
+import { PLAYER, tileDistance, type GridEdge, type GridNode, type NodeId } from '../grid/network'
 import { judgeSite } from './siting'
 import { isBuildable } from '../map/terrain'
 import { routeLine, simplifyRoute } from '../grid/routing'
@@ -244,10 +244,13 @@ export function quoteLine(world: World, fromId: NodeId, toId: NodeId, kv: Voltag
     .some((e) => (e.from === toId || e.to === toId) && e.kv === kv)
   if (duplicate) return refuse('build.alreadyConnected')
 
-  // Both ends have to be places a line can actually be connected to, and a switching station is
-  // three things before it is that: finished, built for this voltage, and not already full.
+  // A station has to be built for this voltage and have a bay free — but it does *not* have to be
+  // finished. A corridor may be run to a compound that is still being dug, which is how the work
+  // is really sequenced: the two contracts proceed side by side and the line is switched in when
+  // both are ready. Refusing the order instead left the player standing idle through the station's
+  // whole build before starting a line that takes years of its own, for no reason anybody digging
+  // a trench would recognise.
   for (const node of [from, to]) {
-    if (!nodeInService(node, world.tick)) return refuse('build.substationNotReady')
     if (node.kind !== 'substation' || !node.kvLevels?.length) continue
     if (!node.kvLevels.includes(kv)) {
       return refuse('build.wrongVoltage', { kv: node.kvLevels.join('/') })

@@ -145,7 +145,6 @@
   "build.cannotAfford": "Cannot afford it",
   "build.unsuitableGround": "Unsuitable ground",
   "build.tooClose": "Too close to something else",
-  "build.substationNotReady": "That substation is still being built",
   "build.wrongVoltage": "That substation is built for {kv} kV",
   "build.substationFull": "That substation has {bays} free {kv} kV bays",
   "build.sameNode": "Pick two different points",
