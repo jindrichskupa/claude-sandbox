@@ -1532,3 +1532,52 @@ button.danger:hover {
   letter-spacing: 0.07em;
   color: var(--warn);
 }
+
+/* ---- Financing --------------------------------------------------------
+ *
+ * At the head of the accounts, above the assets, because it answers a question that comes before
+ * "which station is losing money": what is owed, and what could be raised. It used to have no
+ * screen at all — borrowing happened automatically and silently.
+ */
+.acct-financing {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.acct-loan {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+}
+
+.acct-loan-kind {
+  display: block;
+  color: var(--text);
+}
+
+.acct-loan-terms {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.acct-loan-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.acct-offers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.acct-offers button {
+  font-size: 10px;
+  padding: 4px 8px;
+}

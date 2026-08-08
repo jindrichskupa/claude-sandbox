@@ -29,7 +29,17 @@
  */
 
 import { formatMoney, t } from '@i18n/index'
-import { addLedger, emptyLedger, ledgerProfit, type PeriodLedger } from '@sim/economy/economy'
+import {
+  addLedger,
+  borrowingHeadroom,
+  emptyLedger,
+  gearing,
+  ledgerProfit,
+  quoteLoan,
+  type PeriodLedger,
+} from '@sim/economy/economy'
+import { ECONOMICS } from '@content/economics'
+import { TICKS_PER_YEAR } from '@sim/core/time'
 import { PLANT_TYPES } from '@content/plantTypes'
 import type { World } from '@sim/world'
 import {
@@ -236,6 +246,8 @@ export class AccountsPanel {
     })
     this.body.appendChild(search)
 
+    this.body.appendChild(this.financingSection())
+
     const measure = BASES.find((b) => b.basis === this.basis)!.measure
     const ranked = this.world.books.ranked(this.window, measure)
 
@@ -364,6 +376,104 @@ export class AccountsPanel {
    * *which of these is losing the money?* — is answered by shape faster than by reading, and the
    * ranking is already sorted so the losses are at the top where a bar leftwards is unmissable.
    */
+  /**
+   * What is owed, to whom, and the option to borrow or clear it.
+   *
+   * Borrowing used to be something that happened *to* the player: a shortfall was covered by an
+   * automatic draw on a facility nobody chose, interest accrued for ever on a total nothing paid
+   * down, and there was no screen anywhere that said so. This is the screen. The rate quoted is
+   * the real one — priced on the gearing the balance sheet would have *after* drawing, which is
+   * the question a lender asks — so a player can see borrowing get dearer as they use it up.
+   */
+  private financingSection(): HTMLDivElement {
+    const f = this.world.finances
+    const box = el('div', 'acct-financing')
+    const head = el('div', 'acct-group')
+    head.appendChild(el('span', undefined, t('ui.financing')))
+    head.appendChild(el('b', f.debt > 0 ? 'bad' : 'good', formatMoney(f.debt)))
+    box.appendChild(head)
+
+    const headroom = borrowingHeadroom(f)
+    const geared = gearing(f)
+    const bar = el('div', 'bar')
+    const fill = el('div')
+    fill.style.width = `${Math.min(100, geared * 100)}%`
+    fill.style.background = geared > 0.9 ? '#e2483d' : geared > 0.7 ? '#e8b23a' : '#5fc27e'
+    bar.appendChild(fill)
+    box.appendChild(bar)
+    box.appendChild(this.kv(t('ui.borrowingRoom'), formatMoney(headroom)))
+
+    for (const loan of f.loans) {
+      const row = el('div', 'acct-loan')
+      const left = el('div')
+      left.appendChild(
+        el('span', 'acct-loan-kind', t(loan.kind === 'emergency' ? 'ui.loanEmergency' : 'ui.loanPlanned')),
+      )
+      left.appendChild(
+        el(
+          'span',
+          'acct-loan-terms',
+          `${(loan.ratePerYear * 100).toFixed(1)}% · ${t('ui.loanMaturesIn', {
+            years: Math.max(0, Math.round((loan.maturesTick - this.world.tick) / TICKS_PER_YEAR)),
+          })}`,
+        ),
+      )
+      row.appendChild(left)
+      const right = el('div', 'acct-loan-right')
+      right.appendChild(el('b', undefined, formatMoney(loan.outstanding)))
+      // Clearing early is a genuine use for cash, and the one the accounts panel is the right
+      // place to offer: it is the only screen where what a loan costs is next to what it bought.
+      const clear = el('button', undefined, t('ui.loanRepay'))
+      clear.disabled = this.world.finances.cash < 1
+      clear.addEventListener('click', () => {
+        this.world.repayLoan(loan.id)
+        this.lastSignature = null
+        this.render()
+      })
+      right.appendChild(clear)
+      row.appendChild(right)
+      box.appendChild(row)
+    }
+
+    if (headroom > 1) {
+      // Three sizes rather than a free field: this is a strategic choice about how much of the
+      // balance sheet to spend, not an exercise in typing numbers, and each button shows what it
+      // would actually cost before it is pressed.
+      const offers = el('div', 'acct-offers')
+      for (const [labelKey, share] of [
+        ['ui.loanQuarter', 0.25],
+        ['ui.loanHalf', 0.5],
+        ['ui.loanAll', 1],
+      ] as const) {
+        const amount = headroom * share
+        const quote = quoteLoan(f, amount, ECONOMICS.loanTermYears.value, this.world.state.investorConfidence)
+        if (quote.amount < 1) continue
+        const button = el('button', undefined, `${t(labelKey)} · ${formatMoney(quote.amount)}`)
+        button.title = t('ui.loanQuoteNote', {
+          rate: (quote.ratePerYear * 100).toFixed(1),
+          monthly: formatMoney(quote.monthlyPayment),
+          interest: formatMoney(quote.totalInterest),
+        })
+        button.addEventListener('click', () => {
+          this.world.borrow(quote.amount, ECONOMICS.loanTermYears.value)
+          this.lastSignature = null
+          this.render()
+        })
+        offers.appendChild(button)
+      }
+      box.appendChild(offers)
+    }
+
+    return box
+  }
+
+  private kv(label: string, value: string): HTMLDivElement {
+    const row = el('div', 'kv')
+    row.appendChild(el('span', undefined, label))
+    row.appendChild(el('b', undefined, value))
+    return row
+  }
+
   private renderRow(id: string, value: number, ledger: AssetLedger, scale: number): HTMLDivElement {
     const { name, kind } = assetLabel(this.world, id)
     const row = el('div', `acct-row ${value >= 0 ? 'acct-good' : 'acct-bad'}`)

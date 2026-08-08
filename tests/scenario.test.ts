@@ -31,7 +31,7 @@ import { makeSaveFile, parseSaveFile, SaveError, SAVE_VERSION } from '@sim/scena
 import { beginPlantConstruction, retirePlant } from '@sim/build/commands'
 
 function context(overrides: Partial<ObjectiveContext> = {}): ObjectiveContext {
-  const finances: Finances = { cash: 100e6, debt: 0, trailingRevenue: 500e6, bankrupt: false }
+  const finances: Finances = { cash: 100e6, debt: 0, trailingRevenue: 500e6, bankrupt: false, loans: [], loanSerial: 0 }
   return {
     plants: [],
     finances,
@@ -160,7 +160,7 @@ describe('objectives', () => {
   it('ends the scenario the moment the utility goes bankrupt', () => {
     // Not at the end year: a utility that cannot pay its bills is not going to be judged on its
     // carbon intensity in nine years' time.
-    const broke: Finances = { cash: -1, debt: 1e9, trailingRevenue: 0, bankrupt: true }
+    const broke: Finances = { cash: -1, debt: 1e9, trailingRevenue: 0, bankrupt: true, loans: [], loanSerial: 0 }
     expect(scenarioOutcome([], [], context({ finances: broke, year: 2000 }))).toBe('lost')
   })
 

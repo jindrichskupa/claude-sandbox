@@ -7,6 +7,7 @@
  * keeps those systems additive.
  */
 
+import { ECONOMICS } from '@content/economics'
 import { FUELS, type FuelId } from '@content/fuels'
 import { LINE_TYPES } from '@content/lineTypes'
 import { heatCapacityOf, mixBand, PLANT_TYPES } from '@content/plantTypes'
@@ -89,7 +90,10 @@ import {
   creditRecycling,
   chargeFixedCosts,
   chargeGeneration,
-  chargeInterest,
+  repayLoan,
+  serviceLoans,
+  takeLoan,
+  type Loan,
   chargeUnserved,
   creditSales,
   emptyLedger,
@@ -390,6 +394,24 @@ export class World {
       debt: scenario.startingDebt,
       trailingRevenue: 0,
       bankrupt: false,
+      loans: [],
+      loanSerial: 0,
+    }
+    // The debt the scenario hands over is a loan like any other, and has to be, or it would be the
+    // one borrowing in the game that is never repaid and never costs an instalment. It is taken as
+    // already part-way through its term, for the same reason the fleet is already part-way through
+    // its life: this is a utility with a history, not one that opened yesterday.
+    if (scenario.startingDebt > 0) {
+      const term = ECONOMICS.loanTermYears.value
+      this.finances.loans.push({
+        id: 'loan_inherited',
+        principal: scenario.startingDebt,
+        outstanding: scenario.startingDebt,
+        ratePerYear: ECONOMICS.loanInterestRate.value,
+        takenTick: -Math.round((term / 2) * TICKS_PER_YEAR),
+        maturesTick: Math.round((term / 2) * TICKS_PER_YEAR),
+        kind: 'planned',
+      })
     }
 
     this.params = new Params(this.registry, (targetId, param) => this.baseValue(targetId, param))
@@ -632,6 +654,35 @@ export class World {
 
   get date(): GameDate {
     return tickToDate(this.tick, this.scenario.startYear)
+  }
+
+  /**
+   * Take a loan, at the rate the balance sheet currently earns.
+   *
+   * On the world rather than in the panel that offers it, because it is a command like building a
+   * station: it changes the run, and it has to be reachable from anywhere the player can decide to
+   * do it — including, one day, from an auto-player.
+   */
+  borrow(amount: number, termYears: number): Loan | null {
+    const loan = takeLoan(this.finances, amount, termYears, this.tick, this.state.investorConfidence)
+    if (loan) {
+      this.postNews({
+        category: 'finance',
+        importance: NewsImportance.Notable,
+        titleKey: 'news.loanTaken',
+        params: {
+          amount: Math.round(loan.principal / 1e6),
+          rate: (loan.ratePerYear * 100).toFixed(1),
+          years: Math.round((loan.maturesTick - loan.takenTick) / TICKS_PER_YEAR),
+        },
+      })
+    }
+    return loan
+  }
+
+  /** Clear a loan early out of cash, saving the interest it would have accrued. */
+  repayLoan(loanId: string): number {
+    return repayLoan(this.finances, loanId)
   }
 
   /** Recent snapshots, oldest first. */
@@ -1405,7 +1456,7 @@ export class World {
     }
 
     if (this.state.insured) chargeInsurance(this.openLedger, this.plants, ticks)
-    chargeInterest(this.openLedger, this.finances, ticks, this.state.investorConfidence)
+    serviceLoans(this.openLedger, this.finances, ticks)
 
     // The windfall levy is monthly because it is charged on a price, and a price averaged over a
     // year would never exceed a crisis threshold that a single hard winter month does.
@@ -1421,7 +1472,23 @@ export class World {
       )
     }
     const solventBefore = !this.finances.bankrupt
-    settlePeriod(this.finances, this.openLedger)
+    const rescue = settlePeriod(this.finances, this.openLedger, this.tick, this.state.investorConfidence)
+    // Being bailed out is news. It used to happen in silence — the shortfall was added to a debt
+    // total nothing ever paid down, and the player found out, if at all, by noticing a number had
+    // grown. Now it is a dear, short loan with instalments to carry, and saying so is the whole
+    // point of having made it one.
+    if (rescue) {
+      this.postNews({
+        category: 'finance',
+        importance: NewsImportance.Major,
+        titleKey: 'news.emergencyLoan',
+        params: {
+          amount: Math.round(rescue.principal / 1e6),
+          rate: (rescue.ratePerYear * 100).toFixed(1),
+          years: Math.round((rescue.maturesTick - rescue.takenTick) / TICKS_PER_YEAR),
+        },
+      })
+    }
     // The hour the money runs out is the hour the clock stops, and it is almost never the first
     // of January — so waiting for the year-end verdict to say anything left the player watching a
     // frozen game with no explanation anywhere. This files it the moment it happens, at the one

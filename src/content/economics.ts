@@ -67,6 +67,35 @@ export interface EconomicsDef {
   confidenceRatePenalty: Sourced<number>
   /** The tariff reset never falls below this, so a collapse in wholesale does not bankrupt anyone. */
   tariffFloorPerMwh: Sourced<number>
+  /**
+   * How long a loan for network or generation capital runs.
+   *
+   * Long, and deliberately shorter than what it buys. Infrastructure debt is tenored against the
+   * asset's revenue rather than its physical life: nobody lends for forty years against a station
+   * whose regulatory settlement is reviewed every five, so the plant outlives its own financing and
+   * has to be refinanced or paid off out of what it earns. That gap is the whole of the pressure
+   * this models.
+   */
+  loanTermYears: Sourced<number>
+  /**
+   * How much dearer debt becomes as the balance sheet fills up.
+   *
+   * The lender's price for the last euro is not the price of the first. A utility already at its
+   * ceiling is a worse credit than one with room, and charging both the same rate is what let debt
+   * be a free resource up to a cliff edge and then nothing at all. Applied on gearing — debt
+   * against the limit — so the cost rises smoothly and the decision to borrow again is a real one.
+   */
+  gearingRatePenalty: Sourced<number>
+  /**
+   * What an unplanned overdraft costs on top of a planned loan.
+   *
+   * Money raised in a hurry by somebody who has run out is dearer than money raised in advance by
+   * somebody who has not. Without this, letting the automatic facility cover a bad month was free
+   * relative to arranging finance properly, so there was no reason ever to plan.
+   */
+  emergencyRatePremium: Sourced<number>
+  /** How long the emergency facility runs before it must be repaid. Short, as such lending is. */
+  emergencyTermYears: Sourced<number>
 }
 
 export const ECONOMICS: EconomicsDef = {
@@ -84,4 +113,8 @@ export const ECONOMICS: EconomicsDef = {
   insurancePremiumRate: sourced(0.006, 'fraction', 'game-design', 2024, 'Of insured capital value, per year'),
   confidenceRatePenalty: sourced(1.0, 'fraction', 'eu-energy-policy', 2022, 'A full loss of confidence roughly doubles the cost of debt'),
   tariffFloorPerMwh: sourced(55, 'EUR/MWh', 'iea-weo', 2023, 'Regulated tariffs are sticky downwards'),
+  loanTermYears: sourced(15, 'years', 'eu-energy-policy', 2022, 'Typical tenor of European utility infrastructure debt'),
+  gearingRatePenalty: sourced(0.5, 'fraction', 'eu-energy-policy', 2022, 'Spread widens by about half again at full gearing'),
+  emergencyRatePremium: sourced(0.75, 'fraction', 'game-design', 2024, 'Distressed borrowing is far dearer than arranged'),
+  emergencyTermYears: sourced(5, 'years', 'game-design', 2024, 'A rescue facility is repaid quickly, not carried'),
 }

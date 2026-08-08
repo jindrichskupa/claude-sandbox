@@ -11,7 +11,7 @@ import { ECONOMICS } from '@content/economics'
 import { BASE_PRICES, type Prices } from '../tech/money'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { FUELS } from '@content/fuels'
-import { TICKS_PER_YEAR } from '../core/time'
+import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '../core/time'
 import { Param } from '../params/types'
 import type { Params } from '../params/Params'
 import { incursFixedCost, LifecyclePhase, type PlantAsset } from '../assets/types'
@@ -25,6 +25,16 @@ export interface PeriodLedger {
   varOpex: number
   fixedOpex: number
   interest: number
+  /**
+   * Principal returned to lenders this period.
+   *
+   * On its own line and *not* in `recoverableCosts`, which is the point of separating it from
+   * interest. Repaying a loan is not a cost of providing the service — the capital it bought is
+   * already in the rate base and is recovered through depreciation — so a regulator does not let
+   * it be charged to customers. Interest is the price of the money and is recoverable; the money
+   * itself is not. Folding the two together would have let a player raise the tariff by borrowing.
+   */
+  debtRepaid: number
   unservedPenalty: number
   /** Capital spent on construction in this period. */
   capex: number
@@ -69,6 +79,7 @@ export function emptyLedger(): PeriodLedger {
     varOpex: 0,
     fixedOpex: 0,
     interest: 0,
+    debtRepaid: 0,
     unservedPenalty: 0,
     capex: 0,
     decommissioningCost: 0,
@@ -97,6 +108,7 @@ export function ledgerProfit(l: PeriodLedger): number {
     l.varOpex -
     l.fixedOpex -
     l.interest -
+    l.debtRepaid -
     l.unservedPenalty -
     l.capex -
     l.decommissioningCost -
@@ -116,6 +128,7 @@ export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.varOpex += from.varOpex
   into.fixedOpex += from.fixedOpex
   into.interest += from.interest
+  into.debtRepaid += from.debtRepaid
   into.unservedPenalty += from.unservedPenalty
   into.capex += from.capex
   into.decommissioningCost += from.decommissioningCost
@@ -133,12 +146,55 @@ export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.co2Tonnes += from.co2Tonnes
 }
 
+/**
+ * One borrowing, with a term and a repayment schedule.
+ *
+ * Debt used to be a single number that only ever went up. `settlePeriod` covered a shortfall by
+ * silently drawing on an unlimited-looking facility, interest accrued on the total for ever, and
+ * the principal was never repaid by anything — so a player could not choose to borrow, could not
+ * choose to clear it, and mostly did not know it had happened. That is not a decision, it is a
+ * leak with a number attached.
+ *
+ * A loan here behaves as one: a sum drawn on a day, at a rate fixed on that day, repaid in level
+ * instalments over a term. Which means borrowing early and cheaply to build something that earns
+ * is a different act from being bailed out of a bad winter, and the accounts can tell them apart.
+ */
+export interface Loan {
+  id: string
+  /** What was drawn. Kept so the interface can show how far through the loan is. */
+  principal: number
+  /** What is still owed. */
+  outstanding: number
+  /**
+   * Fixed for the life of the loan, at the rate on the day it was taken.
+   *
+   * Fixed rather than floating on purpose: it is what makes *when* you borrow a decision. A player
+   * who financed a station while investor confidence was intact keeps that rate through the
+   * government that wrecks it, which is exactly the asymmetry long-tenor infrastructure debt has.
+   */
+  ratePerYear: number
+  takenTick: number
+  maturesTick: number
+  kind: 'planned' | 'emergency'
+}
+
 export interface Finances {
   cash: number
+  /**
+   * Total still owed, across every loan.
+   *
+   * Derived from `loans` and kept in step with it, rather than being the primary record. It stays
+   * because a great deal reads it — the borrowing limit, the brief, the accounts, the objectives —
+   * and none of that cares how the debt is structured.
+   */
   debt: number
   /** Rolling 12-month revenue, used to size the borrowing limit. */
   trailingRevenue: number
   bankrupt: boolean
+  /** Every loan still outstanding. */
+  loans: Loan[]
+  /** Serial for loan ids, so they are stable across a save. */
+  loanSerial: number
 }
 
 /**
@@ -293,27 +349,128 @@ export function chargeInsurance(
 }
 
 /**
- * Interest on outstanding debt for a period.
+ * The rate the utility actually pays, after the country's record with investors.
  *
- * `investorConfidence` is what makes tearing up a support contract cost something. A country
- * that has repudiated its promises borrows more expensively for everything afterwards, including
- * projects that had nothing to do with the contract that was broken — which is precisely why the
- * decision is a hard one for a real government rather than free money.
+ * `investorConfidence` is what makes tearing up a support contract cost something. `gearing` is
+ * what makes the balance sheet a constraint rather than a cliff: the last euro a lender advances
+ * to somebody already at their ceiling is not priced like the first to somebody with room. Before
+ * gearing entered, debt was free at any level right up to a hard limit, and then unavailable —
+ * which gave a player no reason to borrow early, when it is cheap, rather than late.
  */
-export function chargeInterest(
-  ledger: PeriodLedger,
-  finances: Finances,
-  ticksInPeriod: number,
-  investorConfidence = 1,
-): void {
-  if (finances.debt <= 0) return
-  ledger.interest += finances.debt * effectiveInterestRate(investorConfidence) * (ticksInPeriod / TICKS_PER_YEAR)
+export function effectiveInterestRate(investorConfidence: number, gearing = 0): number {
+  const confidence = Math.max(0.01, Math.min(1, investorConfidence))
+  const geared = Math.max(0, Math.min(1, gearing))
+  return (
+    ECONOMICS.loanInterestRate.value *
+    (1 + (1 - confidence) * ECONOMICS.confidenceRatePenalty.value) *
+    (1 + geared * ECONOMICS.gearingRatePenalty.value)
+  )
 }
 
-/** The rate the utility actually pays, after the country's record with investors. */
-export function effectiveInterestRate(investorConfidence: number): number {
-  const confidence = Math.max(0.01, Math.min(1, investorConfidence))
-  return ECONOMICS.loanInterestRate.value * (1 + (1 - confidence) * ECONOMICS.confidenceRatePenalty.value)
+/** How full the balance sheet is, 0 to 1. Above one only if the limit has fallen under the debt. */
+export function gearing(finances: Finances): number {
+  const limit = finances.trailingRevenue * ECONOMICS.maxDebtToRevenue.value
+  if (limit <= 0) return 1
+  return Math.max(0, finances.debt / limit)
+}
+
+/** Level monthly instalment that clears `principal` over `months` at `ratePerYear`. */
+export function instalment(principal: number, ratePerYear: number, months: number): number {
+  if (months <= 0) return principal
+  const monthly = ratePerYear / MONTHS_PER_YEAR
+  if (monthly <= 0) return principal / months
+  // The standard annuity. Level payments mean the early years are mostly interest, which is both
+  // how such a loan really amortises and the reason an early repayment saves so much.
+  return (principal * monthly) / (1 - Math.pow(1 + monthly, -months))
+}
+
+/** What a loan of this size and term would cost, without committing to it. */
+export function quoteLoan(
+  finances: Finances,
+  amount: number,
+  termYears: number,
+  investorConfidence = 1,
+  kind: Loan['kind'] = 'planned',
+): { amount: number; ratePerYear: number; monthlyPayment: number; totalInterest: number; ok: boolean } {
+  const capped = Math.max(0, Math.min(amount, borrowingHeadroom(finances)))
+  // Priced on the gearing the utility will have *after* drawing, not before. Asking what the
+  // balance sheet looks like once the money is on it is the question a lender actually asks.
+  const after = { ...finances, debt: finances.debt + capped }
+  let rate = effectiveInterestRate(investorConfidence, gearing(after))
+  if (kind === 'emergency') rate *= 1 + ECONOMICS.emergencyRatePremium.value
+  const months = Math.max(1, Math.round(termYears * MONTHS_PER_YEAR))
+  const monthly = instalment(capped, rate, months)
+  return {
+    amount: capped,
+    ratePerYear: rate,
+    monthlyPayment: monthly,
+    totalInterest: monthly * months - capped,
+    ok: capped > 0 && capped >= amount - 1,
+  }
+}
+
+/** Draw a loan. The cash arrives now; the instalments start next month. */
+export function takeLoan(
+  finances: Finances,
+  amount: number,
+  termYears: number,
+  tick: number,
+  investorConfidence = 1,
+  kind: Loan['kind'] = 'planned',
+): Loan | null {
+  const quote = quoteLoan(finances, amount, termYears, investorConfidence, kind)
+  if (quote.amount <= 0) return null
+  const loan: Loan = {
+    id: `loan_${++finances.loanSerial}`,
+    principal: quote.amount,
+    outstanding: quote.amount,
+    ratePerYear: quote.ratePerYear,
+    takenTick: tick,
+    maturesTick: tick + Math.round(termYears * TICKS_PER_YEAR),
+    kind,
+  }
+  finances.loans.push(loan)
+  finances.cash += quote.amount
+  finances.debt += quote.amount
+  return loan
+}
+
+/**
+ * Pay a period's instalments: interest as a cost, principal as a repayment.
+ *
+ * Replaces the flat interest charge that preceded it, which accrued on a total nothing ever paid
+ * down. The split between interest and principal matters beyond bookkeeping — see `debtRepaid` — and so does the fact that principal now
+ * actually leaves. A player who borrows to build has years of instalments to carry afterwards,
+ * which is what makes the size of the borrowing a decision rather than a formality.
+ */
+export function serviceLoans(ledger: PeriodLedger, finances: Finances, ticksInPeriod: number): void {
+  if (finances.loans.length === 0) return
+  const share = ticksInPeriod / (TICKS_PER_YEAR / MONTHS_PER_YEAR)
+  for (const loan of finances.loans) {
+    const monthsLeft = Math.max(1, Math.round((loan.maturesTick - loan.takenTick) / (TICKS_PER_YEAR / MONTHS_PER_YEAR)))
+    const monthly = instalment(loan.principal, loan.ratePerYear, monthsLeft)
+    const interest = loan.outstanding * (loan.ratePerYear / MONTHS_PER_YEAR) * share
+    // Never repay more than is left, and never let a rounding tail keep a cleared loan alive.
+    const principal = Math.max(0, Math.min(loan.outstanding, monthly * share - interest))
+    ledger.interest += interest
+    ledger.debtRepaid += principal
+    loan.outstanding -= principal
+  }
+  finances.loans = finances.loans.filter((l) => l.outstanding > 1)
+  finances.debt = finances.loans.reduce((sum, l) => sum + l.outstanding, 0)
+}
+
+/** Clear a loan early, out of cash. What it saves is the interest that would have accrued. */
+export function repayLoan(finances: Finances, loanId: string): number {
+  const loan = finances.loans.find((l) => l.id === loanId)
+  if (!loan) return 0
+  const paid = Math.min(finances.cash, loan.outstanding)
+  if (paid <= 0) return 0
+  finances.cash -= paid
+  loan.outstanding -= paid
+  if (loan.outstanding <= 1) finances.loans = finances.loans.filter((l) => l.id !== loanId)
+  finances.debt = finances.loans.reduce((sum, l) => sum + l.outstanding, 0)
+  return paid
 }
 
 /**
@@ -413,20 +570,31 @@ export function creditRecycling(ledger: PeriodLedger, amount: number): void {
 }
 
 /**
- * Settle a period. Cash goes negative before bankruptcy: an automatic emergency loan is
- * taken if there is headroom, because a utility that misses one bad month should not
- * instantly cease to exist.
+ * Settle a period. Cash goes negative before bankruptcy: an automatic emergency facility is
+ * drawn if there is headroom, because a utility that misses one bad month should not instantly
+ * cease to exist.
+ *
+ * The facility is a *loan* now, not a silent addition to a total. It has a rate — dearer than
+ * arranged borrowing, because money raised in a hurry by somebody who has run out is dearer than
+ * money raised in advance by somebody who has not — a short term, and instalments that have to be
+ * carried afterwards. Before that it was free relative to planning ahead, which is the same as
+ * saying there was no reason to plan.
+ *
+ * Returns the loan if one was drawn, so the caller can report it. A player being rescued and not
+ * told is how a run ends in confusion.
  */
-export function settlePeriod(finances: Finances, ledger: PeriodLedger): void {
+export function settlePeriod(
+  finances: Finances,
+  ledger: PeriodLedger,
+  tick = 0,
+  investorConfidence = 1,
+): Loan | null {
   const profit = ledgerProfit(ledger)
   finances.cash += profit
+  if (finances.cash >= 0) return null
 
-  if (finances.cash < 0) {
-    const need = -finances.cash
-    const available = borrowingHeadroom(finances)
-    const borrowed = Math.min(need, available)
-    finances.debt += borrowed
-    finances.cash += borrowed
-    if (finances.cash < 0) finances.bankrupt = true
-  }
+  const need = -finances.cash
+  const loan = takeLoan(finances, need, ECONOMICS.emergencyTermYears.value, tick, investorConfidence, 'emergency')
+  if (finances.cash < 0) finances.bankrupt = true
+  return loan
 }

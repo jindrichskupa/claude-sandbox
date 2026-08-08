@@ -130,7 +130,7 @@ function context(overrides: Partial<DirectorContext> = {}): DirectorContext {
   const registry = new ModifierRegistry()
   const network = new Network()
   network.addNode({ id: 'site', kind: 'plant', ownerId: PLAYER, x: 0, y: 0 })
-  const finances: Finances = { cash: 400e6, debt: 250e6, trailingRevenue: 600e6, bankrupt: false }
+  const finances: Finances = { cash: 400e6, debt: 250e6, trailingRevenue: 600e6, bankrupt: false, loans: [], loanSerial: 0 }
   return {
     tick: GRACE_TICKS + 1,
     year: 2000,
@@ -228,8 +228,8 @@ describe('risk', () => {
 
 describe('the severity director', () => {
   it('gives a stretched utility a quieter year than a comfortable one', () => {
-    const comfortable: Finances = { cash: 900e6, debt: 100e6, trailingRevenue: 600e6, bankrupt: false }
-    const stretched: Finances = { cash: 5e6, debt: 2_300e6, trailingRevenue: 600e6, bankrupt: false }
+    const comfortable: Finances = { cash: 900e6, debt: 100e6, trailingRevenue: 600e6, bankrupt: false, loans: [], loanSerial: 0 }
+    const stretched: Finances = { cash: 5e6, debt: 2_300e6, trailingRevenue: 600e6, bankrupt: false, loans: [], loanSerial: 0 }
     expect(severityBudget(stretched)).toBeLessThan(severityBudget(comfortable))
     // And never to zero: a world where nothing goes wrong is not a reprieve, it is a different
     // and much duller game.
@@ -427,7 +427,7 @@ describe('what an event actually does', () => {
 
   it('will not let a choice the player cannot afford push them under', () => {
     const director = new EventDirector()
-    const broke: Finances = { cash: 1e6, debt: 0, trailingRevenue: 10e6, bankrupt: false }
+    const broke: Finances = { cash: 1e6, debt: 0, trailingRevenue: 10e6, bankrupt: false, loans: [], loanSerial: 0 }
     const ctx = context({ plants: [plant('unit', 'ccgt')], finances: broke })
     director.state.pending.push({
       uid: 'w1',

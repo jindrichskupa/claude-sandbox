@@ -536,6 +536,36 @@ try {
     throw new Error('The inspector did not say when the station would be finished')
   }
 
+  // --- Borrowing is a decision now ---------------------------------------
+  // It used to happen to the player: a shortfall drew silently on a facility nobody chose, the
+  // principal was never repaid by anything, and no screen anywhere said so. The accounts panel is
+  // now where that lives, so the buttons have to be there and the money has to arrive.
+  const financing = await page.evaluate(() => {
+    const g = window.game
+    g.hud.accountsPanel.setOpen(true)
+    const panel = document.getElementById('accounts-panel')
+    const box = panel.querySelector('.acct-financing')
+    const offers = [...box.querySelectorAll('.acct-offers button')]
+    const before = { cash: g.world.finances.cash, debt: g.world.finances.debt, loans: g.world.finances.loans.length }
+    offers[0]?.click()
+    const after = { cash: g.world.finances.cash, debt: g.world.finances.debt, loans: g.world.finances.loans.length }
+    return {
+      text: box.textContent,
+      offers: offers.map((b) => b.textContent),
+      quoteTitle: offers[0]?.title ?? null,
+      before,
+      after,
+      inheritedLoans: before.loans,
+    }
+  })
+  console.log('financing:', financing)
+  if (financing.inheritedLoans < 1) throw new Error('The inherited debt is not a loan')
+  if (financing.offers.length === 0) throw new Error('No way to borrow in the accounts panel')
+  if (!/%/.test(financing.quoteTitle ?? '')) throw new Error('A borrowing offer does not quote its rate')
+  if (!(financing.after.cash > financing.before.cash)) throw new Error('Borrowing did not deliver any money')
+  if (!(financing.after.loans > financing.before.loans)) throw new Error('Borrowing created no loan')
+  await page.evaluate(() => window.game.hud.accountsPanel.setOpen(false))
+
   // --- Lines are things you can ask about --------------------------------
   // Clock stopped, so the panel is not rebuilding under the automation between locating a
   // button and pressing it. A person does not need this — a press freezes the rebuild for its
