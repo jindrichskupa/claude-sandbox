@@ -7,18 +7,56 @@
  */
 
 import en from './en.json'
+import cs from './cs.json'
 
-export type Locale = 'en'
+export type Locale = 'en' | 'cs'
 export type Dict = Record<string, string>
 
-const DICTS: Record<Locale, Dict> = { en: en as Dict }
+const DICTS: Record<Locale, Dict> = { en: en as Dict, cs: cs as Dict }
+
+/** Languages the player can pick, in the order the switch shows them. */
+export const LOCALES: Array<{ id: Locale; label: string }> = [
+  { id: 'en', label: 'English' },
+  { id: 'cs', label: 'Čeština' },
+]
+
+const STORAGE_KEY = 'powergrid-tycoon.locale'
+
+/**
+ * The language to open in.
+ *
+ * A stored choice wins, then the browser's own preference, then English. Guessing from the browser
+ * rather than always starting in English matters more here than in most games: a player whose
+ * system is Czech and who is shown an English interface has no reason to suspect a switch exists.
+ */
+export function preferredLocale(): Locale {
+  try {
+    const stored = globalThis.localStorage?.getItem(STORAGE_KEY)
+    if (stored && stored in DICTS) return stored as Locale
+  } catch {
+    // Private browsing, a full quota, an embedded webview. Not a reason to fail to start.
+  }
+  const languages = globalThis.navigator?.languages ?? []
+  for (const tag of languages) {
+    const base = tag.split('-')[0]?.toLowerCase()
+    if (base && base in DICTS) return base as Locale
+  }
+  return 'en'
+}
 
 let current: Locale = 'en'
 let dict: Dict = DICTS.en
 
-export function setLocale(locale: Locale): void {
-  current = locale
-  dict = DICTS[locale] ?? DICTS.en
+/** `remember` is false for the initial load, which is applying a choice rather than making one. */
+export function setLocale(locale: Locale, remember = true): void {
+  current = DICTS[locale] ? locale : 'en'
+  dict = DICTS[current] ?? DICTS.en
+  if (!remember) return
+  try {
+    globalThis.localStorage?.setItem(STORAGE_KEY, current)
+  } catch {
+    // As above: the game runs, the choice simply does not survive a reload.
+  }
 }
 
 export function getLocale(): Locale {
@@ -30,7 +68,10 @@ export function getLocale(): Locale {
  * an untranslated string obvious on screen rather than silently blank.
  */
 export function t(key: string, params?: Record<string, string | number>): string {
-  const template = dict[key]
+  // English before the key itself. A translation with a hole in it should read as a sentence in
+  // the wrong language, which a player can still act on; `ui.stationBays` on screen is a bug they
+  // can only report. The test suite is what stops the holes existing, not this.
+  const template = dict[key] ?? DICTS.en[key]
   if (template === undefined) return key
   if (!params) return template
   return template.replace(/\{(\w+)\}/g, (whole, name: string) => {
@@ -72,8 +113,7 @@ export function formatPct(fraction: number): string {
 }
 
 export function formatDate(d: { year: number; month: number; day: number; hour: number }): string {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${String(d.day).padStart(2, '0')} ${months[d.month]} ${d.year}, ${String(d.hour).padStart(2, '0')}:00`
+  return `${String(d.day).padStart(2, '0')} ${t(`month.${d.month}`)} ${d.year}, ${String(d.hour).padStart(2, '0')}:00`
 }
 
 /**
@@ -83,6 +123,5 @@ export function formatDate(d: { year: number; month: number; day: number; hour: 
  * needs and making a column of dates twice as wide as the column of headlines.
  */
 export function formatShortDate(d: { year: number; month: number; day: number }): string {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${String(d.day).padStart(2, '0')} ${months[d.month]} ${d.year}`
+  return `${String(d.day).padStart(2, '0')} ${t(`month.${d.month}`)} ${d.year}`
 }

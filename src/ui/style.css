@@ -1581,3 +1581,27 @@ button.danger:hover {
   font-size: 10px;
   padding: 4px 8px;
 }
+
+/* ---- Language switch --------------------------------------------------
+ *
+ * Beside save and load rather than inside a settings panel, because the person who most needs to
+ * find it is the one who cannot read the interface it is sitting in. Each language is labelled in
+ * itself for the same reason.
+ */
+.tab-languages {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--panel-border);
+}
+
+.tab-languages button {
+  font-size: 10px;
+  padding: 4px 7px;
+}
+
+.tab-languages button.active {
+  color: var(--text);
+  border-color: var(--accent);
+}

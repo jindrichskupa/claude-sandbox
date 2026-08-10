@@ -10,7 +10,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import en from '../src/i18n/en.json'
-import { t, setLocale } from '@i18n/index'
+import cs from '../src/i18n/cs.json'
+import { LOCALES, t, setLocale } from '@i18n/index'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { FUELS } from '@content/fuels'
 import { LINE_TYPES, VOLTAGE_LEVELS } from '@content/lineTypes'
@@ -99,6 +100,60 @@ describe('i18n', () => {
   })
 
   it('leaves unknown placeholders alone rather than printing undefined', () => {
+    setLocale('en')
     expect(t('reason.windSpeed', {})).toContain('{wind}')
   })
+})
+
+/**
+ * The two dictionaries, against each other.
+ *
+ * A translation does not rot by being wrong — somebody notices that. It rots by falling behind:
+ * a key added to English and forgotten in Czech shows up as one English sentence in the middle of
+ * a Czech panel, which is easy to ship and easy to miss. And a placeholder dropped in translation
+ * is worse, because the sentence still reads fine while the number it was supposed to carry has
+ * silently vanished.
+ */
+describe('every language says the same things', () => {
+  const dicts: Array<[string, Record<string, string>]> = [['cs', cs as Record<string, string>]]
+
+  it('offers exactly the dictionaries it ships', () => {
+    expect(LOCALES.map((l) => l.id).sort()).toEqual(['cs', 'en'])
+    // Labelled in itself, so the switch is findable by somebody who cannot read the rest.
+    expect(LOCALES.find((l) => l.id === 'cs')?.label).toBe('Čeština')
+  })
+
+  for (const [id, dict] of dicts) {
+    it(`${id} has every key English has, and no others`, () => {
+      const missing = Object.keys(en).filter((k) => !(k in dict))
+      const extra = Object.keys(dict).filter((k) => !(k in (en as Record<string, string>)))
+      expect(missing, `missing from ${id}`).toEqual([])
+      expect(extra, `not in English`).toEqual([])
+    })
+
+    it(`${id} carries the same placeholders`, () => {
+      const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
+      const wrong: string[] = []
+      for (const [key, english] of Object.entries(en as Record<string, string>)) {
+        const a = placeholders(english).join(',')
+        const b = placeholders(dict[key]!).join(',')
+        if (a !== b) wrong.push(`${key}: en(${a}) ${id}(${b})`)
+      }
+      expect(wrong).toEqual([])
+    })
+
+    it(`${id} actually translated something`, () => {
+      // A file copied from English would pass both checks above. Most of it has to differ.
+      const same = Object.keys(en).filter((k) => dict[k] === (en as Record<string, string>)[k])
+      expect(same.length).toBeLessThan(Object.keys(en).length * 0.2)
+    })
+
+    it(`${id} names the months, because dates are built from them`, () => {
+      setLocale(id as 'cs')
+      for (let month = 0; month < 12; month++) {
+        expect(t(`month.${month}`)).not.toBe(`month.${month}`)
+      }
+      setLocale('en')
+    })
+  }
 })

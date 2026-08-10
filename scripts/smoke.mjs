@@ -536,6 +536,42 @@ try {
     throw new Error('The inspector did not say when the station would be finished')
   }
 
+  // --- The language switch keeps the run ---------------------------------
+  // A reload is what rebuilds the overlay in the new language, and a reload is also what would
+  // normally throw away the game in progress. The run is parked and picked up, so the clock, the
+  // money and the fleet have to come back — and the opening brief must *not*, because the player
+  // has already read it and being made to dismiss it again would punish them for using a setting.
+  const parked = await page.evaluate(() => ({
+    tick: window.game.world.tick,
+    cash: Math.round(window.game.world.finances.cash),
+    plants: window.game.world.plants.length,
+  }))
+  await page.click('#locale-cs')
+  await page.waitForFunction(() => window.game !== undefined, null, { timeout: 60000 })
+  await page.waitForTimeout(500)
+  const switched = await page.evaluate(() => ({
+    tick: window.game.world.tick,
+    cash: Math.round(window.game.world.finances.cash),
+    plants: window.game.world.plants.length,
+    briefingVisible: document.getElementById('briefing')?.classList.contains('visible') ?? false,
+    active: document.querySelector('.tab-languages button.active')?.id,
+    tabs: [...document.querySelectorAll('#panel-tabs > button')].map((b) => b.textContent),
+    clock: document.getElementById('clock')?.textContent,
+  }))
+  console.log('language switch:', { parked, switched })
+  if (switched.active !== 'locale-cs') throw new Error('The switch did not mark Czech as current')
+  if (switched.tick < parked.tick) throw new Error('The run went backwards across a language change')
+  if (switched.plants !== parked.plants) throw new Error('The fleet did not survive a language change')
+  if (switched.briefingVisible) throw new Error('The opening brief came back after a language change')
+  if (switched.tabs.includes('Build')) throw new Error('The interface is still in English')
+  // Dates are built from dictionary months, so an English month here means a hardcoded one.
+  if (/Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec/.test(switched.clock ?? '')) {
+    throw new Error(`The clock still shows an English month: ${switched.clock}`)
+  }
+  await page.click('#locale-en')
+  await page.waitForFunction(() => window.game !== undefined, null, { timeout: 60000 })
+  await page.waitForTimeout(500)
+
   // --- Borrowing is a decision now ---------------------------------------
   // It used to happen to the player: a shortfall drew silently on a facility nobody chose, the
   // principal was never repaid by anything, and no screen anywhere said so. The accounts panel is

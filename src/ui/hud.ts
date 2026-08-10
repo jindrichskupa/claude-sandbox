@@ -8,7 +8,7 @@
  * a localisation layer stays honest.
  */
 
-import { formatDate, formatMoney, formatMw, formatMwth, formatPct, t } from '@i18n/index'
+import { formatDate, formatMoney, formatMw, formatMwth, formatPct, getLocale, LOCALES, t, type Locale } from '@i18n/index'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { LINE_TYPES } from '@content/lineTypes'
 import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
@@ -71,6 +71,8 @@ export interface HudCallbacks {
   onSetInsured: (insured: boolean) => void
   onSave: () => void
   onLoad: () => void
+  /** Change language. Parks the run and reloads — see `switchLocale` in `main.ts`. */
+  onSetLocale: (locale: Locale) => void
   onUpgradeLine: (edgeId: string) => void
   onRenewLine: (edgeId: string) => void
   onUpgradeVoltage: (edgeId: string) => void
@@ -331,6 +333,19 @@ export class Hud {
     loadButton.id = 'load-button'
     loadButton.addEventListener('click', () => this.callbacks.onLoad())
     saves.append(saveButton, loadButton)
+
+    // The language switch, next to save and load rather than buried in a settings panel there is
+    // no room for. Each language is labelled in itself — "Čeština", not "Czech" — because the one
+    // person who most needs to find it is the one who cannot read the interface it is in.
+    const languages = el('div', 'tab-languages')
+    for (const { id, label } of LOCALES) {
+      const button = el('button', undefined, label)
+      button.id = `locale-${id}`
+      button.classList.toggle('active', id === getLocale())
+      button.addEventListener('click', () => this.callbacks.onSetLocale(id))
+      languages.appendChild(button)
+    }
+    saves.appendChild(languages)
     tabs.appendChild(saves)
     root.appendChild(tabs)
 

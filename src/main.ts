@@ -17,8 +17,8 @@ import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 import { Hud, type Speed } from '@ui/hud'
 import type { BuildSelection } from '@ui/buildPanel'
-import { formatMoney, setLocale, t } from '@i18n/index'
-import { makeSaveFile, readLocalSave, writeLocalSave } from '@sim/scenario/save'
+import { formatMoney, getLocale, preferredLocale, setLocale, t, type Locale } from '@i18n/index'
+import { makeSaveFile, readLocalSave, writeLocalSave, type SaveFile } from '@sim/scenario/save'
 import { SKIP_LIMIT_TICKS } from '@sim/scenario/notable'
 import { NewsImportance, type NewsItem } from '@sim/news/news'
 import { headline } from '@ui/newsPanel'
@@ -66,8 +66,18 @@ const SIM_BUDGET_MS = 12
  */
 const SKIP_BUDGET_MS = 30
 
+/**
+ * Where a run in progress is parked while the page reloads into another language.
+ *
+ * Its own key, deliberately not the player's save slot. Changing language must not cost somebody
+ * the game they saved yesterday, and it must not cost them the game they are playing either.
+ */
+const LOCALE_HANDOVER_KEY = 'powergrid-tycoon.locale-handover'
+
 async function main(): Promise<void> {
-  setLocale('en')
+  // The stored choice, or the browser's, or English. Not remembered again here: applying a
+  // preference is not the same act as making one.
+  setLocale(preferredLocale(), false)
 
   const canvas = document.getElementById('stage') as HTMLCanvasElement
   const overlay = document.getElementById('overlay') as HTMLDivElement
@@ -86,11 +96,27 @@ async function main(): Promise<void> {
   // Not `const`: loading a save replaces all three, and everything below reaches them through
   // these bindings rather than capturing a particular instance. That is the whole trick that
   // lets a load happen without reloading the page.
+  // A run parked by a language change comes straight back. Read once and cleared immediately, so
+  // a failure to restore cannot strand the player in a loop of the same broken handover.
   let world = buildWorld(FIRST_REGION)
+  let handedOver = false
+  try {
+    const parked = globalThis.localStorage?.getItem(LOCALE_HANDOVER_KEY)
+    globalThis.localStorage?.removeItem(LOCALE_HANDOVER_KEY)
+    if (parked) {
+      world = loadWorld(FIRST_REGION, (JSON.parse(parked) as SaveFile).data)
+      handedOver = true
+    }
+  } catch {
+    world = buildWorld(FIRST_REGION)
+  }
   let hud!: Hud
   let map!: MapView
   let attached = false
-  let briefingShown = false
+  // A run handed over by a language change is not a new run, so it does not get the opening brief
+  // again — the player has read it, and being made to dismiss it because they changed language
+  // would be the interface punishing them for using a setting.
+  let briefingShown = handedOver
 
   let speed: Speed = 1
   /** What to resume at once the opening brief is closed. */
@@ -132,6 +158,28 @@ async function main(): Promise<void> {
    * The timestamp is passed in from here rather than read inside the simulation, which has no
    * business knowing what the wall clock says: everything in there is a function of the tick.
    */
+  /**
+   * Change language, keeping the run.
+   *
+   * The overlay is built once and most of its labels are written at construction, so a live
+   * relabel would mean teaching every panel, button and legend in the game to rewrite itself —
+   * dozens of places, each of which would be a place to forget one. A reload rebuilds all of it
+   * from the new dictionary for free. What a reload would normally cost is the run in progress,
+   * so that is parked first and picked up on the way back in.
+   */
+  const switchLocale = (locale: Locale): void => {
+    if (locale === getLocale()) return
+    try {
+      const file = makeSaveFile(FIRST_REGION.id, world.toSaveData(), new Date().toISOString())
+      globalThis.localStorage?.setItem(LOCALE_HANDOVER_KEY, JSON.stringify(file))
+    } catch {
+      // Storage refused. The language still changes; the run is the price, and the alternative
+      // is refusing to change language at all.
+    }
+    setLocale(locale)
+    globalThis.location.reload()
+  }
+
   const save = (): void => {
     const file = makeSaveFile(FIRST_REGION.id, world.toSaveData(), new Date().toISOString())
     hud.setHint(t(writeLocalSave(file) ? 'ui.saved' : 'ui.saveFailed'))
@@ -244,6 +292,7 @@ async function main(): Promise<void> {
       },
       onSave: save,
       onLoad: load,
+      onSetLocale: switchLocale,
       // The brief holds the clock until the player has read it. Starting a thirty-year run at
       // the same instant the player first sees the map takes a decision away from them before
       // they know there was one.
