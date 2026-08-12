@@ -105,7 +105,6 @@ describe('what gets reported', () => {
     const built = beginPlantConstruction(world, 'ccgt', site.x, site.y)
     expect(built.ok).toBe(true)
     const plant = world.getPlant(built.plantId!)!
-    const commissionsAt = plant.phaseEndsTick
 
     let guard = 0
     while (plant.phase !== LifecyclePhase.Operating && guard++ < 200) {
@@ -114,7 +113,10 @@ describe('what gets reported', () => {
       if (step.item?.titleKey === 'news.plantCommissioned') break
     }
     expect(plant.phase).toBe(LifecyclePhase.Operating)
-    expect(world.tick).toBe(commissionsAt)
+    // The date is read now, not before the run. A construction blockade moves it, and the claim
+    // being tested is that the skip stops *at* commissioning rather than months past it — which
+    // is about the skip, not about the schedule being fixed.
+    expect(world.tick).toBe(plant.phaseEndsTick)
   }, 300_000)
 
   it('does not stop for the weather, the price, or the time of day', () => {

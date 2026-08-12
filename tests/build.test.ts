@@ -111,8 +111,14 @@ describe('building a plant', () => {
     const plant = world.getPlant(result.plantId!)!
     const buildTicks = result.quote.buildTicks
 
-    // One tick short: still a building site.
-    for (let i = 0; i < buildTicks - 1; i++) world.step()
+    // One tick short of *whatever the finish date currently is*: still a building site.
+    //
+    // Read each tick rather than counted down from the quote, because the date is not a
+    // constant — a construction blockade adds nine months to a named project. The claim being
+    // made here is about the hour of commissioning relative to the schedule, not about the
+    // schedule being immovable.
+    expect(buildTicks).toBeGreaterThan(0)
+    while (world.tick < plant.phaseEndsTick - 1) world.step()
     expect(plant.phase).toBe(LifecyclePhase.Building)
 
     world.step()
@@ -264,8 +270,14 @@ describe('a built plant actually helps', () => {
     const line = beginLineConstruction(world, plant.nodeId, 'n_rivermouth', 220, 1)
     expect(line.ok).toBe(true)
 
-    const ticks = Math.max(built.quote.buildTicks, line.quote.buildTicks) + 1
-    for (let i = 0; i < ticks; i++) world.step()
+    // Run until both are finished, rather than for a length worked out in advance: a blockade can
+    // add months to the station, and the point here is that a finished plant on a live line
+    // generates — not that it does so on a particular date.
+    const guard = Math.max(built.quote.buildTicks, line.quote.buildTicks) + TICKS_PER_YEAR * 3
+    for (let i = 0; i < guard; i++) {
+      if (plant.phase === LifecyclePhase.Operating && world.network.requireEdge(line.edgeId!).energised) break
+      world.step()
+    }
 
     expect(plant.phase).toBe(LifecyclePhase.Operating)
     expect(world.network.requireEdge(line.edgeId!).energised).toBe(true)
