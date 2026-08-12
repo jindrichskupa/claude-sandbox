@@ -24,7 +24,9 @@ import { Param } from '@sim/params/types'
 import { availableRange } from '@sim/dispatch/dispatch'
 import { dispatchHeat, heatCeilingMw, heatMarginalCostPerMwh, settleHeatStore } from '@sim/heat/heat'
 import { thermalInputMwh, emptyLedger, chargeGeneration } from '@sim/economy/economy'
-import { TICKS_PER_YEAR } from '@sim/core/time'
+import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
+
+const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 
 // --- A minimal hand-built heat system -------------------------------------
 
@@ -412,4 +414,56 @@ describe('the opening scenario', () => {
       expect(nearest, p.id).toBeLessThanOrEqual(3)
     }
   })
+})
+
+/**
+ * What a buried main costs to own.
+ *
+ * The pipe content has carried `fixedOpexPerKmYear` since it was written and nothing read it, so a
+ * heat main was the last asset in the game that was free to keep — while the electric corridor
+ * beside it had been charged since the network milestone. Small in absolute terms, 1.4m a year
+ * against 71m of heat revenue in the opening scenario. The reason to care is that "free to own" is
+ * the shape of a modelling hole, and the last two turned out to be hiding something larger.
+ */
+describe('the heat network costs money to own', () => {
+  it('charges every main, every month, whether anything flows or not', () => {
+    const world = buildWorld(FIRST_REGION)
+    for (let i = 0; i < TICKS_PER_YEAR; i++) world.step()
+
+    let charged = 0
+    let mains = 0
+    for (const edge of world.network.allEdges()) {
+      if (edge.commodity !== 'heat') continue
+      mains++
+      const book = world.books.window(edge.id, 'lifetime')
+      expect(book.fixedOpex, edge.id).toBeGreaterThan(0)
+      charged += book.fixedOpex
+    }
+    expect(mains).toBeGreaterThan(0)
+
+    // In the right order of magnitude: the sourced rate over the length actually laid, deflated
+    // to the scenario's own price level, so it is neither zero nor a figure from another decade.
+    let expected = 0
+    for (const edge of world.network.allEdges()) {
+      if (edge.commodity !== 'heat' || edge.dn === undefined) continue
+      expected += HEAT_PIPE_TYPES[edge.dn].fixedOpexPerKmYear.value * edge.lengthKm * Math.max(1, edge.circuits)
+    }
+    expect(charged).toBeGreaterThan(expected * 0.4)
+    expect(charged).toBeLessThan(expected * 1.2)
+  }, 300_000)
+
+  it('puts it on the main itself, so the accounts can show which one', () => {
+    // Per-asset, like every other cost in the game. A standing charge pooled into an overhead
+    // would tell the player their heat business costs money and not which kilometre of it does.
+    const world = buildWorld(FIRST_REGION)
+    for (let i = 0; i < TICKS_PER_MONTH * 2; i++) world.step()
+
+    const mains = world.network.allEdges().filter((e) => e.commodity === 'heat')
+    const longest = mains.reduce((a, b) => (a.lengthKm > b.lengthKm ? a : b))
+    const shortest = mains.reduce((a, b) => (a.lengthKm < b.lengthKm ? a : b))
+    if (longest.id === shortest.id) return
+    expect(world.books.window(longest.id, 'lifetime').fixedOpex).toBeGreaterThan(
+      world.books.window(shortest.id, 'lifetime').fixedOpex,
+    )
+  }, 300_000)
 })

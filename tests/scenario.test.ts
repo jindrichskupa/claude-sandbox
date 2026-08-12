@@ -29,6 +29,7 @@ import {
 import { emptyLedger, type Finances } from '@sim/economy/economy'
 import { makeSaveFile, parseSaveFile, SaveError, SAVE_VERSION } from '@sim/scenario/save'
 import { beginPlantConstruction, retirePlant } from '@sim/build/commands'
+import { TICKS_PER_YEAR } from '@sim/core/time'
 
 function context(overrides: Partial<ObjectiveContext> = {}): ObjectiveContext {
   const finances: Finances = { cash: 100e6, debt: 0, trailingRevenue: 500e6, bankrupt: false, loans: [], loanSerial: 0 }
@@ -384,15 +385,23 @@ describe('saving a game', () => {
     const loaded = loadWorld(FIRST_REGION, world.toSaveData())
     expect(loaded.committedSpend()).toBeCloseTo(committedBefore, 3)
 
-    // And it still finishes at the same moment.
+    // And it still finishes at the same moment — whenever that turns out to be.
+    //
+    // Read the finish date each tick rather than taking it once and counting down. It is not a
+    // constant: a construction blockade adds nine months to a named project, so a run that took
+    // the date up front and stepped exactly that far would stop while the site was still fenced
+    // off. The property being tested is that the saved world and the live one agree, and they do
+    // — including about the delay, which is the more interesting version of the claim.
     const plant = world.getPlant(built!.plantId!)!
-    const remaining = plant.phaseEndsTick - world.tick
-    for (let i = 0; i < remaining; i++) {
+    const guard = plant.phaseEndsTick - world.tick + TICKS_PER_YEAR * 3
+    for (let i = 0; i < guard && world.getPlant(plant.id)!.phase !== LifecyclePhase.Operating; i++) {
       world.step()
       loaded.step()
     }
     expect(loaded.getPlant(plant.id)!.phase).toBe(world.getPlant(plant.id)!.phase)
     expect(loaded.getPlant(plant.id)!.phase).toBe(LifecyclePhase.Operating)
+    // The same hour in both, not merely the same state at the end.
+    expect(loaded.tick).toBe(world.tick)
   })
 
   it('carries an event that is in force, expiry and all', () => {

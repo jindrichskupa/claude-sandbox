@@ -1472,6 +1472,28 @@ export class World {
       this.books.for(edge.id).open.fixedOpex += cost
     }
 
+    // The heat mains, on exactly the same footing. `fixedOpexPerKmYear` has been in the pipe
+    // content since it was written and nothing read it, so a buried main was the last asset in
+    // the game that was free to own — a leak worth 1.4m a year against 71m of heat revenue in the
+    // opening scenario. Not large; the point is that it existed at all, and that the electric
+    // corridor beside it had been paying since the network milestone.
+    //
+    // What it buys is not the same list as an overhead line's: no vegetation to cut and no towers
+    // to paint, but pumps to maintain, joints and valve chambers to inspect, and make-up water to
+    // treat. The standing heat loss is modelled separately, in the heat dispatch, and the pumping
+    // power is real electrical demand — see `pumpingDemandMw`. This is what is left.
+    for (const edge of this.network.allEdges()) {
+      if (edge.commodity !== 'heat' || edge.dn === undefined) continue
+      const perYear =
+        nominal(HEAT_PIPE_TYPES[edge.dn].fixedOpexPerKmYear, this.date.year) *
+        edge.lengthKm *
+        Math.max(1, edge.circuits) *
+        this.state.maintenanceLevel
+      const cost = perYear * (ticks / TICKS_PER_YEAR)
+      this.openLedger.fixedOpex += cost
+      this.books.for(edge.id).open.fixedOpex += cost
+    }
+
     // And the switching stations, for the same reason. Switchgear maintenance, protection
     // testing, the site, and the transformer's no-load losses — which are real energy, burned
     // continuously for as long as the station is energised. Charged from the day it enters
