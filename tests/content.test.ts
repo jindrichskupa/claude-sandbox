@@ -6,6 +6,8 @@
  * much stronger guarantee than an intention, because it cannot be quietly forgotten.
  */
 
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isSourced, SOURCES, type SourceId } from '@content/schema'
 import { PLANT_TYPES, PLANT_TYPE_IDS } from '@content/plantTypes'
@@ -122,5 +124,59 @@ describe('content provenance', () => {
       expect(higher.resistanceOhmPerKm.value).toBeLessThan(lower.resistanceOhmPerKm.value)
       expect(higher.capexPerKm.value).toBeGreaterThan(lower.capexPerKm.value)
     }
+  })
+})
+
+/**
+ * Numbers the content defines that nothing ever reads.
+ *
+ * Twice in one week a field turned out to be complete, sourced and inert: the heat mains' standing
+ * cost, which the electric corridor beside it had been paying since the network milestone, and a
+ * duplicate line fault rate that disagreed with the one actually used by a factor of nine. Neither
+ * was findable by reading the content — the content looked finished — and both were only caught by
+ * going and looking at one subsystem on purpose. This does the looking mechanically.
+ *
+ * Deliberately crude: it matches a field name declared in `content/` against `.field` appearing
+ * anywhere that could consume it. A number read generically — through a `Param`, a spread, or a
+ * computed key — would be flagged here even though it is live, which is what `READ_INDIRECTLY` is
+ * for. Adding a name to that list is a claim you have checked; leaving the list empty is the
+ * default, and it is where the tree stands today.
+ */
+describe('content that nothing reads', () => {
+  const READ_INDIRECTLY = new Set<string>([])
+
+  function tsFiles(dir: string, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry)
+      if (statSync(full).isDirectory()) tsFiles(full, out)
+      else if (full.endsWith('.ts')) out.push(full)
+    }
+    return out
+  }
+
+  it('defines no sourced number that no consumer ever reads', () => {
+    const declared = new Map<string, string>()
+    for (const file of tsFiles('src/content')) {
+      const text = readFileSync(file, 'utf8')
+      for (const m of text.matchAll(/^\s{2}(\w+)\??:\s*Sourced</gm)) declared.set(m[1]!, file)
+    }
+    // Enough fields that a silent gap is plausible; too few means the scan itself broke.
+    expect(declared.size).toBeGreaterThan(80)
+
+    const consumers = [
+      ...tsFiles('src/sim'),
+      ...tsFiles('src/ui'),
+      ...tsFiles('src/render'),
+      ...tsFiles('scripts'),
+    ]
+      .map((f) => readFileSync(f, 'utf8'))
+      .join('\n')
+
+    const unread: string[] = []
+    for (const [field, file] of declared) {
+      if (READ_INDIRECTLY.has(field)) continue
+      if (!new RegExp(`\\.${field}\\b`).test(consumers)) unread.push(`${field} (${file})`)
+    }
+    expect(unread, 'declared, sourced, and never read').toEqual([])
   })
 })

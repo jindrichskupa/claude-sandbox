@@ -93,8 +93,6 @@ export interface LineTypeDef {
    */
   substationBays: Sourced<number>
   buildTimeMonthsPer100Km: Sourced<number>
-  /** Base probability per year that a given kilometre suffers a fault. */
-  faultRatePerKmYear: Sourced<number>
 }
 
 const Y = 2022
@@ -116,7 +114,6 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     substationFixedOpexPerYear: sourced(120_000, 'EUR', 'entsoe-factsheet', Y),
     substationBuildMonths: sourced(12, 'months', 'entsoe-factsheet', Y),
     buildTimeMonthsPer100Km: sourced(18, 'months', 'entsoe-factsheet', Y),
-    faultRatePerKmYear: sourced(0.004, 'fraction', 'entsoe-factsheet', Y),
   },
   220: {
     kv: 220,
@@ -134,7 +131,6 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     substationFixedOpexPerYear: sourced(260_000, 'EUR', 'entsoe-factsheet', Y),
     substationBuildMonths: sourced(18, 'months', 'entsoe-factsheet', Y),
     buildTimeMonthsPer100Km: sourced(24, 'months', 'entsoe-factsheet', Y),
-    faultRatePerKmYear: sourced(0.003, 'fraction', 'entsoe-factsheet', Y),
   },
   400: {
     kv: 400,
@@ -152,7 +148,6 @@ export const LINE_TYPES: Record<VoltageLevel, LineTypeDef> = {
     substationFixedOpexPerYear: sourced(600_000, 'EUR', 'entsoe-factsheet', Y),
     substationBuildMonths: sourced(30, 'months', 'entsoe-factsheet', Y, 'Consents and switchgear lead times, not concrete'),
     buildTimeMonthsPer100Km: sourced(36, 'months', 'entsoe-factsheet', Y, 'Permitting dominates, not construction'),
-    faultRatePerKmYear: sourced(0.002, 'fraction', 'entsoe-factsheet', Y),
   },
 }
 

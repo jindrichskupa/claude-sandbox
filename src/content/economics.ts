@@ -11,10 +11,6 @@ export interface EconomicsDef {
    * infeasible problem. Published estimates for European systems span a wide range.
    */
   valueOfLostLoadPerMwh: Sourced<number>
-  /** Retail tariff the utility receives. */
-  baseTariffPerMwh: Sourced<number>
-  /** Carbon price at scenario start. Later driven by policy. */
-  baseCarbonPricePerTonne: Sourced<number>
   /** Annual interest on borrowed money. */
   loanInterestRate: Sourced<number>
   /** How much can be borrowed, as a multiple of annual revenue. */
@@ -33,8 +29,6 @@ export interface EconomicsDef {
    * a battery always goes without before a city does.
    */
   forgoneChargePricePerMwh: Sourced<number>
-  /** What the utility is paid for a megawatt-hour of heat delivered to a district network. */
-  baseHeatTariffPerMwh: Sourced<number>
   /**
    * What a megawatt-hour of undelivered heat costs.
    *
@@ -100,14 +94,11 @@ export interface EconomicsDef {
 
 export const ECONOMICS: EconomicsDef = {
   valueOfLostLoadPerMwh: sourced(5000, 'EUR/MWh', 'entsoe-factsheet', 2022, 'Estimates range from 2000 to 25000'),
-  baseTariffPerMwh: sourced(85, 'EUR/MWh', 'iea-weo', 2023, 'Wholesale-plus-margin, not a retail bill'),
-  baseCarbonPricePerTonne: sourced(0, 'EUR', 'game-design', 2024, 'Scenario dependent; zero before carbon pricing exists'),
   loanInterestRate: sourced(0.06, 'fraction', 'game-design', 2024),
   maxDebtToRevenue: sourced(4, 'fraction', 'game-design', 2024),
   wheelingTieBreakPerMwh: sourced(0.01, 'EUR/MWh', 'game-design', 2024, 'Numerical tie-break only'),
   unservedPenaltyPerMwh: sourced(300, 'EUR/MWh', 'game-design', 2024, 'Regulatory penalty for failing to supply'),
   forgoneChargePricePerMwh: sourced(600, 'EUR/MWh', 'game-design', 2024, 'Ordering only; not a real cost'),
-  baseHeatTariffPerMwh: sourced(45, 'EUR/MWh_th', 'euro-chp-practice', 2021, 'District heat sells for far less than electricity'),
   valueOfLostHeatPerMwh: sourced(9000, 'EUR/MWh_th', 'euro-chp-practice', 2021, 'Frozen and burst pipes, not an inconvenient evening'),
   unservedHeatPenaltyPerMwh: sourced(550, 'EUR/MWh_th', 'game-design', 2024, 'Same share of lost value as the electrical penalty'),
   insurancePremiumRate: sourced(0.006, 'fraction', 'game-design', 2024, 'Of insured capital value, per year'),
