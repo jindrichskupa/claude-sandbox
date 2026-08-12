@@ -167,10 +167,35 @@ button.active {
 
 /* ---- Side panels ------------------------------------------------------ */
 
-#charts {
+/* The column everything on the right lives in.
+ *
+ * It starts below the tab row rather than beside it, which is the bug this replaced: the row runs
+ * the full width of the screen and the charts began four pixels below its top, so the save and
+ * load buttons were painted over the first chart's title. Laying the three panels out in a flex
+ * column also retires a set of hand-measured offsets — `top: 490px` on the events feed, a
+ * `100vh - 640px` height to leave room for the key — every one of which was a number that had to
+ * be corrected by hand whenever anything above it changed size. */
+#right-column {
+  position: absolute;
   right: 12px;
-  top: 74px;
+  top: 106px;
+  bottom: 12px;
   width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* The column is scaffolding; only the panels in it take the mouse, or it would swallow clicks
+   * on the map down the whole right-hand side. */
+  pointer-events: none;
+}
+
+#right-column > * {
+  pointer-events: auto;
+}
+
+#charts {
+  position: static;
+  flex: 0 0 auto;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -371,8 +396,11 @@ button.active {
  * with the inspector and the concern line. Three things stacked in one corner is two too many,
  * and this is the one of them that never changes — a key, not a reading. */
 #legend-lines {
-  right: 12px;
-  bottom: 12px;
+  position: static;
+  flex: 0 0 auto;
+  /* Pinned to the foot of the column when the events feed is short, rather than floating up
+   * against it. */
+  margin-top: auto;
   padding: 10px 14px;
   font-size: 11px;
   color: var(--text-dim);
@@ -556,11 +584,12 @@ button.danger:hover {
  * precisely so they can be thought about while the world keeps turning.
  */
 #events {
-  right: 12px;
-  top: 490px;
-  width: 300px;
+  position: static;
+  /* Takes what the charts and the key leave, and scrolls inside it. `min-height: 0` is what lets
+   * a flex child actually shrink rather than pushing the key off the bottom of the screen. */
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 12px;
-  max-height: calc(100vh - 640px);
   overflow-y: auto;
 }
 

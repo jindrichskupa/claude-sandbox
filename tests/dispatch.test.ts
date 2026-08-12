@@ -6,6 +6,9 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { floorDiscountPerMwh, marginalCostPerMwh } from '@sim/dispatch/dispatch'
+import { FIRST_REGION } from '@content/scenarios/firstRegion'
+import { buildWorld } from '@sim/scenario/build'
 import { Network, PLAYER, type GridEdge, type GridNode } from '@sim/grid/network'
 import { computeIslands } from '@sim/grid/islands'
 import { dispatch } from '@sim/dispatch/dispatch'
@@ -297,4 +300,70 @@ describe('negative prices', () => {
     const r = run(n, [plant('p1', 'gen', 'ccgt')], [city('c1', 'town', 200)])
     expect(r.nodalPrice.get('town')!).toBeGreaterThan(0)
   })
+})
+
+/**
+ * What the clearing price is allowed to be.
+ *
+ * A price of zero says the last megawatt-hour cost nothing to produce. That is true of wind on a
+ * gusty night and it is never true of a coal unit, because somebody bought the coal. The dispatch
+ * used to say otherwise: a running unit's technical minimum was offered at zero, on the reasoning
+ * that the fuel was being burnt anyway, and the consequences reached much further than the price.
+ *
+ *   - The price collapsed to zero in 575 hours a year with lignite and coal running.
+ *   - That zero was the cheapest energy in the system, so it was always taken, so no unit ever
+ *     came off. Minima alone covered demand in half the hours of the year.
+ *   - With only two rungs in the merit order — zero, and full marginal cost — the price chart was
+ *     a square wave. Measured on medians it swung 17x between night and evening; a real day is
+ *     closer to two.
+ */
+describe('the price of the last megawatt-hour', () => {
+  it('is never zero while something is burning fuel', () => {
+    const world = buildWorld(FIRST_REGION)
+    let zeroWhileBurning = 0
+    for (let i = 0; i < 24 * 30; i++) {
+      world.step()
+      const d = world.lastDispatch
+      if (!d) continue
+      const burning = world.plants.some(
+        (p) => (d.generationMw.get(p.id) ?? 0) > 0.5 && PLANT_TYPES[p.typeId].fuel !== 'none',
+      )
+      if (burning && world.systemPricePerMwh <= 0.01) zeroWhileBurning++
+    }
+    expect(zeroWhileBurning).toBe(0)
+  }, 300_000)
+
+  it('leaves a unit willing to sell below cost, but not for nothing', () => {
+    // The behaviour the fix has to preserve: a large thermal unit really will take a loss on its
+    // minimum rather than pay for a stop and a restart. What it will not do is give it away.
+    const world = buildWorld(FIRST_REGION)
+    world.step()
+    const lignite = world.plants.find((p) => PLANT_TYPES[p.typeId].fuel === 'lignite')!
+    const turbine = world.plants.find((p) => p.typeId === 'ocgt')
+
+    expect(floorDiscountPerMwh(lignite)).toBeGreaterThan(0)
+    expect(floorDiscountPerMwh(lignite)).toBeLessThan(
+      marginalCostPerMwh(lignite, world.params, world.carbonPriceInForce()),
+    )
+    // And a machine built to start is barely reluctant at all, unlike a lignite boiler.
+    if (turbine) expect(floorDiscountPerMwh(turbine)).toBeLessThan(floorDiscountPerMwh(lignite))
+  })
+
+  it('has a daily shape rather than two levels', () => {
+    // The square wave was the visible symptom. A merit order with more than two rungs produces a
+    // price that moves through the day instead of flipping between a floor and a ceiling.
+    const world = buildWorld(FIRST_REGION)
+    const byHour: number[][] = Array.from({ length: 24 }, () => [])
+    for (let i = 0; i < 24 * 60; i++) {
+      world.step()
+      byHour[world.date.hour]!.push(world.systemPricePerMwh)
+    }
+    const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!
+    const medians = byHour.map(median)
+    expect(Math.min(...medians)).toBeGreaterThan(0)
+    // Evening dearer than night, by a believable margin rather than an infinite one.
+    const swing = Math.max(...medians) / Math.min(...medians)
+    expect(swing).toBeGreaterThan(1.2)
+    expect(swing).toBeLessThan(4)
+  }, 300_000)
 })

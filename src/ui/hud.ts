@@ -171,6 +171,17 @@ export class Hud {
     topbar.appendChild(speeds)
     root.appendChild(topbar)
 
+    // --- The right-hand column ---
+    //
+    // Charts, events and the line key stacked in one flex column rather than three panels each
+    // pinned to its own hand-measured offset. Those offsets were how the tab row came to sit on
+    // top of the first chart's title: the row spans the full width at y=70..100 and the charts
+    // began at y=74, so "Load" was drawn over "Load and generation". Fixing that by nudging one
+    // number would have left the next panel to be added in the same trap.
+    const rightColumn = el('div')
+    rightColumn.id = 'right-column'
+    root.appendChild(rightColumn)
+
     // --- Charts ---
     const charts = el('div', 'panel')
     charts.id = 'charts'
@@ -190,7 +201,7 @@ export class Hud {
 
     const legend = mixLegend(t)
     charts.appendChild(legend)
-    root.appendChild(charts)
+    rightColumn.appendChild(charts)
 
     // --- Events ---
     // Deliberately its own panel rather than a modal. A modal would stop the clock and make
@@ -198,7 +209,7 @@ export class Hud {
     // most of them arrive with warning and can be thought about while the world keeps turning.
     this.events = el('div', 'panel')
     this.events.id = 'events'
-    root.appendChild(this.events)
+    rightColumn.appendChild(this.events)
 
     // --- Inspector ---
     this.inspector = el('div', 'panel')
@@ -233,7 +244,7 @@ export class Hud {
     // orange, which shared no vocabulary with this and — over the range these networks actually
     // run at — was a single hue from empty to full.
     lineLegend.appendChild(el('div', 'legend-note', t('ui.mainsSameScale')))
-    root.appendChild(lineLegend)
+    rightColumn.appendChild(lineLegend)
 
     // --- Build panel and its hint line ---
     // Four panels now share the same corner, and each used to name the other three when it

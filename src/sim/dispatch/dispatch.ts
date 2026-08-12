@@ -91,6 +91,22 @@ export function marginalCostPerMwh(plant: PlantAsset, params: Params, carbonPric
  * accept the injection. An **extraction** unit keeps its choice but loses ceiling, because the
  * steam bled off for the town is steam that is not turning the low-pressure turbine.
  */
+/**
+ * How many hours of running a unit will accept a loss over, rather than stop and start again.
+ *
+ * The start cost is a one-off; spreading it over a plausible length of shutdown turns it into the
+ * per-megawatt-hour discount a unit will bid below its own cost. Overnight is the shutdown that
+ * actually tempts an operator — a lull of a few hours is not worth the cycle for anything large —
+ * so that is the window it is spread over.
+ */
+const CYCLE_AVOIDANCE_HOURS = 8
+
+/** What a unit will knock off its running cost to keep its minimum on the system. */
+export function floorDiscountPerMwh(plant: PlantAsset): number {
+  const type = PLANT_TYPES[plant.typeId]
+  return type.startCostPerMw.value / CYCLE_AVOIDANCE_HOURS
+}
+
 export function availableRange(
   plant: PlantAsset,
   params: Params,
@@ -263,9 +279,22 @@ function build(input: DispatchInput): Built {
     const { floor, ceiling } = availableRange(plant, params, chpCommitments?.get(plant.id))
     const cost = marginalCostPerMwh(plant, params, carbonPrice)
 
-    // The must-run floor is offered at zero cost: the fuel is being burnt regardless, so
-    // from this hour's point of view that energy is already paid for.
-    const floorArc = floor > 0 ? solver.addArc(source, node, floor, costShift) : -1
+    // What the unit will accept for its technical minimum rather than come off.
+    //
+    // This used to be zero, on the reasoning that the fuel was being burnt anyway. It produced two
+    // wrong things at once. The clearing price collapsed to nothing in 575 hours a year — with
+    // lignite and coal running, which is the market announcing that electricity is free while
+    // somebody is buying the coal. And since zero was the cheapest energy in the system it was
+    // always taken, so no unit ever shut down: minima alone covered demand in half the hours of
+    // the year, and the whole merit order had two rungs, which is why the price chart looked like
+    // a square wave rather than a price.
+    //
+    // A unit really will sell below its own running cost to stay on, because a stop and restart
+    // costs more than the hour does — but "below cost" is not "free", and how far below depends on
+    // the machine. See `startCostPerMw`.
+    const floorBid = Math.max(0, cost - floorDiscountPerMwh(plant))
+
+    const floorArc = floor > 0 ? solver.addArc(source, node, floor, floorBid + costShift) : -1
     const above = Math.max(0, ceiling - floor)
     const costArc = above > 0 ? solver.addArc(source, node, above, cost + costShift) : -1
     plantArcs.push({ plant, floorArc, costArc, cost })

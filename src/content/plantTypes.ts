@@ -152,6 +152,26 @@ export interface PlantTypeDef {
   rampRatePerHour: Sourced<number>
   /** Lowest stable output as a fraction of capacity, while running. */
   minLoadFraction: Sourced<number>
+  /**
+   * What one stop-and-restart costs, per MW of capacity.
+   *
+   * Fuel burnt getting back to temperature, and the thermal fatigue a large machine suffers being
+   * cycled — which is charged against its life whether or not anyone accounts for it that hour. It
+   * is why a unit at its technical minimum will sell below its own running cost rather than come
+   * off: the cycle costs more than the hour does.
+   *
+   * That behaviour is what this exists for. Before it, a unit's minimum was offered into the
+   * dispatch at *zero*, on the reasoning that the fuel was being burnt anyway. Two things followed,
+   * and both were wrong. The price collapsed to nothing in any hour a minimum was marginal —
+   * 575 hours a year, with lignite and coal running, which is the market saying electricity is
+   * free while somebody is buying the coal. And because that zero was the cheapest energy in the
+   * system, it was always taken, so no unit ever came off: minima alone covered demand in half
+   * the hours of the year, and the merit order had exactly two rungs.
+   *
+   * Highest for the large thermal machines, which are the ones cycling genuinely damages, and
+   * near nothing for a gas turbine, which is built to start.
+   */
+  startCostPerMw: Sourced<number>
 
   buildTimeMonths: Sourced<number>
   designLifeYears: Sourced<number>
@@ -241,6 +261,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.4, 'fraction', 'iea-projected-costs', 2020, 'Subcritical to supercritical: 0.36-0.45'),
     rampRatePerHour: sourced(0.4, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0.35, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(55, 'EUR/MW', 'engineering-standard', Y, 'Hot start of a large coal unit, including the fatigue it charges to the machine'),
     buildTimeMonths: sourced(48, 'months', 'iea-projected-costs', 2020),
     designLifeYears: sourced(45, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(200, 'EUR/kW', 'eia-electricity', 2022, 'Includes ash pond and site cleanup'),
@@ -274,6 +295,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.36, 'fraction', 'iea-projected-costs', 2020),
     rampRatePerHour: sourced(0.3, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0.5, 'fraction', 'engineering-standard', Y, 'Inflexible; a real operating problem'),
+    startCostPerMw: sourced(70, 'EUR/MW', 'engineering-standard', Y, 'A lignite boiler is the least willing thing on the system to be cycled'),
     buildTimeMonths: sourced(54, 'months', 'iea-projected-costs', 2020),
     designLifeYears: sourced(45, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(250, 'EUR/kW', 'engineering-standard', Y),
@@ -307,6 +329,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.58, 'fraction', 'iea-projected-costs', 2020, 'Best modern units reach 0.62'),
     rampRatePerHour: sourced(0.7, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0.3, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(35, 'EUR/MW', 'engineering-standard', Y, 'Two shafts and a steam cycle to bring back up'),
     buildTimeMonths: sourced(30, 'months', 'iea-projected-costs', 2020),
     designLifeYears: sourced(30, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(60, 'EUR/kW', 'engineering-standard', Y),
@@ -340,6 +363,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.38, 'fraction', 'iea-projected-costs', 2020, 'Cheap to build, expensive to run'),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y, 'Full output within minutes'),
     minLoadFraction: sourced(0.1, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(6, 'EUR/MW', 'engineering-standard', Y, 'Built to start; that is the whole point of the machine'),
     buildTimeMonths: sourced(18, 'months', 'iea-projected-costs', 2020),
     designLifeYears: sourced(25, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(40, 'EUR/kW', 'engineering-standard', Y),
@@ -373,6 +397,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.33, 'fraction', 'engineering-standard', Y, 'Low steam temperature limits it'),
     rampRatePerHour: sourced(0.05, 'fraction/h', 'engineering-standard', Y, 'Technically capable of more; rarely done'),
     minLoadFraction: sourced(0.6, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(180, 'EUR/MW', 'engineering-standard', Y, 'Xenon poisoning makes a restart a matter of days, not hours'),
     buildTimeMonths: sourced(96, 'months', 'iea-projected-costs', 2020),
     designLifeYears: sourced(60, 'years', 'engineering-standard', Y, 'With mid-life refurbishment'),
     decommissionCostPerKw: sourced(900, 'EUR/kW', 'iea-projected-costs', 2020, 'Estimates vary widely and tend to rise'),
@@ -406,6 +431,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.9, 'fraction', 'engineering-standard', Y, 'Turbine-generator efficiency'),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(1, 'EUR/MW', 'engineering-standard', Y, 'A gate and a governor'),
     buildTimeMonths: sourced(60, 'months', 'irena-costs', 2022),
     designLifeYears: sourced(80, 'years', 'engineering-standard', Y, 'Civil works outlast everything else'),
     decommissionCostPerKw: sourced(100, 'EUR/kW', 'engineering-standard', Y),
@@ -439,6 +465,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.9, 'fraction', 'engineering-standard', Y),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(1, 'EUR/MW', 'engineering-standard', Y, 'A gate and a governor'),
     buildTimeMonths: sourced(72, 'months', 'irena-costs', 2022),
     designLifeYears: sourced(80, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(100, 'EUR/kW', 'engineering-standard', Y),
@@ -478,6 +505,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(1, 'fraction', 'game-design', Y, 'No fuel; the wind curve does the work'),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(0, 'EUR/MW', 'engineering-standard', Y, 'Nothing is burnt and nothing is heated'),
     buildTimeMonths: sourced(18, 'months', 'irena-costs', 2022),
     designLifeYears: sourced(25, 'years', 'irena-costs', 2022),
     decommissionCostPerKw: sourced(60, 'EUR/kW', 'irena-costs', 2022),
@@ -526,6 +554,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(1, 'fraction', 'game-design', Y, 'No fuel; the wind curve does the work'),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(0, 'EUR/MW', 'engineering-standard', Y, 'Nothing is burnt and nothing is heated'),
     buildTimeMonths: sourced(36, 'months', 'irena-costs', 2022, 'Consent, cable route and a build season that closes in winter'),
     designLifeYears: sourced(27, 'years', 'irena-costs', 2022),
     decommissionCostPerKw: sourced(220, 'EUR/kW', 'engineering-standard', 2023, 'Jack-up vessels again, and the foundations have to come out'),
@@ -559,6 +588,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(1, 'fraction', 'game-design', Y, 'No fuel; irradiance does the work'),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(0, 'EUR/MW', 'engineering-standard', Y, 'Nothing is burnt and nothing is heated'),
     buildTimeMonths: sourced(12, 'months', 'irena-costs', 2022),
     designLifeYears: sourced(30, 'years', 'irena-costs', 2022),
     decommissionCostPerKw: sourced(30, 'EUR/kW', 'irena-costs', 2022),
@@ -592,6 +622,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(1, 'fraction', 'game-design', Y, 'Round-trip loss is in the storage spec'),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y, 'Effectively instant'),
     minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(0, 'EUR/MW', 'engineering-standard', Y, 'Nothing is burnt and nothing is heated'),
     buildTimeMonths: sourced(9, 'months', 'nrel-atb', 2023),
     designLifeYears: sourced(15, 'years', 'nrel-atb', 2023, 'Cycle life, not calendar life, usually binds'),
     decommissionCostPerKw: sourced(20, 'EUR/kW', 'engineering-standard', Y),
@@ -630,6 +661,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.4, 'fraction', 'euro-chp-practice', 2021, 'Electrical only; total fuel use is far better'),
     rampRatePerHour: sourced(0.6, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0.3, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(30, 'EUR/MW', 'engineering-standard', Y, 'A cogeneration set is cycled around the heat load, not the market'),
     buildTimeMonths: sourced(30, 'months', 'euro-chp-practice', 2021),
     designLifeYears: sourced(35, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(70, 'EUR/kW', 'engineering-standard', Y),
@@ -680,6 +712,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.29, 'fraction', 'euro-chp-practice', 2021, 'Electrical only; low because the steam is not fully expanded'),
     rampRatePerHour: sourced(0.3, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0.4, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(60, 'EUR/MW', 'engineering-standard', Y, 'A coal boiler, with a town on the other end of it'),
     buildTimeMonths: sourced(42, 'months', 'euro-chp-practice', 2021),
     designLifeYears: sourced(45, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(210, 'EUR/kW', 'engineering-standard', Y),
@@ -719,6 +752,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.92, 'fraction', 'euro-chp-practice', 2021, 'Fuel to heat'),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y, 'Minutes from cold'),
     minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(2, 'EUR/MW', 'engineering-standard', Y, 'A burner and a fan'),
     buildTimeMonths: sourced(10, 'months', 'euro-chp-practice', 2021),
     designLifeYears: sourced(30, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(8, 'EUR/kWth', 'engineering-standard', Y),
@@ -757,6 +791,7 @@ export const PLANT_TYPES: Record<PlantTypeId, PlantTypeDef> = {
     efficiency: sourced(0.98, 'fraction', 'euro-chp-practice', 2021),
     rampRatePerHour: sourced(1, 'fraction/h', 'engineering-standard', Y),
     minLoadFraction: sourced(0, 'fraction', 'engineering-standard', Y),
+    startCostPerMw: sourced(0, 'EUR/MW', 'engineering-standard', Y, 'A tank of hot water'),
     buildTimeMonths: sourced(12, 'months', 'euro-chp-practice', 2021),
     designLifeYears: sourced(40, 'years', 'engineering-standard', Y),
     decommissionCostPerKw: sourced(5, 'EUR/kWth', 'engineering-standard', Y),

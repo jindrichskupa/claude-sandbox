@@ -33,6 +33,8 @@ export type Unit =
   | 'EUR/kW/yr'
   | 'EUR/kWth/yr'
   | 'EUR/MWh'
+  /** Per megawatt of installed capacity, for a one-off such as a start. */
+  | 'EUR/MW'
   | 'EUR/MWh_th'
   | 'EUR/t'
   | 't/MWh_th'

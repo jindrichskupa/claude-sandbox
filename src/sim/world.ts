@@ -340,6 +340,17 @@ export class World {
    * charting layer existing.
    */
   private lastSystemPrice = 0
+
+  /**
+   * What the last hour cleared at, system-wide.
+   *
+   * Exposed because it is the headline the topbar shows and the series the price chart draws, so
+   * it is already public in every sense that matters; reaching it through a snapshot only made it
+   * awkward to assert on.
+   */
+  get systemPricePerMwh(): number {
+    return this.lastSystemPrice
+  }
   lastStoragePlans: Map<string, StoragePlan> = new Map()
   /** Residual load for the coming hours, current hour first. Drives storage and the UI. */
   lastForecast: ForecastHour[] = []
