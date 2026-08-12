@@ -143,6 +143,7 @@ export class MapView {
   private nodeGraphics = new Map<string, Graphics>()
   private nodeSprites = new Map<string, Sprite>()
   private lastTopologyEpoch = -1
+  private lastLabelEpoch = -1
   selectedNodeId: string | null = null
   /**
    * The corridor the inspector is showing, drawn so it can be found.
@@ -325,6 +326,7 @@ export class MapView {
       }
     }
     this.lastTopologyEpoch = this.world.network.topologyEpoch
+    this.lastLabelEpoch = this.world.network.labelEpoch
   }
 
   /** Which sprite a node wears: its technology, its size as a town, or a switching yard. */
@@ -360,7 +362,14 @@ export class MapView {
 
   /** Redraw everything that depends on the latest dispatch. Called once per simulation tick. */
   syncToWorld(): void {
-    if (this.world.network.topologyEpoch !== this.lastTopologyEpoch) {
+    // A rename changes the label and nothing else, but the labels are built with the nodes, so
+    // it goes through the same rebuild. It is rare enough that the cost does not matter and
+    // frequent enough that a station whose new name only appeared on the map when the player
+    // next built something would read as a bug.
+    if (
+      this.world.network.topologyEpoch !== this.lastTopologyEpoch ||
+      this.world.network.labelEpoch !== this.lastLabelEpoch
+    ) {
       this.buildNodes()
       this.rebuildPylons()
       this.particles = []

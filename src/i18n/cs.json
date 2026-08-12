@@ -113,6 +113,7 @@
   "ui.emissions": "Emise",
   "ui.build": "Stavět",
   "ui.close": "Zavřít",
+  "ui.renameHint": "Klikni pro přejmenování",
   "ui.why": "Proč?",
   "ui.base": "Základ",
   "ui.final": "Výsledek",

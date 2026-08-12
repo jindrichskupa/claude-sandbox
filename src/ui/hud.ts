@@ -21,6 +21,7 @@ import { Layer, LAYER_KEYS, Op, Param, PARAM_KEYS, type Explanation } from '@sim
 import { drawLoadCurve, drawMix, drawPrice, mixLegend } from './charts'
 import { LOADING_STOPS, nodeLabel } from '@render/mapView'
 import { nodeInService } from '@sim/grid/network'
+import { MAX_NAME_LENGTH } from '@sim/naming'
 import {
   nextVoltage,
   quoteLineDemolition,
@@ -36,7 +37,7 @@ import { BuildPanel, type BuildSelection } from './buildPanel'
 import { PoliticsPanel } from './politicsPanel'
 import { ObjectivesPanel } from './objectivesPanel'
 import { AccountsPanel, ledgerBlock } from './accountsPanel'
-import { headline, NewsPanel } from './newsPanel'
+import { expandName, headline, NewsPanel } from './newsPanel'
 import { HistoryPanel } from './historyPanel'
 import { BriefingPanel } from './briefingPanel'
 import { operatingMargin } from '@sim/economy/assetLedger'
@@ -80,6 +81,14 @@ export interface HudCallbacks {
   onSkip: () => void
   /** The player has read the opening brief, so the clock can start. */
   onBriefingClosed: () => void
+  /**
+   * Something was renamed, so the map's labels are stale.
+   *
+   * A callback rather than the hud reaching for the renderer: renaming happens on a paused game
+   * as often as not, and the map only redraws when it is told to. Without this the station keeps
+   * its old name on the map until the next tick or the next thing built.
+   */
+  onRenamed: () => void
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -707,6 +716,9 @@ export class Hud {
   private lastInspectorSignature: string | null = null
 
   private renderInspector(): void {
+    // A rebuild would replace the open input, so the player's half-typed name would vanish on
+    // the next tick. See `nameField`.
+    if (this.renaming !== null) return
     if (this.selectedEdgeId) {
       this.renderEdgeInspector(this.selectedEdgeId)
       return
@@ -745,7 +757,12 @@ export class Hud {
     close.addEventListener('click', () => this.selectNode(null))
     this.inspector.appendChild(close)
 
-    this.inspector.appendChild(el('h2', undefined, nodeLabel(node) ?? node.id))
+    // Named, not just labelled: a substation the player paid for is theirs to call something.
+    // Cities are not — a town has a name of its own and the player did not found it.
+    const label = nodeLabel(node) ?? node.id
+    this.inspector.appendChild(
+      node.kind === 'city' ? el('h2', undefined, label) : this.nameField(nodeId, label, 'h2'),
+    )
     const dispatch = this.world.lastDispatch
 
     const city = this.world.cities.find((c) => c.nodeId === nodeId)
@@ -863,7 +880,9 @@ export class Hud {
       const block = el('div', 'asset')
 
       const head = el('div', 'asset-head')
-      head.appendChild(el('span', 'asset-name', plant.id.replace(/^p_/, '')))
+      head.appendChild(
+        this.nameField(plant.id, expandName(this.world.plantDisplayName(plant.id)), 'span', 'asset-name'),
+      )
       head.appendChild(el('span', 'asset-type', t(type.nameKey)))
       block.appendChild(head)
 
@@ -1308,6 +1327,70 @@ export class Hud {
       row.appendChild(retire)
     }
     return row
+  }
+
+  /**
+   * A name the player can change, in place.
+   *
+   * Editing in the heading rather than behind a dialog, because renaming is a small thing done
+   * often and a modal for it would be heavier than the act. The element is a button until it is
+   * clicked and an input after, so the resting state stays a heading and does not look like a
+   * form the player has to fill in.
+   *
+   * `renaming` is the important part. The inspector rebuilds itself on every tick, so an open
+   * input would be replaced out from under the player mid-word on an unpaused game — the field
+   * would clear itself once an hour. While this is true, `renderInspector` leaves the panel
+   * alone.
+   */
+  private renaming: string | null = null
+
+  private nameField(assetId: string, shown: string, tag: 'h2' | 'span', className?: string): HTMLElement {
+    const host = el(tag, className)
+    host.classList.add('nameable')
+    host.textContent = shown
+    host.title = t('ui.renameHint')
+
+    // On mousedown, not click. The inspector rebuilds itself twice a second on a running game,
+    // so the element under the cursor is replaced between a press and its release — and a click
+    // event is only delivered to the nearest ancestor the two have in common, which by then is
+    // the panel and not the name. Pressing the name did nothing, at random, perhaps half the
+    // time. Mousedown fires on the live element before any rebuild can intervene.
+    host.addEventListener('mousedown', (ev) => {
+      // Otherwise the press starts a text selection that drags across the panel behind the
+      // input that is about to appear.
+      ev.preventDefault()
+      this.renaming = assetId
+      const input = el('input', className ? `${className} name-input` : 'name-input')
+      input.type = 'text'
+      input.maxLength = MAX_NAME_LENGTH
+      input.value = shown
+      input.placeholder = shown
+
+      // Committed on Enter or on leaving the field, abandoned on Escape. Blur has to commit
+      // rather than cancel: clicking anything else in the panel is how most edits end, and
+      // silently throwing the typing away would be the worse surprise of the two.
+      let done = false
+      const finish = (commit: boolean): void => {
+        if (done) return
+        done = true
+        this.renaming = null
+        if (commit && this.world.renameAsset(assetId, input.value) !== null) this.callbacks.onRenamed()
+        this.lastInspectorSignature = null
+        this.renderInspector()
+      }
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') finish(true)
+        else if (ev.key === 'Escape') finish(false)
+        // Otherwise the map would pan and the game would change speed under a player typing a
+        // name, because the shortcuts listen on the document.
+        ev.stopPropagation()
+      })
+      input.addEventListener('blur', () => finish(true))
+      host.replaceWith(input)
+      input.focus()
+      input.select()
+    })
+    return host
   }
 
   private kv(label: string, value: string): HTMLDivElement {

@@ -155,6 +155,10 @@ export function buildWorld(content: ScenarioContent): World {
       ownerId: PLAYER,
       typeId: spec.typeId,
       nodeId: spec.nodeId,
+      // The author named these — Blackridge I and Blackridge II are two machines on one site —
+      // and until the plant had a name field of its own the pair of names went nowhere. Both
+      // units answered to the site's name and the inspector printed the raw id.
+      name: spec.name,
       phase: LifecyclePhase.Operating,
       phaseEndsTick: Number.MAX_SAFE_INTEGER,
       commissionedTick,

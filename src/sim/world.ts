@@ -83,6 +83,7 @@ import { techModifiers, TECH_SOURCE } from './tech/modifiers'
 import { nominal, pricesFor, type Prices } from './tech/money'
 import { realDecommissioningFactor } from './tech/costs'
 import type { SaveData } from './scenario/save'
+import { sanitiseName } from './naming'
 import { EventDirector } from './events/director'
 import { EVENTS_BY_ID } from '@content/events'
 import {
@@ -1799,10 +1800,54 @@ export class World {
     return nodeId.replace(/^n_/, '')
   }
 
-  /** The same, for a plant, via the node it stands on. */
+  /**
+   * The same, for a plant: its own name if it has one, otherwise the site it stands on.
+   *
+   * Its own name first, because a site can hold several machines and the site name then names
+   * none of them. Falling through to the node is what gives a newly built unit "Gas turbine 4"
+   * without anybody having to name it — the node carries the key and the serial.
+   */
   plantDisplayName(plantId: string): string {
-    const nodeId = this.plantsById.get(plantId)?.nodeId
+    const plant = this.plantsById.get(plantId)
+    if (plant?.name) return plant.name
+    const nodeId = plant?.nodeId
     return nodeId ? this.displayName(nodeId) : plantId.replace(/^p_/, '')
+  }
+
+  /**
+   * Rename something the player owns: a generating unit or a switching station.
+   *
+   * One entry point for both because the player does not think of them as two kinds of thing,
+   * and because the id space is disjoint — a plant and a node cannot share an id, so what is
+   * being renamed is decided by what exists. An empty name clears it, and the asset goes back
+   * to being called whatever it was called before.
+   *
+   * Not lines. A corridor is named by the two places it joins, which is how the industry refers
+   * to one and how all twelve headlines about lines already read; a name that appeared in the
+   * inspector and in none of them would be worse than no name at all. The game also cannot
+   * produce the case that would justify one — a second circuit is modelled on the same edge, so
+   * two corridors between the same pair of substations do not arise.
+   *
+   * Returns what the asset is now called, or null if there is nothing by that id. Display only:
+   * nothing downstream of this dispatches, prices or ages by a name.
+   */
+  renameAsset(id: string, raw: string): string | null {
+    const name = sanitiseName(raw)
+
+    const plant = this.plantsById.get(id)
+    if (plant) {
+      if (name === undefined) delete plant.name
+      else plant.name = name
+      return this.plantDisplayName(id)
+    }
+
+    const node = this.network.getNode(id)
+    if (node) {
+      this.network.setNodeName(id, name)
+      return this.displayName(id)
+    }
+
+    return null
   }
 
   private plantName(plantId: string): string {

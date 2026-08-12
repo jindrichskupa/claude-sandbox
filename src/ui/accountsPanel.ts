@@ -50,6 +50,7 @@ import {
   type LedgerWindow,
 } from '@sim/economy/assetLedger'
 import { nodeLabel } from '@render/mapView'
+import { expandName } from './newsPanel'
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -96,7 +97,7 @@ export function assetLabel(world: World, id: string): { name: string; kind: stri
   const plant = world.plants.find((p) => p.id === id)
   if (plant) {
     return {
-      name: plant.id.replace(/^p_/, ''),
+      name: expandName(world.plantDisplayName(plant.id)),
       kind: t(PLANT_TYPES[plant.typeId].nameKey),
       group: 'generation',
     }

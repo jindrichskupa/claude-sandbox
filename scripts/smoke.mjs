@@ -153,6 +153,62 @@ try {
   if (reach.units < 2) throw new Error('No node with more than one unit; this check proves nothing')
   if (reach.blocked.length) throw new Error(`Inspector buttons are covered: ${reach.blocked.join(', ')}`)
 
+  // --- Naming ------------------------------------------------------------
+  // Typed for real rather than driven through the model, because everything that can go wrong
+  // here is in the event path: the field has to survive the inspector's once-a-tick rebuild while
+  // it is open, and the keystrokes must not reach the shortcuts on the document — which would
+  // otherwise pan the map and change the game speed under a player typing a name.
+  //
+  // Paused for the press itself. Not to dodge a bug — the field is opened on mousedown for that
+  // reason — but because Playwright refuses to click an element that is replaced twice a second,
+  // and pausing to rename something is what a player does anyway. The clock is started again
+  // immediately, which is the half that matters.
+  const speedButton = (i) => document.querySelectorAll('.speed-controls button')[i].click()
+  await page.evaluate(() => window.game.hud.selectNode('n_blackridge', true))
+  await page.evaluate(speedButton, 0)
+  await page.waitForTimeout(200)
+  const beforeRename = await page.evaluate(() => ({
+    shown: document.querySelector('#inspector .asset-name').textContent,
+    tick: window.game.world.tick,
+  }))
+  // The name the scenario author wrote, which for years reached no screen: the plant had nowhere
+  // to keep a name, so both units at Blackridge answered to the site and the panel printed the id.
+  if (beforeRename.shown !== 'Blackridge I') {
+    throw new Error(`The unit is not called what the scenario calls it: ${beforeRename.shown}`)
+  }
+
+  await page.click('#inspector .asset-name')
+  await page.evaluate(speedButton, 1)
+  await page.keyboard.press('Control+A')
+  // Contains a digit and a space on purpose: '3' is a speed shortcut and space is pause.
+  await page.type('#inspector .name-input', 'Stara 3 dama', { delay: 40 })
+  // Long enough that an unguarded rebuild would have cleared the field under the typing.
+  await page.waitForTimeout(1500)
+  const midEdit = await page.evaluate(() => ({
+    value: document.querySelector('#inspector .name-input')?.value ?? null,
+    tick: window.game.world.tick,
+  }))
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(300)
+  const renamed = await page.evaluate(() => ({
+    shown: document.querySelector('#inspector .asset-name').textContent,
+    model: window.game.world.plants.find((p) => p.id === 'p_blackridge1').name,
+    stillEditing: document.querySelector('#inspector .name-input') !== null,
+  }))
+  console.log('renaming:', { was: beforeRename.shown, midEdit, ...renamed })
+  if (midEdit.tick <= beforeRename.tick) throw new Error('The clock never restarted; the test proves nothing')
+  if (midEdit.value !== 'Stara 3 dama') throw new Error(`The field was cleared while typing: ${midEdit.value}`)
+  if (renamed.shown !== 'Stara 3 dama') throw new Error(`Rename did not stick: ${renamed.shown}`)
+  if (renamed.model !== 'Stara 3 dama') throw new Error('The name never reached the model')
+  if (renamed.stillEditing) throw new Error('Enter did not close the field')
+  // The other unit on the same site is untouched, which is the whole reason a name lives on the
+  // machine rather than on the ground it stands on.
+  const sibling = await page.evaluate(
+    () => window.game.world.plantDisplayName('p_blackridge2'),
+  )
+  if (sibling !== 'Blackridge II') throw new Error(`Renaming one unit renamed another: ${sibling}`)
+  await page.screenshot({ path: join(OUT, '03b-renamed.png') })
+
   // --- District heating -------------------------------------------------
   // The heat network has to be visibly running, not merely present in the data model.
   const heat = await page.evaluate(() => {

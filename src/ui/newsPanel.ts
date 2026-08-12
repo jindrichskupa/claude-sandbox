@@ -39,32 +39,34 @@ function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 /**
- * A headline, with its parameters already translated where they are themselves keys.
+ * A name the model handed over, in the language the interface is in.
  *
  * Content refers to itself by key — a plant type is `plant.ccgt`, a government is
  * `policy.renewablesPush` — so a headline that interpolated them raw would read "Millbrook
- * (plant.ccgt) has come into service". Translating any parameter that looks like a key is a small
+ * (plant.ccgt) has come into service". Translating anything that looks like a key is a small
  * piece of cleverness that removes a large class of ugly bugs, and the cost of getting it wrong
  * is a string that was going to be shown untranslated anyway.
  *
  * `key#index` is the other half of that convention. A node the player built has no literal name,
  * only a key and a serial — "220 kV substation 4" — and the simulation has no business knowing
  * what language the interface is in, so it hands over the pair and this expands it. See
- * `World.displayName`.
+ * `World.displayName`, and `sanitiseName` for why a name the player typed can never contain a
+ * hash and so can never be mistaken for one of these.
  */
+export function expandName(value: string): string {
+  if (value.includes('#')) {
+    const [nameKey, index] = value.split('#')
+    return `${t(nameKey!)} ${index}`
+  }
+  if (/^[a-z]+\.[A-Za-z0-9_.]+$/.test(value)) return t(value)
+  return value
+}
+
+/** A headline, with every parameter that names something already expanded. */
 export function headline(item: { titleKey: string; params?: Record<string, string | number> }): string {
   const params: Record<string, string | number> = {}
   for (const [key, value] of Object.entries(item.params ?? {})) {
-    if (typeof value !== 'string') {
-      params[key] = value
-    } else if (value.includes('#')) {
-      const [nameKey, index] = value.split('#')
-      params[key] = `${t(nameKey!)} ${index}`
-    } else if (/^[a-z]+\.[A-Za-z0-9_.]+$/.test(value)) {
-      params[key] = t(value)
-    } else {
-      params[key] = value
-    }
+    params[key] = typeof value === 'string' ? expandName(value) : value
   }
   return t(item.titleKey, params)
 }

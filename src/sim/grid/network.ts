@@ -39,7 +39,13 @@ export interface GridNode {
    */
   nameKey?: string
   nameIndex?: number
-  /** Free-form display name for places that are named rather than keyed, such as cities. */
+  /**
+   * A literal display name, which wins over the key and index above.
+   *
+   * Two things set it: the scenario, for places that are named rather than keyed — a town is
+   * called Millbrook and always was — and the player, who may call a station they paid for
+   * whatever they like. Clearing it puts a renamed station back to "220 kV substation 4".
+   */
   name?: string
 
   /**
@@ -143,9 +149,30 @@ export class Network {
   private readonly edges = new Map<EdgeId, GridEdge>()
   private readonly adjacency = new Map<NodeId, EdgeId[]>()
   private _topologyEpoch = 0
+  private _labelEpoch = 0
 
   get topologyEpoch(): number {
     return this._topologyEpoch
+  }
+
+  /**
+   * Bumped when a name changes, which the map has to notice and the solver must not.
+   *
+   * Renaming a station changes nothing about the graph, so putting it through `topologyEpoch`
+   * would throw away the island partition, the dispatch caches and the pylon geometry to redraw
+   * a word. The renderer watches both counters; everything else watches only the first.
+   */
+  get labelEpoch(): number {
+    return this._labelEpoch
+  }
+
+  /** Give a node a literal name, or clear it back to whatever it was called before. */
+  setNodeName(id: NodeId, name: string | undefined): void {
+    const node = this.nodes.get(id)
+    if (!node || node.name === name) return
+    if (name === undefined) delete node.name
+    else node.name = name
+    this._labelEpoch++
   }
 
   addNode(node: GridNode): void {

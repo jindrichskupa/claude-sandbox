@@ -43,6 +43,19 @@ export interface PlantAsset {
   ownerId: OwnerId
   typeId: PlantTypeId
   nodeId: NodeId
+  /**
+   * What this unit is called, if it is called anything in particular.
+   *
+   * On the plant rather than on its node, because a site is not a machine: Blackridge is one
+   * place with two lignite sets on it, and the scenario has always named them Blackridge I and
+   * Blackridge II. Reading the name off the node meant both answered to "Blackridge" and the
+   * inspector, which read neither, printed `blackridge1` — so the two names the author wrote
+   * were carried through the whole game and shown nowhere.
+   *
+   * Absent means the unit has no name of its own and is described by its site and technology,
+   * which is the right answer for the first gas turbine the player drops on empty ground.
+   */
+  name?: string
 
   phase: LifecyclePhase
   /** Tick at which the current phase ends. Meaningless while Operating. */

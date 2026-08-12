@@ -113,6 +113,7 @@
   "ui.emissions": "Emissions",
   "ui.build": "Build",
   "ui.close": "Close",
+  "ui.renameHint": "Click to rename",
   "ui.why": "Why?",
   "ui.base": "Base",
   "ui.final": "Effective",

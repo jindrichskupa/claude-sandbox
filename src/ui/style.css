@@ -296,6 +296,38 @@ button.active {
   color: var(--text-dim);
 }
 
+/*
+ * A name the player can change.
+ *
+ * Deliberately not styled as a control at rest. Renaming is the least of the things this panel
+ * does, and a field or a pencil icon in the heading would advertise it above the buttons that
+ * spend money. The underline appears on hover, which is where the player looks when they are
+ * wondering whether something is clickable, and nowhere else.
+ */
+.nameable {
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+}
+
+.nameable:hover {
+  border-bottom-color: var(--text-dim);
+}
+
+.name-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--text);
+  background: #0e1420;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.name-input:focus {
+  outline: none;
+}
+
 .bar {
   height: 5px;
   border-radius: 3px;

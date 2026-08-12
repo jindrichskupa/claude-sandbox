@@ -317,6 +317,9 @@ async function main(): Promise<void> {
         if (focus && (nodeId ?? edgeId)) map.focusOn((nodeId ?? edgeId)!)
         map.syncToWorld()
       },
+      onRenamed: () => {
+        map.syncToWorld()
+      },
       onUpgradeLine: (edgeId) => {
         const result = upgradeLine(world, edgeId)
         hud.setHint(result.ok ? t('build.upgrading') : t(result.quote.reasonKey ?? 'build.notUpgradable'))
