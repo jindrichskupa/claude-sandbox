@@ -52,7 +52,8 @@ describe('a loan', () => {
     // Ten years of monthly instalments clear it. Nothing did this before: the principal stood for
     // ever and only the interest was charged, so debt was a one-way ratchet.
     const ledger = emptyLedger()
-    for (let month = 0; month < 10 * MONTHS_PER_YEAR; month++) serviceLoans(ledger, f, TICKS_PER_MONTH)
+    for (let month = 0; month < 10 * MONTHS_PER_YEAR; month++)
+      serviceLoans(ledger, f, TICKS_PER_MONTH, month * TICKS_PER_MONTH)
     expect(f.loans).toHaveLength(0)
     expect(f.debt).toBe(0)
 
@@ -70,7 +71,7 @@ describe('a loan', () => {
     const f = finances()
     takeLoan(f, 200e6, 10, 0)
     const ledger = emptyLedger()
-    serviceLoans(ledger, f, TICKS_PER_MONTH)
+    serviceLoans(ledger, f, TICKS_PER_MONTH, 0)
 
     expect(ledger.interest).toBeGreaterThan(0)
     expect(ledger.debtRepaid).toBeGreaterThan(0)
@@ -86,7 +87,11 @@ describe('a loan', () => {
     // Before gearing, debt was free at any level right up to a hard ceiling and then unavailable,
     // which gave a player no reason to borrow early rather than late.
     const empty = finances()
-    const loaded = finances({ debt: 2_000e6 })
+    // Borrowed rather than written into the field, because gearing is now a question about the
+    // loans a utility actually holds: a project facility is secured on its asset and does not
+    // fill the corporate balance sheet, so the total alone can no longer answer it.
+    const loaded = finances()
+    takeLoan(loaded, 2_000e6, 10, 0)
     expect(gearing(empty)).toBe(0)
     expect(gearing(loaded)).toBeGreaterThan(0.5)
     expect(effectiveInterestRate(1, gearing(loaded))).toBeGreaterThan(effectiveInterestRate(1, 0))
@@ -115,7 +120,7 @@ describe('a loan', () => {
     const f = finances()
     takeLoan(f, 100e6, 10, 0)
     const before = { ...emptyLedger() }
-    serviceLoans(before, f, TICKS_PER_MONTH)
+    serviceLoans(before, f, TICKS_PER_MONTH, 0)
 
     const paid = repayLoan(f, f.loans[0]!.id)
     expect(paid).toBeGreaterThan(0)
@@ -123,7 +128,7 @@ describe('a loan', () => {
     expect(f.debt).toBe(0)
 
     const after = emptyLedger()
-    serviceLoans(after, f, TICKS_PER_MONTH)
+    serviceLoans(after, f, TICKS_PER_MONTH, 0)
     expect(after.interest).toBe(0)
   })
 
@@ -136,12 +141,13 @@ describe('a loan', () => {
     const f = finances()
     takeLoan(f, 120e6, 10, 0)
     const first = emptyLedger()
-    serviceLoans(first, f, TICKS_PER_MONTH)
+    serviceLoans(first, f, TICKS_PER_MONTH, 0)
     const firstInterest = first.interest
 
-    for (let i = 0; i < 8 * MONTHS_PER_YEAR; i++) serviceLoans(emptyLedger(), f, TICKS_PER_MONTH)
+    for (let i = 0; i < 8 * MONTHS_PER_YEAR; i++)
+      serviceLoans(emptyLedger(), f, TICKS_PER_MONTH, i * TICKS_PER_MONTH)
     const late = emptyLedger()
-    serviceLoans(late, f, TICKS_PER_MONTH)
+    serviceLoans(late, f, TICKS_PER_MONTH, 0)
     expect(late.interest).toBeLessThan(firstInterest)
   })
 })

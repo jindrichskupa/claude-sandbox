@@ -25,7 +25,7 @@ import { judgeSite } from './siting'
 import { isBuildable } from '../map/terrain'
 import { routeLine, simplifyRoute } from '../grid/routing'
 import { Param } from '../params/types'
-import { canAfford } from '../economy/economy'
+import { canAfford, openProjectFacility, quoteProjectFinance } from '../economy/economy'
 import { REGIMES_BY_ID } from '@content/policies'
 import { offerContract } from '../policy/contracts'
 import type { World } from '../world'
@@ -65,6 +65,8 @@ export interface Quote {
   lengthKm?: number
   /** The corridor itself, as tile corners. */
   route?: Array<{ x: number; y: number }>
+  /** Terms a lender would offer against this project. Only present when one was asked for. */
+  facility?: ReturnType<typeof quoteProjectFinance>
 }
 
 /** Synthetic parameter target used to price a plant that does not exist yet. */
@@ -82,8 +84,21 @@ function refuse(reasonKey: string, reasonParams?: Record<string, string | number
 // Plants
 // ---------------------------------------------------------------------------
 
-/** What a new plant of this type would cost and how long it would take. */
-export function quotePlant(world: World, typeId: PlantTypeId, x: number, y: number): Quote {
+/**
+ * What a new plant of this type would cost and how long it would take.
+ *
+ * `financed` asks the question with a lender in it. The affordability test then applies to the
+ * equity share rather than the whole cost, which is the entire point: nothing else about the
+ * quote changes, because a facility does not make a station cheaper — it changes who pays for it
+ * when, and leaves the player with twenty-five years of instalments either way.
+ */
+export function quotePlant(
+  world: World,
+  typeId: PlantTypeId,
+  x: number,
+  y: number,
+  financed = false,
+): Quote {
   const type = PLANT_TYPES[typeId]
   const year = world.date.year
 
@@ -119,6 +134,13 @@ export function quotePlant(world: World, typeId: PlantTypeId, x: number, y: numb
   const totalCost = capexPerKw * capacityMw * 1000
   const buildTicks = Math.max(1, Math.round(buildMonths * TICKS_PER_MONTH))
 
+  if (financed) {
+    const facility = quoteProjectFinance(totalCost, buildTicks, world.state.investorConfidence)
+    if (!facility.ok) return refuse(facility.reasonKey ?? 'build.projectTooSmall')
+    if (!canAfford(world.finances, facility.equity)) return refuse('build.cannotAffordEquity')
+    return { ok: true, totalCost, buildTicks, siteQuality: verdict.quality, facility }
+  }
+
   if (!canAfford(world.finances, totalCost)) {
     return refuse('build.cannotAfford')
   }
@@ -134,8 +156,9 @@ export function beginPlantConstruction(
   typeId: PlantTypeId,
   x: number,
   y: number,
+  financed = false,
 ): { ok: boolean; plantId?: string; quote: Quote } {
-  const quote = quotePlant(world, typeId, x, y)
+  const quote = quotePlant(world, typeId, x, y, financed)
   if (!quote.ok) return { ok: false, quote }
 
   const type = PLANT_TYPES[typeId]
@@ -189,6 +212,20 @@ export function beginPlantConstruction(
   }
   world.addPlant(plant)
   world.scheduleSpending(plantId, quote.totalCost, quote.buildTicks, 'capex')
+
+  // Arranged before a euro is spent, so the drawdown in `payInstalments` has something to draw
+  // on from the first instalment. Nothing moves yet: a facility is a promise to fund the work,
+  // and the work has not started.
+  if (financed) {
+    openProjectFacility(
+      world.finances,
+      plantId,
+      quote.totalCost,
+      quote.buildTicks,
+      world.tick,
+      world.state.investorConfidence,
+    )
+  }
 
   // The promise is made now, at the investment decision, and runs from the day the plant enters
   // service. That gap — one construction time and possibly one election — is the whole risk

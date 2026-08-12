@@ -347,6 +347,115 @@ try {
   await page.waitForTimeout(600)
   await page.screenshot({ path: join(OUT, '10-heat-main.png') })
 
+  // --- Project finance ---------------------------------------------------
+  // The reactor is the case this exists for: 3005 million against an opening balance of 400, so
+  // the row is refused for cash and offered against the station itself. What is checked is that
+  // the offer appears, that it is not on the rows too small to justify one, and that choosing it
+  // actually builds something the utility could not otherwise have paid for.
+  await page.evaluate(() => window.game.hud.buildPanel.setOpen(true))
+  await page.waitForTimeout(300)
+  const financeRows = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#build-panel .build-row')]
+    return rows.map((r) => ({
+      name: r.querySelector('.build-name')?.textContent,
+      offered: r.querySelector('.build-finance') !== null,
+      blocked: r.querySelector('.build-finance .build-blocked') !== null,
+    }))
+  })
+  // The reactor's row is greyed because it cannot be bought for cash — which is the one row where
+  // that grey must not swallow the offer underneath it. Opacity on a parent composites its
+  // children with it, so this is not something a rule inside the box can fix, and nothing in a
+  // screenshot would say which of the two was happening.
+  const deadRowOffer = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('#build-panel .build-row.disabled')].find(
+      (r) => r.querySelector('.build-finance:not(.disabled)'),
+    )
+    if (!row) return null
+    const box = row.querySelector('.build-finance:not(.disabled)')
+    box.scrollIntoView({ block: 'center' })
+    const r = box.getBoundingClientRect()
+    const over = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return {
+      opacity: Number(getComputedStyle(box).opacity),
+      hittable: over !== null && (over === box || box.contains(over)),
+    }
+  })
+  console.log('offer inside an unaffordable row:', deadRowOffer)
+  if (deadRowOffer) {
+    if (deadRowOffer.opacity < 0.9) throw new Error('A live facility is faded out with the row it sits in')
+    if (!deadRowOffer.hittable) throw new Error('A live facility inside a disabled row cannot be clicked')
+  }
+
+  const offered = financeRows.filter((r) => r.offered).map((r) => r.name)
+  console.log('project finance offered on:', offered)
+  if (!offered.length) throw new Error('No row offers project finance at all')
+  if (offered.length === financeRows.length) {
+    throw new Error('Every row offers project finance; the size threshold is doing nothing')
+  }
+
+  const beforeFinance = await page.evaluate(() => ({
+    plants: window.game.world.plants.length,
+    debt: window.game.world.finances.debt,
+    cash: window.game.world.finances.cash,
+  }))
+  const financedBuild = await page.evaluate(async () => {
+    const g = window.game
+    // The row the offer is on, chosen and placed the way a player would: click the sub-row, then
+    // put the station on the ground.
+    const row = [...document.querySelectorAll('#build-panel .build-row')].find(
+      (r) => r.querySelector('.build-finance') && !r.querySelector('.build-finance .build-blocked'),
+    )
+    if (!row) return { skipped: 'no affordable facility on offer' }
+    const name = row.querySelector('.build-name').textContent
+    row.querySelector('.build-finance').click()
+    await new Promise((r) => setTimeout(r, 200))
+    const mode = g.map.buildMode
+    return { name, mode: mode ? { kind: mode.kind, financed: mode.financed } : null }
+  })
+  console.log('chose project finance:', financedBuild)
+  if (!financedBuild.skipped) {
+    if (!financedBuild.mode?.financed) throw new Error('Clicking the facility did not select a financed build')
+
+    // Placed through the same command the map click uses, because finding a legal reactor site
+    // by clicking pixels is a different test.
+    const placed = await page.evaluate(() => {
+      const g = window.game
+      const mode = g.map.buildMode
+      for (let y = 0; y < g.world.scenario.mapHeight; y++) {
+        for (let x = 0; x < g.world.scenario.mapWidth; x++) {
+          const result = g.build.beginPlantConstruction(g.world, mode.typeId, x, y, mode.financed)
+          if (result.ok) return { plantId: result.plantId, cost: result.quote.totalCost }
+        }
+      }
+      return null
+    })
+    if (!placed) throw new Error('The financed station could not be placed anywhere')
+
+    // Nothing is drawn on signature, and nothing is repaid until it runs. A year of building
+    // should draw against the work and add to the debt without a euro of instalment.
+    await page.evaluate(() => {
+      for (let i = 0; i < 24 * 60; i++) window.game.world.step()
+    })
+    const after = await page.evaluate((id) => {
+      const g = window.game
+      const loan = g.world.finances.loans.find((l) => l.assetId === id)
+      return {
+        hasFacility: loan !== undefined,
+        drawn: loan ? Math.round(loan.drawn / 1e6) : 0,
+        outstanding: loan ? Math.round(loan.outstanding / 1e6) : 0,
+        repaymentsStart: loan?.repaymentsStartTick ?? null,
+        tick: g.world.tick,
+        debt: g.world.finances.debt,
+      }
+    }, placed.plantId)
+    console.log('financed build after two months:', { was: beforeFinance.debt, ...after })
+    if (!after.hasFacility) throw new Error('The financed build arranged no facility')
+    if (after.drawn <= 0) throw new Error('The facility never drew against the construction')
+    if (after.debt <= beforeFinance.debt) throw new Error('Drawing on the facility did not show as debt')
+    if (after.repaymentsStart <= after.tick) throw new Error('Repayments began before the station did')
+  }
+  await page.evaluate(() => window.game.hud.buildPanel.setOpen(false))
+
   // --- Building ---------------------------------------------------------
   // The point of this milestone: the player can actually do something.
   await page.evaluate(() => window.game.hud.buildPanel.setOpen(true))

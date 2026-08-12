@@ -529,13 +529,33 @@ button.active {
   border-color: var(--accent);
 }
 
+/*
+ * Faded part by part rather than as a whole row, which looks like the same thing and is not.
+ *
+ * Opacity on a parent composites its children with it, so nothing inside can undo it — and the
+ * reactor is precisely the row that needs to: it cannot be bought for cash, so the row is
+ * disabled, and the financed alternative underneath is the entire reason the row is worth
+ * reading. Fading the parts that are genuinely unavailable leaves the one live thing live.
+ */
 .build-row.disabled {
-  opacity: 0.45;
   cursor: not-allowed;
+}
+
+.build-row.disabled .build-swatch,
+.build-row.disabled .build-name,
+.build-row.disabled .build-meta,
+.build-row.disabled .build-trend,
+.build-row.disabled .build-blocked {
+  opacity: 0.45;
 }
 
 .build-row.disabled:hover {
   background: transparent;
+}
+
+/* The offer keeps its pointer even where the row above it has lost one. */
+.build-row.disabled .build-finance:not(.disabled) {
+  cursor: pointer;
 }
 
 .build-swatch {
@@ -1153,6 +1173,48 @@ button.danger:hover {
 .build-trend {
   font-size: 10px;
   margin-top: 2px;
+}
+
+/*
+ * The financed alternative, under the row it belongs to.
+ *
+ * Indented and quieter than the row above it, because it is the second answer to the question
+ * rather than a second thing to build. It appears only where the deal is large enough to be worth
+ * arranging, which for most of the catalogue is never — so a player meets it for the first time
+ * in front of the one machine they could not otherwise pay for.
+ */
+.build-finance {
+  margin: 6px 0 0 0;
+  padding: 5px 8px;
+  border-left: 2px solid var(--line);
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.build-finance:hover {
+  border-left-color: var(--accent);
+}
+
+.build-finance.selected {
+  border-left-color: var(--accent);
+  background: rgba(127, 212, 255, 0.08);
+  color: var(--text);
+}
+
+.build-finance.disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.build-finance-head {
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+
+.build-finance-line {
+  font-variant-numeric: tabular-nums;
 }
 
 .build-trend.good {

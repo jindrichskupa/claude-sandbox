@@ -13,6 +13,42 @@ export interface EconomicsDef {
   valueOfLostLoadPerMwh: Sourced<number>
   /** Annual interest on borrowed money. */
   loanInterestRate: Sourced<number>
+  /**
+   * What share of a project's capital cost a lender will advance against the project itself.
+   *
+   * The whole difference between this and the ordinary facility beside it. Corporate debt is
+   * sized on the balance sheet — trailing revenue times a multiple — which means a utility can
+   * never borrow to build something larger than the business it already has. That is a real
+   * constraint on a real company and it is also why the opening scenario's reactor, at seven and
+   * a half times the utility's opening cash, was a technology in the catalogue that nobody could
+   * ever build. Infrastructure is not financed that way: the lender looks at the asset, takes
+   * security over it, and advances against what it will earn.
+   *
+   * Seventy per cent is the ordinary gearing for a merchant power project. Contracted or
+   * regulated assets reach eighty and more, because the revenue is certain; a plant selling into
+   * a market gets less, because it might not.
+   */
+  projectDebtShare: Sourced<number>
+  /**
+   * How much more a project facility costs than corporate debt, as a fraction of the rate.
+   *
+   * A margin for construction risk, which is the risk that the thing is late, over budget, or
+   * never finishes at all — and until it does finish there is no asset to take security over
+   * and nothing earning to pay anybody. It is the price of the money arriving before the
+   * revenue does.
+   */
+  projectRatePremium: Sourced<number>
+  /** How long a project facility runs for, once the asset it financed is earning. */
+  projectTermYears: Sourced<number>
+  /**
+   * Below this, a project facility is not on offer.
+   *
+   * Arranging one is months of lawyers, technical advisers and due diligence, and those costs
+   * barely move with the size of the deal — which is why nobody project-finances a substation.
+   * The threshold is what keeps this a decision about the two or three largest things a player
+   * will ever build rather than the default way to buy anything.
+   */
+  projectMinimumSize: Sourced<number>
   /** How much can be borrowed, as a multiple of annual revenue. */
   maxDebtToRevenue: Sourced<number>
   /**
@@ -95,6 +131,10 @@ export interface EconomicsDef {
 export const ECONOMICS: EconomicsDef = {
   valueOfLostLoadPerMwh: sourced(5000, 'EUR/MWh', 'entsoe-factsheet', 2022, 'Estimates range from 2000 to 25000'),
   loanInterestRate: sourced(0.06, 'fraction', 'game-design', 2024),
+  projectDebtShare: sourced(0.70, 'fraction', 'project-finance', 2023, 'Merchant power; contracted assets gear higher'),
+  projectRatePremium: sourced(0.35, 'fraction', 'project-finance', 2023, 'Construction-risk margin over corporate debt'),
+  projectTermYears: sourced(25, 'years', 'project-finance', 2023, 'Tenor matched to a long-lived asset'),
+  projectMinimumSize: sourced(200_000_000, 'EUR', 'project-finance', 2023, 'Below this the arrangement costs swamp the deal'),
   maxDebtToRevenue: sourced(4, 'fraction', 'game-design', 2024),
   wheelingTieBreakPerMwh: sourced(0.01, 'EUR/MWh', 'game-design', 2024, 'Numerical tie-break only'),
   unservedPenaltyPerMwh: sourced(300, 'EUR/MWh', 'game-design', 2024, 'Regulatory penalty for failing to supply'),

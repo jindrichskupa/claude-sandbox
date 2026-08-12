@@ -175,7 +175,28 @@ export interface Loan {
   ratePerYear: number
   takenTick: number
   maturesTick: number
-  kind: 'planned' | 'emergency'
+  kind: 'planned' | 'emergency' | 'project'
+  /**
+   * What this facility financed. Project facilities only.
+   *
+   * Kept because the debt outlives the decision: a player who project-financed a station and then
+   * closed it is still paying for it, and the interface has to be able to say which station. It is
+   * also what the drawdown finds — a facility funds its share of *that* asset's construction and
+   * nothing else, which is the difference between project finance and a loan.
+   */
+  assetId?: string
+  /** The facility's full size. What is left to draw is this less `drawn`. */
+  commitment?: number
+  drawn?: number
+  /**
+   * When instalments begin. Absent means at once, which is every facility but a project one.
+   *
+   * A station under construction earns nothing, so a project facility charges no instalment until
+   * the asset is in service; the interest it accrues in the meantime is rolled into the balance
+   * instead. That is not a concession, it is how the money works — and it is why the debt at
+   * commissioning is larger than the sum ever drawn.
+   */
+  repaymentsStartTick?: number
 }
 
 export interface Finances {
@@ -367,11 +388,37 @@ export function effectiveInterestRate(investorConfidence: number, gearing = 0): 
   )
 }
 
-/** How full the balance sheet is, 0 to 1. Above one only if the limit has fallen under the debt. */
-export function gearing(finances: Finances): number {
+/**
+ * Debt the utility carries on its own balance sheet, rather than against a particular asset.
+ *
+ * The distinction is the whole point of a project facility. Corporate debt is limited by what the
+ * business already earns; a facility secured on a station is limited by the station. Counting the
+ * second against the first would put the reactor back out of reach, which is what this was built
+ * to fix — and not counting it in `finances.debt` at all would be a lie, because the money is
+ * owed either way. So it is in the total the accounts, the brief and the objectives read, and out
+ * of the ceiling the corporate facility is sized against.
+ */
+export function corporateDebt(finances: Finances): number {
+  let total = 0
+  for (const loan of finances.loans) {
+    if (loan.kind !== 'project') total += loan.outstanding
+  }
+  return total
+}
+
+/**
+ * How full the balance sheet is, 0 to 1. Above one only if the limit has fallen under the debt.
+ *
+ * `extra` asks the question about a balance sheet that does not exist yet, which is what a lender
+ * pricing a new advance is doing. It is a parameter rather than a spread copy of the finances
+ * because the debt figure now comes from the loans themselves: copying the object and raising a
+ * total the function no longer reads was a silent no-op, and every quote came back at the base
+ * rate however much was being asked for.
+ */
+export function gearing(finances: Finances, extra = 0): number {
   const limit = finances.trailingRevenue * ECONOMICS.maxDebtToRevenue.value
   if (limit <= 0) return 1
-  return Math.max(0, finances.debt / limit)
+  return Math.max(0, (corporateDebt(finances) + Math.max(0, extra)) / limit)
 }
 
 /** Level monthly instalment that clears `principal` over `months` at `ratePerYear`. */
@@ -395,8 +442,7 @@ export function quoteLoan(
   const capped = Math.max(0, Math.min(amount, borrowingHeadroom(finances)))
   // Priced on the gearing the utility will have *after* drawing, not before. Asking what the
   // balance sheet looks like once the money is on it is the question a lender actually asks.
-  const after = { ...finances, debt: finances.debt + capped }
-  let rate = effectiveInterestRate(investorConfidence, gearing(after))
+  let rate = effectiveInterestRate(investorConfidence, gearing(finances, capped))
   if (kind === 'emergency') rate *= 1 + ECONOMICS.emergencyRatePremium.value
   const months = Math.max(1, Math.round(termYears * MONTHS_PER_YEAR))
   const monthly = instalment(capped, rate, months)
@@ -436,6 +482,114 @@ export function takeLoan(
 }
 
 /**
+ * What a project facility would look like, without committing to it.
+ *
+ * The question a lender is actually being asked: not "can this business carry more debt" — which
+ * is what the corporate facility beside this one answers, and which no mid-sized utility can
+ * answer yes to about a reactor — but "will this asset earn enough to pay for itself". So the
+ * size comes off the project's capital cost rather than off the balance sheet, and what the
+ * player has to find is the rest of it, in cash. That equity share is the gate, and it is meant
+ * to be: it is the difference between a decision and a formality.
+ */
+export function quoteProjectFinance(
+  capex: number,
+  buildTicks: number,
+  investorConfidence = 1,
+): {
+  ok: boolean
+  reasonKey?: string
+  /** The facility's size: what the lender will advance in total. */
+  commitment: number
+  /** What the player has to fund themselves, in cash, over the construction. */
+  equity: number
+  ratePerYear: number
+  termYears: number
+  /**
+   * What will be owed the day the asset enters service, after the interest that rolls up while
+   * it is being built. An estimate: the balance ramps as the money is drawn, so the interest
+   * accrues on roughly half the facility for roughly the length of the build.
+   */
+  balanceAtCommissioning: number
+  monthlyPayment: number
+} {
+  const share = ECONOMICS.projectDebtShare.value
+  const commitment = capex * share
+  const termYears = ECONOMICS.projectTermYears.value
+  const rate = effectiveInterestRate(investorConfidence) * (1 + ECONOMICS.projectRatePremium.value)
+  const buildYears = buildTicks / TICKS_PER_YEAR
+  const balance = commitment * (1 + (rate * buildYears) / 2)
+  const monthly = instalment(balance, rate, Math.round(termYears * MONTHS_PER_YEAR))
+  const tooSmall = capex < ECONOMICS.projectMinimumSize.value
+  return {
+    ok: !tooSmall,
+    ...(tooSmall ? { reasonKey: 'build.projectTooSmall' } : {}),
+    commitment,
+    equity: capex - commitment,
+    ratePerYear: rate,
+    termYears,
+    balanceAtCommissioning: balance,
+    monthlyPayment: monthly,
+  }
+}
+
+/**
+ * Commit a lender to a project. Nothing is drawn yet and no cash moves.
+ *
+ * A facility is a promise to fund construction as it happens, not a lump sum handed over on the
+ * day it is signed — see `drawProjectFinance`. Modelling it the other way would have let a player
+ * open a facility for a reactor and spend the money on something else entirely, which is the one
+ * thing project finance is specifically arranged to prevent.
+ */
+export function openProjectFacility(
+  finances: Finances,
+  assetId: string,
+  capex: number,
+  buildTicks: number,
+  tick: number,
+  investorConfidence = 1,
+): Loan | null {
+  const quote = quoteProjectFinance(capex, buildTicks, investorConfidence)
+  if (!quote.ok || quote.commitment <= 0) return null
+  const commissioning = tick + Math.max(1, buildTicks)
+  const loan: Loan = {
+    id: `loan_${++finances.loanSerial}`,
+    principal: 0,
+    outstanding: 0,
+    ratePerYear: quote.ratePerYear,
+    takenTick: tick,
+    repaymentsStartTick: commissioning,
+    maturesTick: commissioning + Math.round(quote.termYears * TICKS_PER_YEAR),
+    kind: 'project',
+    assetId,
+    commitment: quote.commitment,
+    drawn: 0,
+  }
+  finances.loans.push(loan)
+  return loan
+}
+
+/**
+ * Draw the lender's share of one instalment of construction spending.
+ *
+ * Called as the money is actually spent, so the facility funds building the thing and nothing
+ * else. Returns the cash it put in, which the caller adds back — the net effect on the player is
+ * that they pay the equity share of every euro and the lender pays the rest.
+ */
+export function drawProjectFinance(finances: Finances, assetId: string, spend: number): number {
+  const loan = finances.loans.find((l) => l.kind === 'project' && l.assetId === assetId)
+  if (!loan || loan.commitment === undefined) return 0
+  const left = loan.commitment - (loan.drawn ?? 0)
+  const draw = Math.max(0, Math.min(spend * ECONOMICS.projectDebtShare.value, left))
+  if (draw <= 0) return 0
+  loan.drawn = (loan.drawn ?? 0) + draw
+  loan.outstanding += draw
+  loan.principal = loan.outstanding
+  finances.cash += draw
+  finances.debt += draw
+  return draw
+}
+
+/**
  * Pay a period's instalments: interest as a cost, principal as a repayment.
  *
  * Replaces the flat interest charge that preceded it, which accrued on a total nothing ever paid
@@ -443,13 +597,31 @@ export function takeLoan(
  * actually leaves. A player who borrows to build has years of instalments to carry afterwards,
  * which is what makes the size of the borrowing a decision rather than a formality.
  */
-export function serviceLoans(ledger: PeriodLedger, finances: Finances, ticksInPeriod: number): void {
+export function serviceLoans(
+  ledger: PeriodLedger,
+  finances: Finances,
+  ticksInPeriod: number,
+  tick: number,
+): void {
   if (finances.loans.length === 0) return
-  const share = ticksInPeriod / (TICKS_PER_YEAR / MONTHS_PER_YEAR)
+  const ticksPerMonth = TICKS_PER_YEAR / MONTHS_PER_YEAR
+  const share = ticksInPeriod / ticksPerMonth
   for (const loan of finances.loans) {
-    const monthsLeft = Math.max(1, Math.round((loan.maturesTick - loan.takenTick) / (TICKS_PER_YEAR / MONTHS_PER_YEAR)))
-    const monthly = instalment(loan.principal, loan.ratePerYear, monthsLeft)
+    const startsAt = loan.repaymentsStartTick ?? loan.takenTick
     const interest = loan.outstanding * (loan.ratePerYear / MONTHS_PER_YEAR) * share
+
+    // A project still being built pays nothing and owes more for it. No cash leaves, because
+    // there is nothing earning to pay from; the interest is rolled into the balance, which is
+    // why a facility matures larger than the sum ever drawn on it. It is not charged to the
+    // period either — an asset under construction capitalises its interest into what it cost.
+    if (tick < startsAt) {
+      loan.outstanding += interest
+      loan.principal = loan.outstanding
+      continue
+    }
+
+    const monthsLeft = Math.max(1, Math.round((loan.maturesTick - startsAt) / ticksPerMonth))
+    const monthly = instalment(loan.principal, loan.ratePerYear, monthsLeft)
     // Never repay more than is left, and never let a rounding tail keep a cleared loan alive.
     const principal = Math.max(0, Math.min(loan.outstanding, monthly * share - interest))
     ledger.interest += interest
@@ -526,7 +698,7 @@ export function creditCapacityPayment(
 /** How much more the utility could borrow. */
 export function borrowingHeadroom(finances: Finances): number {
   const limit = finances.trailingRevenue * ECONOMICS.maxDebtToRevenue.value
-  return Math.max(0, limit - finances.debt)
+  return Math.max(0, limit - corporateDebt(finances))
 }
 
 /** Everything the utility could put behind a commitment right now. */

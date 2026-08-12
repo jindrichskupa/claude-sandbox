@@ -574,5 +574,16 @@
   "ui.shortfallLine": "{line} byla mimo provoz při {mwh} z toho",
   "ui.shortfallShare": "{pct} % výpadku",
   "ui.postMortemHeat": "Teplo",
-  "ui.somewhere": "někde v soustavě"
+  "ui.somewhere": "někde v soustavě",
+  "build.projectTooSmall": "Příliš malé na projektové financování; sjednat ho stojí víc, než by přineslo",
+  "build.cannotAffordEquity": "Na vlastní podíl nejsou peníze",
+  "ui.projectFinance": "Projektové financování",
+  "ui.projectFinanceNote": "Věřitel dá {share} % proti samotné elektrárně. Zbytek složíš v hotovosti a do zprovoznění neplatíš nic.",
+  "ui.equityShare": "Tvůj podíl",
+  "ui.facilitySize": "Věřitel poskytne",
+  "ui.balanceAtCommissioning": "Dluh při dokončení",
+  "ui.projectInstalment": "Pak {amount} měsíčně po {years} let",
+  "ui.payCash": "Zaplatit z hotovosti",
+  "ui.loanProject": "Projektový úvěr",
+  "ui.loanDrawing": "čerpá se, úrok se kapitalizuje"
 }

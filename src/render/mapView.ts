@@ -118,7 +118,7 @@ export interface MapViewCallbacks {
 
 /** What the player is currently placing, if anything. */
 export type BuildMode =
-  | { kind: 'plant'; typeId: string }
+  | { kind: 'plant'; typeId: string; financed: boolean }
   | { kind: 'substation'; kv: number }
   | { kind: 'line'; kv: 110 | 220 | 400; circuits: number; fromNodeId: string | null }
   | { kind: 'pipe'; dn: 200 | 400 | 700; pipes: number; fromNodeId: string | null }

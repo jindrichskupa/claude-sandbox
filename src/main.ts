@@ -132,7 +132,7 @@ async function main(): Promise<void> {
       return
     }
     if (selection.kind === 'plant') {
-      map.buildMode = { kind: 'plant', typeId: selection.typeId }
+      map.buildMode = { kind: 'plant', typeId: selection.typeId, financed: selection.financed }
       hud.setHint(t('ui.buildHint'))
     } else if (selection.kind === 'substation') {
       map.buildMode = { kind: 'substation', kv: selection.kv }
@@ -469,7 +469,7 @@ async function main(): Promise<void> {
     }
 
     if (mode.kind === 'plant') {
-      const result = beginPlantConstruction(world, mode.typeId as never, tile.x, tile.y)
+      const result = beginPlantConstruction(world, mode.typeId as never, tile.x, tile.y, mode.financed)
       if (result.ok) {
         hud.setHint(t('build.placed'))
         // One station at a time: staying in build mode invites a row of accidental plants.

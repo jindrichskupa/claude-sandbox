@@ -13,7 +13,7 @@ import { PLANT_TYPES, PLANT_TYPE_IDS, type PlantTypeId } from '@content/plantTyp
 import { lineLossMw, LINE_TYPES, VOLTAGE_LEVELS, type VoltageLevel } from '@content/lineTypes'
 import { HEAT_PIPE_TYPES, PIPE_SIZES, type PipeSize } from '@content/heatPipeTypes'
 import type { World } from '@sim/world'
-import { quotePlant, quoteTargetFor } from '@sim/build/commands'
+import { quotePlant, quoteTargetFor, type Quote } from '@sim/build/commands'
 import { Param } from '@sim/params/types'
 import { realCapexFactor } from '@sim/tech/costs'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
@@ -21,7 +21,7 @@ import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '@sim/core/time'
 const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 
 export type BuildSelection =
-  | { kind: 'plant'; typeId: PlantTypeId }
+  | { kind: 'plant'; typeId: PlantTypeId; financed: boolean }
   | { kind: 'line'; kv: VoltageLevel; circuits: number }
   | { kind: 'pipe'; dn: PipeSize; pipes: number }
   | { kind: 'substation'; kv: VoltageLevel }
@@ -188,7 +188,8 @@ export class BuildPanel {
     const type = PLANT_TYPES[typeId]
     const row = el('div', 'build-row')
 
-    const selected = this.selection?.kind === 'plant' && this.selection.typeId === typeId
+    const chosen = this.selection?.kind === 'plant' && this.selection.typeId === typeId ? this.selection : null
+    const selected = chosen !== null && !chosen.financed
     row.classList.toggle('selected', selected)
 
     const swatch = el('span', 'build-swatch')
@@ -204,6 +205,9 @@ export class BuildPanel {
     const quote = probe
       ? quotePlant(this.world, typeId, probe.x, probe.y)
       : { ok: false, totalCost: 0, buildTicks: 0, reasonKey: 'build.unsuitableGround' }
+    // The same station with a lender in the room. Asked separately because the answers differ in
+    // the only way that matters: what has to be in the bank today.
+    const financedQuote = probe ? quotePlant(this.world, typeId, probe.x, probe.y, true) : null
 
     const target = quoteTargetFor(typeId)
     const capacity = this.world.params.get(target, Param.CapacityMw)
@@ -251,10 +255,71 @@ export class BuildPanel {
     row.classList.toggle('disabled', !usable)
     if (usable) {
       row.addEventListener('click', () => {
-        this.select(selected ? null : { kind: 'plant', typeId })
+        this.select(selected ? null : { kind: 'plant', typeId, financed: false })
       })
     }
+
+    // The financed alternative, where one exists. Offered as its own row rather than a switch on
+    // this one because it is a different commitment, not a payment method: the money arrives
+    // against the work, nothing is paid until the station runs, and the instalments then last
+    // twenty-five years whatever the station turns out to be worth. A player choosing it should
+    // be choosing it, and should see what it costs before they do.
+    // Appended to the text column rather than to the row, which is a flex box of swatch and text:
+    // a third child became a third column and squeezed the station's name into a narrow ribbon.
+    const facility = financedQuote?.facility
+    if (!tooEarly && facility?.ok) {
+      main.appendChild(this.financeRow(typeId, facility, chosen?.financed === true, financedQuote!.ok))
+    }
     return row
+  }
+
+  private financeRow(
+    typeId: PlantTypeId,
+    facility: NonNullable<Quote['facility']>,
+    selected: boolean,
+    affordable: boolean,
+  ): HTMLDivElement {
+    const box = el('div', 'build-finance')
+    box.classList.toggle('selected', selected)
+    box.classList.toggle('disabled', !affordable)
+
+    box.appendChild(
+      el(
+        'div',
+        'build-finance-head',
+        `${t('ui.projectFinance')} · ${(facility.ratePerYear * 100).toFixed(1)}%`,
+      ),
+    )
+    box.appendChild(
+      el('div', 'build-finance-line', `${t('ui.equityShare')} ${formatMoney(facility.equity)}`),
+    )
+    box.appendChild(
+      el(
+        'div',
+        'build-finance-line',
+        `${t('ui.balanceAtCommissioning')} ${formatMoney(facility.balanceAtCommissioning)}`,
+      ),
+    )
+    box.appendChild(
+      el(
+        'div',
+        'build-finance-line',
+        t('ui.projectInstalment', {
+          amount: formatMoney(facility.monthlyPayment),
+          years: facility.termYears,
+        }),
+      ),
+    )
+    if (!affordable) {
+      box.appendChild(el('div', 'build-blocked', t('build.cannotAffordEquity')))
+    } else {
+      box.addEventListener('click', (ev) => {
+        // Otherwise the row behind it takes the click and quietly selects the cash option.
+        ev.stopPropagation()
+        this.select(selected ? null : { kind: 'plant', typeId, financed: true })
+      })
+    }
+    return box
   }
 
   /**

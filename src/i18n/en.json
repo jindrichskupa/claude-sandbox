@@ -574,5 +574,16 @@
   "ui.shortfallLine": "{line} was down for {mwh} of it",
   "ui.shortfallShare": "{pct}% of the shortfall",
   "ui.postMortemHeat": "Heat",
-  "ui.somewhere": "somewhere on the system"
+  "ui.somewhere": "somewhere on the system",
+  "build.projectTooSmall": "Too small to project-finance; arranging one costs more than it would raise",
+  "build.cannotAffordEquity": "Cannot fund the equity share",
+  "ui.projectFinance": "Project finance",
+  "ui.projectFinanceNote": "The lender funds {share}% against the station itself. You fund the rest in cash, and pay nothing until it enters service.",
+  "ui.equityShare": "Your share",
+  "ui.facilitySize": "Lender advances",
+  "ui.balanceAtCommissioning": "Owed on completion",
+  "ui.projectInstalment": "Then {amount} a month for {years} years",
+  "ui.payCash": "Pay from cash",
+  "ui.loanProject": "Project facility",
+  "ui.loanDrawing": "drawing, interest rolling up"
 }

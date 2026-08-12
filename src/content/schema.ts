@@ -79,6 +79,7 @@ export const SOURCES = {
   'iea-electrification': 'IEA, roadmaps for the electrification of transport and heat',
   'pvgis': 'European Commission JRC, Photovoltaic Geographical Information System (yield and roof potential)',
   'engineering-standard': 'Standard power engineering reference values (textbook level)',
+  'project-finance': 'Infrastructure project finance practice: gearing, tenors and construction-risk margins on non-recourse power projects',
   'game-design': 'Game design choice — not a physical or economic measurement',
 } as const
 

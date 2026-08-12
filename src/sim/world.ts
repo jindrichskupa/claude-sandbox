@@ -94,6 +94,7 @@ import { EventDirector } from './events/director'
 import { EVENTS_BY_ID } from '@content/events'
 import {
   addLedger,
+  drawProjectFinance,
   chargeCapex,
   chargeEventCost,
   chargeInsurance,
@@ -1519,8 +1520,13 @@ export class World {
   private payInstalments(): void {
     for (let i = this.spending.length - 1; i >= 0; i--) {
       const item = this.spending[i]!
-      if (item.kind === 'capex') chargeCapex(this.openLedger, item.perTick)
-      else chargeDecommissioning(this.openLedger, item.perTick)
+      if (item.kind === 'capex') {
+        chargeCapex(this.openLedger, item.perTick)
+        // The lender's share of this euro, drawn as it is spent. A facility funds building the
+        // thing it was arranged for and nothing else, so the money arrives against the work
+        // rather than as a lump the player could take somewhere else.
+        drawProjectFinance(this.finances, item.ownerId, item.perTick)
+      } else chargeDecommissioning(this.openLedger, item.perTick)
       // Attributed to whatever is being built or torn down, so a project's own account carries
       // what it cost rather than the money vanishing into the utility's capital line.
       this.books.for(item.ownerId).open.capital += item.perTick
@@ -1599,7 +1605,7 @@ export class World {
     }
 
     if (this.state.insured) chargeInsurance(this.openLedger, this.plants, ticks)
-    serviceLoans(this.openLedger, this.finances, ticks)
+    serviceLoans(this.openLedger, this.finances, ticks, this.tick)
 
     // The windfall levy is monthly because it is charged on a price, and a price averaged over a
     // year would never exceed a crisis threshold that a single hard winter month does.
