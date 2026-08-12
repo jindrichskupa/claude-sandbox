@@ -30,6 +30,7 @@ import type { DirectorState } from '../events/director'
 import type { Weather } from '../weather/weather'
 import type { WorldState } from '../world'
 import type { ObjectiveProgress, ScenarioOutcome } from './objectives'
+import type { ShortfallState } from '../reliability/shortfall'
 
 /**
  * Bumped whenever the shape below changes incompatibly.
@@ -85,6 +86,16 @@ export interface SaveData {
    * playing after it.
    */
   freePlay: boolean
+  /**
+   * Why every failing hour of the run failed.
+   *
+   * Irrecoverable in the same way the asset books are: it is the accumulated history of hours
+   * whose explaining state — what was online, what was faulted, where the graph was cut — is gone
+   * the moment the next hour begins. A loaded game without it would offer the player a post-mortem
+   * with nothing in it, which is worse than none, because a blank one reads as "nothing went
+   * wrong". Absent in saves that predate it, and an absent log is an empty one.
+   */
+  shortfalls?: ShortfallState
   /**
    * Per-asset accounts. Genuinely irrecoverable: they are the accumulated history of every hour
    * the run has played, and nothing short of replaying the run would rebuild them. Dropping them

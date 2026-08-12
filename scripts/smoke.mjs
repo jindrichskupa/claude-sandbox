@@ -1256,6 +1256,48 @@ try {
   if (!ending.clockStopped) throw new Error('The simulation kept running after the scenario ended')
 
   await page.screenshot({ path: join(OUT, '15-scenario-complete.png') })
+
+  // --- The post-mortem --------------------------------------------------
+  // The panel has to name the cause the simulation actually recorded, not a plausible one. This
+  // run is short, so it may genuinely have gone short in no hour at all — in which case the panel
+  // says so, and saying so is the correct behaviour rather than a skipped check.
+  const postMortem = await page.evaluate(() => {
+    const g = window.game
+    const ranked = g.world.shortfalls.ranked('electric')
+    const panel = document.getElementById('game-over')
+    return {
+      recorded: ranked.map((r) => `${r.cause}:${Math.round(r.tally.mwh)}`),
+      dominant: ranked[0]?.cause ?? null,
+      chips: [...panel.querySelectorAll('.pm-chip')].map((c) => c.textContent),
+      links: [...panel.querySelectorAll('.pm-link')].map((c) => c.textContent),
+      none: panel.textContent.includes('never went unserved'),
+      // The one thing a report must never do: overflow its own panel and hide the buttons under
+      // it. The end screen is fixed width and the post-mortem is the longest thing in it.
+      overflows: panel.scrollWidth > panel.clientWidth + 1,
+      // Scrolled into view first, and an element that still cannot be hit-tested counts as
+      // unreachable rather than as fine. The first version treated a null from elementFromPoint
+      // as a pass, which is exactly backwards: null means the point is off-screen, and it duly
+      // reported "reachable" for a Close button that had fallen off the bottom of the display.
+      buttonsReachable: [...panel.querySelectorAll('button')].every((b) => {
+        b.scrollIntoView({ block: 'center' })
+        const r = b.getBoundingClientRect()
+        if (r.bottom <= 0 || r.top >= window.innerHeight) return false
+        const over = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+        return over !== null && (over === b || b.contains(over))
+      }),
+    }
+  })
+  console.log('post-mortem:', postMortem)
+  if (postMortem.overflows) throw new Error('The post-mortem overflows the end screen')
+  if (!postMortem.buttonsReachable) throw new Error('The post-mortem covers the end screen buttons')
+  if (postMortem.dominant) {
+    if (!postMortem.chips.length) throw new Error('Shortfalls were recorded and the panel showed none')
+    if (!postMortem.links.length) throw new Error('The post-mortem named nothing to go and look at')
+  } else if (!postMortem.none) {
+    throw new Error('Nothing went short and the panel did not say so')
+  }
+  await page.screenshot({ path: join(OUT, '15b-post-mortem.png') })
+
   await page.evaluate(() => {
     window.game.world.outcome = 'playing'
     window.game.hud.update()

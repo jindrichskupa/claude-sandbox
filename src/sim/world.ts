@@ -46,7 +46,7 @@ import { isDispatchable, LifecyclePhase, type CityAsset, type PlantAsset } from 
 import { ModifierRegistry } from './params/ModifierRegistry'
 import { Params } from './params/Params'
 import { Param } from './params/types'
-import { dispatch, lossDemandOf, type DispatchResult } from './dispatch/dispatch'
+import { availableRange, dispatch, lineCapacityOf, lossDemandOf, type DispatchResult } from './dispatch/dispatch'
 import { WeatherModel, type ClimateDef, type Weather } from './weather/weather'
 import { weatherModifiers, WEATHER_SOURCE } from './weather/effects'
 import { generateTerrain, windSiteFactor, type TerrainMap } from './map/terrain'
@@ -84,6 +84,12 @@ import { nominal, pricesFor, type Prices } from './tech/money'
 import { realDecommissioningFactor } from './tech/costs'
 import type { SaveData } from './scenario/save'
 import { sanitiseName } from './naming'
+import {
+  classifyHour,
+  ShortfallLog,
+  type HeatShortfallCause,
+  type PlantCeilings,
+} from './reliability/shortfall'
 import { EventDirector } from './events/director'
 import { EVENTS_BY_ID } from '@content/events'
 import {
@@ -371,6 +377,14 @@ export class World {
   private readonly spending: ScheduledSpend[] = []
   private readonly energiseAt = new Map<string, number>()
   private recentBlackoutTicks = 0
+  /**
+   * Why the lights went out, hour by hour, for the whole run.
+   *
+   * On the world rather than derived at the end for the same reason the asset books are: the state
+   * that explains a failing hour — what was online, what was faulted, where the graph was cut — is
+   * gone by the next one, and replaying thirty years to recover it is not an option.
+   */
+  readonly shortfalls = new ShortfallLog()
   /** Previous hour's loss estimate, used to warm-start the next hour's iteration. */
   private lastLossDemand: Map<NodeId, number> | null = null
   /** Accumulated over the electoral term, because that is the period voters judge. */
@@ -1089,6 +1103,76 @@ export class World {
     // because a fortnight of intermittent failure would otherwise produce a hundred identical
     // headlines and the player would stop reading the feed — which is the only real failure
     // mode a notification system has.
+    // Why, before the hour that explains it is gone. Only on hours that actually went short, so
+    // this costs nothing on a system that is working — which is nearly all of them.
+    if (result.totalUnservedMw > UNSERVED_EPSILON_MW) {
+      // From the same function the dispatch bounded the units with, so the post-mortem cannot
+      // disagree with the hour it is explaining. `structural` drops the ramp limit back out,
+      // because a fleet that could not get there in time is a different failure from one that was
+      // never big enough — and the two have opposite answers.
+      const ceilings = new Map<string, PlantCeilings>()
+      for (const plant of this.plants) {
+        if (PLANT_TYPES[plant.typeId].heatOnly) continue
+        const commitment = heat.commitments.get(plant.id)
+        const range = availableRange(plant, this.params, commitment)
+        const capacity = this.params.get(plant.id, Param.CapacityMw)
+        const availability = this.params.getOr(plant.id, Param.Availability, 1)
+        const derate = commitment?.capacityDerateMw ?? 0
+        const forced = commitment?.forcedOutputMw
+        const structural =
+          forced !== null && forced !== undefined
+            ? Math.max(0, Math.min(capacity * availability, forced))
+            : Math.max(0, capacity * availability - derate)
+        ceilings.set(plant.id, { structural, now: range.ceiling })
+      }
+
+      this.shortfalls.record(
+        classifyHour({
+          network: this.network,
+          islands: this.electricIslands.get(),
+          plants: this.plants,
+          cities: this.cities,
+          ceilings,
+          unservedByCity: result.unservedMw,
+          totalUnservedMw: result.totalUnservedMw,
+          totalLoadMw:
+            result.totalDemandMw + result.totalLossMw + result.totalAuxDemandMw + result.totalStorageChargeMw,
+          lineFlowMw: result.lineFlowMw,
+          lineCapacityMw: (edgeId) => {
+            const edge = this.network.getEdge(edgeId)
+            if (!edge) return 0
+            return this.params.getOr(edgeId, Param.LineCapacityMw, lineCapacityOf(edge.kv, edge.circuits))
+          },
+          demandOf: (cityId) => (result.servedMw.get(cityId) ?? 0) + (result.unservedMw.get(cityId) ?? 0),
+        }),
+      )
+    }
+
+    // Heat splits differently, and far more simply, because a heat network is a tree with a very
+    // short reach. Either the town is on a main at all — and if it is not, no amount of plant
+    // anywhere will warm it — or it is on one and there was not enough heat in its own island.
+    // There is no third case worth telling apart: a buried pipe has no thermal rating the player
+    // can saturate the way they can a corridor.
+    if (heat.totalUnservedHeatMw > 0.01) {
+      let unconnected = 0
+      let starved = 0
+      const cold = new Map<string, number>()
+      for (const [cityId, mw] of heat.unservedHeatMw) {
+        if (mw <= 0.01) continue
+        cold.set(cityId, mw)
+        const city = this.citiesById.get(cityId)
+        const onAMain =
+          city !== undefined &&
+          this.network.edgesOf(city.nodeId).some((id) => this.network.requireEdge(id).commodity === 'heat')
+        if (onAMain) starved += mw
+        else unconnected += mw
+      }
+      // Attributed to whichever failing is the larger this hour, so one town off the network does
+      // not relabel a whole cold winter for the towns that are on it.
+      const cause: HeatShortfallCause = unconnected > starved ? 'unconnected' : 'heatCapacity'
+      this.shortfalls.recordHeat(cause, cold, heat.totalUnservedHeatMw)
+    }
+
     const short = result.totalUnservedMw > UNSERVED_EPSILON_MW || heat.totalUnservedHeatMw > 0.01
     if (short && this.recentBlackoutTicks === 0) {
       const worst = this.worstServedCity(result, heat)
@@ -2374,6 +2458,7 @@ export class World {
       outcome: this.outcome,
       freePlay: this.freePlay,
       books: this.books.toJSON(),
+      shortfalls: this.shortfalls.toJSON(),
       news: this.news.toJSON(),
       yearbook: this.yearbook,
       yearMix: this.yearMix,
@@ -2443,6 +2528,11 @@ export class World {
     // Older saves predate the field. Absent means "never carried on", which is the safe
     // reading: it re-offers the verdict rather than silently resuming a run the player ended.
     this.freePlay = data.freePlay ?? false
+    // Replaced wholesale rather than merged: a loaded game is that run, and folding this run's
+    // failures into it would credit the save with hours it never played.
+    // Guarded rather than cloned blindly: `JSON.parse(JSON.stringify(undefined))` throws, so a
+    // save written before any of this existed took the whole load down with it.
+    this.shortfalls.replace(data.shortfalls ? clone(data.shortfalls) : undefined)
     this.books.loadJSON(clone(data.books))
     this.news.loadJSON(clone(data.news))
     this.yearbook.length = 0

@@ -1020,6 +1020,14 @@ button.danger:hover {
   padding: 20px 22px;
   display: none;
   z-index: 4;
+  /*
+   * Bounded and scrolling, because the post-mortem made this the tallest panel in the game: four
+   * failure causes, each with a note and up to three corridors to mend, under four objectives.
+   * It ran off the bottom of a 900-pixel screen and took the Close and Keep playing buttons with
+   * it — the run was over and there was no way to dismiss the screen saying so.
+   */
+  max-height: calc(100vh - 22% - 24px);
+  overflow-y: auto;
 }
 
 #game-over.visible {
@@ -1052,6 +1060,91 @@ button.danger:hover {
   color: var(--text-dim);
   margin-top: 10px;
   line-height: 1.45;
+}
+
+/*
+ * The post-mortem, on the end screen.
+ *
+ * A run that ended thirty years long can have failed several ways at once, so this is a ranked
+ * list with a bar against each rather than a single sentence naming a culprit. The bar is the
+ * point: four causes listed plainly read as four equal problems, and the opening scenario's split
+ * is 72% one thing and three small ones. Whether the panel is worth reading at all depends on the
+ * reader seeing that immediately.
+ */
+#game-over h3.pm-heading {
+  margin: 18px 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.pm-side {
+  margin: 14px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.pm-total {
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.pm-cause {
+  margin-bottom: 12px;
+}
+
+.pm-cause-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.pm-chip {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Grey for the one cause that is an admission rather than a finding. Everything else is a real
+ * answer the player can act on; "not accounted for" is a gap in the report and should not wear
+ * the same colour as a diagnosis. */
+.pm-chip-unexplained {
+  color: var(--text-dim);
+}
+
+.pm-share {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-note {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+/* Named things are places, and clicking one goes there. Styled as a link rather than a button
+ * because a row of buttons in a report reads as a form to fill in. */
+.pm-link {
+  display: block;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pm-link:hover {
+  text-decoration: underline;
 }
 
 /* Where a technology's real cost is heading over the next decade. Real terms

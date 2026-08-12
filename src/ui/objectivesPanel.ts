@@ -24,6 +24,18 @@ import {
   type ObjectiveDef,
 } from '@sim/scenario/objectives'
 import type { World } from '@sim/world'
+import { worstOf } from '@sim/reliability/shortfall'
+import { expandName } from './newsPanel'
+
+/**
+ * Megawatt-hours at a size a person can hold. A run that lost two hundred thousand of them should
+ * not print the digits.
+ */
+function formatEnergy(mwh: number): string {
+  if (mwh >= 1_000_000) return `${(mwh / 1_000_000).toFixed(1)} TWh`
+  if (mwh >= 1000) return `${(mwh / 1000).toFixed(1)} GWh`
+  return `${Math.round(mwh)} MWh`
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -82,6 +94,13 @@ export interface ObjectivesPanelCallbacks {
   onOpen?: () => void
   onSave: () => void
   onLoad: () => void
+  /**
+   * Show the player the thing the post-mortem is talking about.
+   *
+   * A report that says a corridor was down and cannot take you to it is a report about somebody
+   * else's grid. Same callback shape as the news feed uses, for the same reason.
+   */
+  onGoTo?: (subjectId: string, kind: 'node' | 'edge') => void
 }
 
 export class ObjectivesPanel {
@@ -231,6 +250,104 @@ export class ObjectivesPanel {
     return row
   }
 
+  /** Put the end screen away, for a caller taking the player somewhere it points at. */
+  dismissEndScreen(): void {
+    this.endDismissed = true
+    this.gameOver.classList.remove('visible')
+  }
+
+  /**
+   * Why the lights went out, ranked, with the thing to blame named and clickable.
+   *
+   * The version of this that was nearly written said "your firm capacity fell behind demand" and
+   * would have been wrong about the opening scenario in the most misleading way available: it
+   * fails on reliability in year one while carrying a 178% capacity margin, and 129 of the 163
+   * failing hours are a town on the wrong side of a broken line. A player told to build more
+   * plant would have spent years and a fortune making the problem no better at all.
+   *
+   * So every line here is a count the simulation kept as the hours passed, and the causes are
+   * ordered by the energy against them rather than by what reads best. A run that failed four
+   * ways says so, and in proportion.
+   */
+  private renderPostMortem(): void {
+    const totalMwh = this.world.shortfalls.totalMwh('electric')
+    const heatMwh = this.world.shortfalls.totalMwh('heat')
+    if (totalMwh < 1 && heatMwh < 1) {
+      this.gameOver.appendChild(el('div', 'obj-cause', t('ui.postMortemNone')))
+      return
+    }
+
+    this.gameOver.appendChild(el('h3', 'pm-heading', t('ui.postMortem')))
+    this.renderShortfallSide('electric', totalMwh)
+    if (heatMwh >= 1) {
+      this.gameOver.appendChild(el('div', 'pm-side', t('ui.postMortemHeat')))
+      this.renderShortfallSide('heat', heatMwh)
+    }
+  }
+
+  private renderShortfallSide(side: 'electric' | 'heat', totalMwh: number): void {
+    const ranked = this.world.shortfalls.ranked(side)
+    if (!ranked.length) return
+
+    const hours = ranked.reduce((sum, r) => sum + r.tally.hours, 0)
+    this.gameOver.appendChild(
+      el('div', 'pm-total', t('ui.shortfallTotal', { mwh: formatEnergy(totalMwh), hours })),
+    )
+
+    for (const { cause, tally } of ranked) {
+      const block = el('div', 'pm-cause')
+      const head = el('div', 'pm-cause-head')
+      head.appendChild(el('span', `pm-chip pm-chip-${cause}`, t(`ui.cause.${cause}`)))
+      head.appendChild(
+        el('span', 'pm-share', t('ui.shortfallShare', { pct: Math.round((tally.mwh / totalMwh) * 100) })),
+      )
+      block.appendChild(head)
+
+      // A bar, because the shape of the split is the finding. Four causes in a list read as four
+      // equal problems; one at 72% and three small ones does not.
+      const bar = el('div', 'bar')
+      const fill = el('div')
+      fill.style.width = `${Math.min(100, (tally.mwh / totalMwh) * 100)}%`
+      fill.style.background = cause === 'unexplained' ? '#6b7683' : '#e2483d'
+      bar.appendChild(fill)
+      block.appendChild(bar)
+
+      const worstCity = worstOf(tally.byCity)
+      const city = worstCity ? this.world.cities.find((c) => c.id === worstCity.id) : undefined
+      block.appendChild(
+        el(
+          'div',
+          'pm-note',
+          t(`ui.causeNote.${cause}`, { city: city ? this.world.nodeName(city.nodeId) : t('ui.somewhere') }),
+        ),
+      )
+      if (city) {
+        const goTo = el('button', 'pm-link', this.world.nodeName(city.nodeId))
+        goTo.addEventListener('click', () => this.callbacks.onGoTo?.(city.nodeId, 'node'))
+        block.appendChild(goTo)
+      }
+
+      // The corridors that were down, worst first. This is the actionable half: a town cut off
+      // has a name to mend, not a category to think about.
+      const lines = Object.entries(tally.byMissingLine).sort((a, b) => b[1] - a[1])
+      for (const [edgeId, mwh] of lines.slice(0, 3)) {
+        const edge = this.world.network.getEdge(edgeId)
+        if (!edge) continue
+        const from = this.world.nodeName(edge.from)
+        const to = this.world.nodeName(edge.to)
+        const row = el('button', 'pm-link')
+        row.textContent = t('ui.shortfallLine', {
+          line: `${expandName(from)} → ${expandName(to)}`,
+          mwh: formatEnergy(mwh),
+        })
+        row.addEventListener('click', () => this.callbacks.onGoTo?.(edgeId, 'edge'))
+        block.appendChild(row)
+      }
+
+      this.gameOver.appendChild(block)
+    }
+  }
+
   /**
    * The end of the run.
    *
@@ -270,6 +387,8 @@ export class ObjectivesPanel {
     if (this.world.finances.bankrupt) {
       this.gameOver.appendChild(el('div', 'obj-cause', t('ui.lostToBankruptcy')))
     }
+
+    this.renderPostMortem()
 
     const actions = el('div', 'obj-saves')
 

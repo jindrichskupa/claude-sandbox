@@ -272,6 +272,14 @@ export class Hud {
       onOpen: () => this.soloPanel('objectives'),
       onSave: () => this.callbacks.onSave(),
       onLoad: () => this.callbacks.onLoad(),
+      // The post-mortem names a corridor and a town; naming them and not going there would leave
+      // the player reading about a grid they cannot find. Closes the end screen on the way, or
+      // the map it just moved to would be behind it.
+      onGoTo: (subjectId, kind) => {
+        this.objectivesPanel.dismissEndScreen()
+        if (kind === 'edge') this.selectEdge(subjectId, true)
+        else this.selectNode(subjectId, true)
+      },
     })
 
     this.newsPanel = new NewsPanel(root, world, {

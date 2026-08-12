@@ -386,7 +386,8 @@ function build(input: DispatchInput): Built {
   }
 }
 
-function lineCapacityOf(kv: number, circuits: number): number {
+/** The catalogue rating of a corridor, before wear and before any modifier is applied to it. */
+export function lineCapacityOf(kv: number, circuits: number): number {
   if (kv === 110 || kv === 220 || kv === 400) return LINE_TYPES[kv].capacityMw.value * circuits
   return 0
 }
