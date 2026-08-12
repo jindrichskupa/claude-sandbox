@@ -22,6 +22,7 @@ import { drawLoadCurve, drawMix, drawPrice, mixLegend } from './charts'
 import { LOADING_STOPS, nodeLabel } from '@render/mapView'
 import { nodeInService } from '@sim/grid/network'
 import { MAX_NAME_LENGTH } from '@sim/naming'
+import { reconcile } from './reconcile'
 import {
   nextVoltage,
   quoteLineDemolition,
@@ -722,6 +723,33 @@ export class Hud {
    * pipeline from an implementation detail into something the player can learn from.
    */
   private lastInspectorSignature: string | null = null
+  /**
+   * What the live panel is currently describing.
+   *
+   * The reconciler keeps an element, and its listeners with it, whenever the new render puts an
+   * equivalent one in the same place. Within one selection that is safe — every listener in this
+   * panel closes over an asset id that cannot change while the selection does not. Across a
+   * selection change it is not safe at all: two plant sites render the same Refurbish, Mothball
+   * and Retire buttons, same tag, same class, same words, and reusing them would leave the player
+   * retiring the station they had just clicked away from.
+   *
+   * So the panel is emptied when the subject changes and only ever patched within one. A
+   * selection change is something the player did, not something that happens twice a second, so
+   * there is nothing to lose by rebuilding it.
+   */
+  private inspectorSubject: string | null = null
+
+  private startPanel(subject: string): HTMLDivElement {
+    if (this.inspectorSubject !== subject) {
+      this.inspector.replaceChildren()
+      this.inspectorSubject = subject
+    }
+    this.inspector.classList.add('visible')
+    // Rendered into a panel nobody can see, then moved across by difference. See `reconcile`:
+    // replacing the live one twice a second cost the player their text selection, their hover,
+    // and — at random — the click they were in the middle of making.
+    return document.createElement('div')
+  }
 
   private renderInspector(): void {
     // A rebuild would replace the open input, so the player's half-typed name would vanish on
@@ -758,17 +786,16 @@ export class Hud {
       return
     }
 
-    this.inspector.classList.add('visible')
-    this.inspector.replaceChildren()
+    const panel = this.startPanel(`node:${nodeId}`)
 
     const close = el('button', 'close-btn', t('ui.close'))
     close.addEventListener('click', () => this.selectNode(null))
-    this.inspector.appendChild(close)
+    panel.appendChild(close)
 
     // Named, not just labelled: a substation the player paid for is theirs to call something.
     // Cities are not — a town has a name of its own and the player did not found it.
     const label = nodeLabel(node) ?? node.id
-    this.inspector.appendChild(
+    panel.appendChild(
       node.kind === 'city' ? el('h2', undefined, label) : this.nameField(nodeId, label, 'h2'),
     )
     const dispatch = this.world.lastDispatch
@@ -777,7 +804,7 @@ export class Hud {
     const plants = this.world.plants.filter((p) => p.nodeId === nodeId)
     const lines = this.world.network.edgesOf(nodeId)
 
-    this.inspector.appendChild(
+    panel.appendChild(
       el(
         'div',
         'subtitle',
@@ -826,7 +853,7 @@ export class Hud {
         0,
       )
       block.appendChild(this.kv(t('ui.fixedOpex'), `${formatMoney(opex)} / ${t('ui.year')}`))
-      this.inspector.appendChild(block)
+      panel.appendChild(block)
     }
 
     if (city) {
@@ -880,7 +907,7 @@ export class Hud {
           block.appendChild(row)
         }
       }
-      this.inspector.appendChild(block)
+      panel.appendChild(block)
     }
 
     for (const plant of plants) {
@@ -1015,7 +1042,7 @@ export class Hud {
       }
 
       block.appendChild(this.plantActions(plant))
-      this.inspector.appendChild(block)
+      panel.appendChild(block)
     }
 
     if (!city && plants.length === 0 && lines.length > 0) {
@@ -1041,7 +1068,7 @@ export class Hud {
           block.appendChild(
             this.kv(t('ui.losses'), formatMwth(pipe.standingLossMwPerKm.value * edge.lengthKm * edge.circuits)),
           )
-          this.inspector.appendChild(block)
+          panel.appendChild(block)
           continue
         }
         if (edge.kv === 0) continue
@@ -1063,7 +1090,7 @@ export class Hud {
           block.appendChild(el('div', 'asset-building', t('ui.energisesIn', { months })))
           block.appendChild(this.kv(t('ui.length'), `${edge.lengthKm.toFixed(0)} ${t('ui.kmShort')}`))
           block.appendChild(this.kv(t('ui.capacity'), formatMw(capacity)))
-          this.inspector.appendChild(block)
+          panel.appendChild(block)
           continue
         }
 
@@ -1078,9 +1105,10 @@ export class Hud {
         block.appendChild(bar)
         block.appendChild(this.kv(t('ui.output'), `${formatMw(flow)} / ${formatMw(capacity)}`))
         block.appendChild(this.kv(t('ui.losses'), formatMw(dispatch?.lineLossMw.get(edgeId) ?? 0)))
-        this.inspector.appendChild(block)
+        panel.appendChild(block)
       }
     }
+    reconcile(this.inspector, panel)
   }
 
   /**
@@ -1106,18 +1134,17 @@ export class Hud {
     if (signature === this.lastInspectorSignature) return
     this.lastInspectorSignature = signature
 
-    this.inspector.classList.add('visible')
-    this.inspector.replaceChildren()
+    const panel = this.startPanel(`edge:${edgeId}`)
     const close = el('button', 'close-btn', t('ui.close'))
     close.addEventListener('click', () => this.selectEdge(null))
-    this.inspector.appendChild(close)
+    panel.appendChild(close)
 
     const from = this.world.network.getNode(edge.from)
     const to = this.world.network.getNode(edge.to)
     const heat = edge.commodity === 'heat'
     const title = heat && edge.dn !== undefined ? t(HEAT_PIPE_TYPES[edge.dn].nameKey) : `${edge.kv} kV`
-    this.inspector.appendChild(el('h2', undefined, title))
-    this.inspector.appendChild(
+    panel.appendChild(el('h2', undefined, title))
+    panel.appendChild(
       el(
         'div',
         'subtitle',
@@ -1262,7 +1289,8 @@ export class Hud {
       block.appendChild(row)
     }
 
-    this.inspector.appendChild(block)
+    panel.appendChild(block)
+    reconcile(this.inspector, panel)
   }
 
   /**
@@ -1382,6 +1410,11 @@ export class Hud {
         if (done) return
         done = true
         this.renaming = null
+        // Given up before the panel is asked to redraw. The reconciler refuses to touch a panel
+        // containing a focused field — so a still-focused input would survive the very render
+        // meant to replace it with the finished name, and the player would be left typing into a
+        // box that never closed.
+        input.blur()
         if (commit && this.world.renameAsset(assetId, input.value) !== null) this.callbacks.onRenamed()
         this.lastInspectorSignature = null
         this.renderInspector()

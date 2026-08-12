@@ -153,6 +153,106 @@ try {
   if (reach.units < 2) throw new Error('No node with more than one unit; this check proves nothing')
   if (reach.blocked.length) throw new Error(`Inspector buttons are covered: ${reach.blocked.join(', ')}`)
 
+  // --- The inspector updates instead of being rebuilt ----------------------
+  // Every failure this guards against looks like a different small bug and has one cause: the
+  // panel used to be thrown away and built again roughly twice a second, so nothing in it kept
+  // its identity from one hour to the next. A click is delivered to the nearest common ancestor
+  // of where the button went down and where it came up — so a control replaced in between hands
+  // its click to the panel, and the button does nothing, at random.
+  const persistence = await page.evaluate(async () => {
+    const g = window.game
+    const counts = new Map()
+    for (const p of g.world.plants) counts.set(p.nodeId, (counts.get(p.nodeId) ?? 0) + 1)
+    const busiest = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+    g.hud.selectNode(busiest, true)
+    await new Promise((r) => setTimeout(r, 300))
+
+    const inspector = document.getElementById('inspector')
+    const button = inspector.querySelector('.asset-actions button')
+    const valueRow = inspector.querySelector('.kv b')
+    const beforeTick = g.world.tick
+    // Every value in the panel, not one of them: a cogeneration set at fixed backpressure output
+    // can hold the same figure for hours, and a check pinned to one row would call a working
+    // panel dead. What is being tested is that the panel is still live, so anything moving does.
+    const beforeValues = [...inspector.querySelectorAll('.kv b')].map((b) => b.textContent).join('|')
+
+    // Long enough for several rebuilds at the rate the panel refreshes.
+    await new Promise((r) => setTimeout(r, 2000))
+
+    return {
+      node: busiest,
+      ticksPassed: g.world.tick - beforeTick,
+      buttonSurvived: document.contains(button),
+      rowSurvived: document.contains(valueRow),
+      valueChanged:
+        [...inspector.querySelectorAll('.kv b')].map((b) => b.textContent).join('|') !== beforeValues,
+      label: button.textContent,
+    }
+  })
+  console.log('inspector persistence:', persistence)
+  if (persistence.ticksPassed < 2) throw new Error('The clock did not move; this check proves nothing')
+  if (!persistence.buttonSurvived) throw new Error('The inspector replaced a button the player could have been pressing')
+  if (!persistence.rowSurvived) throw new Error('The inspector replaced a row the player could have been reading')
+  if (!persistence.valueChanged) throw new Error('The inspector kept its elements and stopped updating them')
+
+  // The bug itself: a real press and release, spanning a rebuild, on a button that spends
+  // something. Playwright refused to click the rename field for exactly this reason before the
+  // panel stopped replacing itself.
+  const clicked = await page.evaluate(() => {
+    const g = window.game
+    const plant = g.world.plants.find((p) => p.nodeId === g.map.selectedNodeId && p.phase === 2)
+    return plant ? { id: plant.id, phase: plant.phase } : null
+  })
+  if (!clicked) throw new Error('No operating unit to press a button on')
+  await page.click('#inspector .asset-actions button:has-text("Mothball")')
+  await page.waitForTimeout(600)
+  const afterClick = await page.evaluate((id) => {
+    const plant = window.game.world.plants.find((p) => p.id === id)
+    const inspector = document.getElementById('inspector')
+    return {
+      phase: plant.phase,
+      buttons: [...inspector.querySelectorAll('.asset-actions button')].map((b) => b.textContent),
+    }
+  }, clicked.id)
+  console.log('inspector click:', { was: clicked.phase, ...afterClick })
+  if (afterClick.phase === clicked.phase) throw new Error('The click on a live inspector did nothing')
+  // And the panel restructured itself around the new state: a mothballed unit is reactivated,
+  // not mothballed again. That is the case the reconciler must *not* patch in place.
+  if (!afterClick.buttons.some((b) => /Reactivate/.test(b))) {
+    throw new Error('The inspector kept the old buttons after the state they act on changed')
+  }
+
+  // Switching to another site must not hand the new plant the old one's buttons. Same tag, same
+  // class, same words, and a listener that closes over the wrong id — which would leave a player
+  // retiring the station they had just clicked away from.
+  const switchedSite = await page.evaluate(async (previousId) => {
+    const g = window.game
+    const other = g.world.plants.find((p) => p.nodeId !== g.map.selectedNodeId && p.phase === 2)
+    g.hud.selectNode(other.nodeId, true)
+    await new Promise((r) => setTimeout(r, 400))
+    const button = document.querySelector('#inspector .asset-actions button')
+    button.click()
+    await new Promise((r) => setTimeout(r, 300))
+    return {
+      target: other.id,
+      targetPhase: g.world.plants.find((p) => p.id === other.id).phase,
+      previousPhase: g.world.plants.find((p) => p.id === previousId).phase,
+    }
+  }, clicked.id)
+  console.log('inspector after switching site:', switchedSite)
+  if (switchedSite.targetPhase === 2) throw new Error('The button did nothing after the selection changed')
+  if (switchedSite.previousPhase !== 4) {
+    throw new Error('Pressing a button acted on the previously selected unit')
+  }
+
+  // Put both back, so the rest of the run measures the fleet it was meant to.
+  await page.evaluate(
+    ([a, b]) => {
+      for (const id of [a, b]) window.game.world.plants.find((p) => p.id === id).phase = 2
+    },
+    [clicked.id, switchedSite.target],
+  )
+
   // --- Naming ------------------------------------------------------------
   // Typed for real rather than driven through the model, because everything that can go wrong
   // here is in the event path: the field has to survive the inspector's once-a-tick rebuild while
