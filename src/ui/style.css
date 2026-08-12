@@ -1634,3 +1634,17 @@ button.danger:hover {
   color: var(--text);
   border-color: var(--accent);
 }
+
+/* What an active event has hold of, and a way to get to it. */
+.event-subject {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 10px;
+  color: var(--warn);
+  cursor: pointer;
+}
+
+.event-subject:hover {
+  color: var(--text);
+}

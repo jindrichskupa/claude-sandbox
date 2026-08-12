@@ -35,7 +35,7 @@ import {
   type RiskCondition,
 } from '@content/events'
 import { PLANT_TYPES } from '@content/plantTypes'
-import { TICKS_PER_YEAR } from '../core/time'
+import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '../core/time'
 import { lifeFraction } from '../assets/aging'
 import { isDispatchable, LifecyclePhase, type CityAsset, type PlantAsset } from '../assets/types'
 import type { Network } from '../grid/network'
@@ -67,6 +67,9 @@ export interface ActiveEvent {
   /** Plant the outage fell on, if any. */
   outagePlantId?: string
   outageUntilTick?: number
+  /** Project this event held up, and by how many ticks, so the interface can name it. */
+  delayedPlantId?: string
+  delayTicks?: number
 }
 
 export interface DirectorState {
@@ -86,6 +89,8 @@ export function emptyDirectorState(): DirectorState {
 }
 
 /** No events at all before this much of the scenario has elapsed. */
+const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
+
 export const GRACE_TICKS = TICKS_PER_YEAR
 /** After a severe event, no other severe event for this long. */
 export const SEVERE_COOLDOWN_TICKS = 24 * 30
@@ -236,6 +241,11 @@ function resolveTargets(
       if (candidates.length === 0) return []
       return [candidates[stream.int(tick, candidates.length, 7717)]!.id]
     }
+    case 'oneUnderConstruction': {
+      const candidates = context.plants.filter((p) => p.phase === LifecyclePhase.Building)
+      if (candidates.length === 0) return []
+      return [candidates[stream.int(tick, candidates.length, 4231)]!.id]
+    }
   }
 }
 
@@ -356,6 +366,24 @@ export class EventDirector {
             endsTick = Math.max(endsTick, active.outageUntilTick)
             active.endsTick = endsTick
           }
+        }
+      }
+
+      // A project held up, by name. Applied to `phaseEndsTick` directly: the schedule of a
+      // particular job is the thing being changed, and no parameter can reach it.
+      if (def.delay) {
+        const months = def.delay.months.value * (1 - chosen.mitigation)
+        const [plantId] = resolveTargets(def.delay.target, context, context.stream, context.tick)
+        const plant = plantId ? context.plants.find((p) => p.id === plantId) : undefined
+        if (plant && months > 0) {
+          const ticks = Math.round(months * TICKS_PER_MONTH)
+          plant.phaseEndsTick += ticks
+          // Commissioning moves with it. It is the date the plant's age is measured from, so a
+          // station held up nine months and left commissioning on the old date would arrive late
+          // *and* be nine months old on its first day.
+          plant.commissionedTick += ticks
+          active.delayedPlantId = plantId
+          active.delayTicks = ticks
         }
       }
 

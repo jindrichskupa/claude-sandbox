@@ -36,7 +36,7 @@ import { BuildPanel, type BuildSelection } from './buildPanel'
 import { PoliticsPanel } from './politicsPanel'
 import { ObjectivesPanel } from './objectivesPanel'
 import { AccountsPanel, ledgerBlock } from './accountsPanel'
-import { NewsPanel } from './newsPanel'
+import { headline, NewsPanel } from './newsPanel'
 import { HistoryPanel } from './historyPanel'
 import { BriefingPanel } from './briefingPanel'
 import { operatingMargin } from '@sim/economy/assetLedger'
@@ -670,6 +670,32 @@ export class Hud {
       if (choice) {
         block.appendChild(el('div', 'event-body', t('ui.eventChosen', { choice: t(choice.labelKey) })))
       }
+
+      // Which asset it fell on, and a way to get there.
+      //
+      // "Construction blockade" without a site is a headline about somebody else's problem. The
+      // player's first question is which of their projects has stopped, and until now the panel
+      // could not answer it — nor could the event, which applied a world-wide parameter and picked
+      // no site at all.
+      for (const [plantId, labelKey, params] of [
+        [active.delayedPlantId, 'ui.eventDelaying', { months: Math.round((active.delayTicks ?? 0) / TICKS_PER_MONTH) }],
+        [active.outagePlantId, 'ui.eventOutageAt', {}],
+      ] as const) {
+        if (!plantId) continue
+        const plant = this.world.getPlant(plantId)
+        if (!plant) continue
+        // Through `headline`, not `t` directly: a plant the player built has no literal name, only
+        // a key and a serial — see the note on the convention in `newsPanel`. Interpolating it raw
+        // put "plant.ccgt#1" on screen.
+        const row = el('div', 'event-subject')
+        row.textContent = headline({
+          titleKey: labelKey,
+          params: { ...params, plant: this.world.plantDisplayName(plantId) },
+        })
+        row.addEventListener('click', () => this.selectNode(plant.nodeId, true))
+        block.appendChild(row)
+      }
+
       this.events.appendChild(block)
     }
   }

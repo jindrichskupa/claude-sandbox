@@ -13,7 +13,16 @@ import { LINE_TYPES } from '@content/lineTypes'
 import { heatCapacityOf, mixBand, PLANT_TYPES } from '@content/plantTypes'
 import { HEAT_PIPE_TYPES } from '@content/heatPipeTypes'
 import { RandomSource } from './core/rng'
-import { isMonthBoundary, isYearBoundary, TICKS_PER_YEAR, tickToDate, type GameDate } from './core/time'
+import {
+  isMonthBoundary,
+  isYearBoundary,
+  MONTHS_PER_YEAR,
+  TICKS_PER_YEAR,
+  tickToDate,
+  type GameDate,
+} from './core/time'
+
+const TICKS_PER_MONTH = TICKS_PER_YEAR / MONTHS_PER_YEAR
 import { Network, nodeInService, PLAYER, type NodeId } from './grid/network'
 import { IslandCache } from './grid/islands'
 import {
@@ -820,6 +829,22 @@ export class World {
         titleKey: 'news.eventLanded',
         params: { event: def.nameKey },
       })
+      // A project held up gets its own headline, naming the site and pointing at it. The event
+      // headline alone said something had happened somewhere; this says what and where, and is
+      // still there in the archive months later when the player wonders why a station is late.
+      if (active.delayedPlantId) {
+        this.postNews({
+          category: 'construction',
+          importance: NewsImportance.Major,
+          titleKey: 'news.buildDelayed',
+          params: {
+            plant: this.plantDisplayName(active.delayedPlantId),
+            months: Math.round((active.delayTicks ?? 0) / TICKS_PER_MONTH),
+          },
+          subjectId: active.delayedPlantId,
+          subjectKind: 'plant',
+        })
+      }
     }
 
     // 4. Lifecycle transitions (construction finishing, dismantling completing) and the

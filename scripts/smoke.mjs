@@ -536,6 +536,59 @@ try {
     throw new Error('The inspector did not say when the station would be finished')
   }
 
+  // --- An event says what it has hold of ----------------------------------
+  // "Construction blockade" with no site is a headline about somebody else's problem: the player's
+  // first question is which of their projects has stopped. The event used to carry a world-wide
+  // build-time modifier and name nothing — and the modifier could not even do its job, because a
+  // project's finish date is fixed the hour it is committed.
+  const blockade = await page.evaluate(() => {
+    const g = window.game
+    let site = null
+    for (let y = 0; y < g.world.scenario.mapHeight && !site; y++) {
+      for (let x = 0; x < g.world.scenario.mapWidth; x++) {
+        if (g.build.quotePlant(g.world, 'ccgt', x, y).ok) { site = { x, y }; break }
+      }
+    }
+    if (!site) return { skipped: 'nowhere to build' }
+    g.build.beginPlantConstruction(g.world, 'ccgt', site.x, site.y)
+
+    // Record every project under way, because the director picks one of them and it need not be
+    // the one just started — the smoke test has built things before reaching here.
+    const before = new Map(
+      g.world.plants.filter((p) => p.phase === 1).map((p) => [p.id, p.phaseEndsTick]),
+    )
+
+    g.world.director.state.pending.push({
+      uid: 'smoke-blockade', defId: 'construction_blockade',
+      raisedTick: g.world.tick, landsTick: g.world.tick, choiceId: 'accept',
+    })
+    for (let i = 0; i < 3; i++) g.world.step()
+    g.hud.update()
+
+    const active = g.world.director.state.active.find((a) => a.uid === 'smoke-blockade')
+    const hit = active?.delayedPlantId ? g.world.getPlant(active.delayedPlantId) : null
+    const row = document.querySelector('#events .event-subject')
+    return {
+      delayedPlantId: active?.delayedPlantId,
+      moved: hit ? hit.phaseEndsTick - (before.get(hit.id) ?? hit.phaseEndsTick) : 0,
+      commissionsWithIt: hit ? hit.commissionedTick === hit.phaseEndsTick : false,
+      subjectText: row?.textContent ?? null,
+      filed: g.world.news.all().some((n) => n.titleKey === 'news.buildDelayed'),
+    }
+  })
+  console.log('construction blockade:', blockade)
+  if (!blockade.skipped) {
+    if (!blockade.delayedPlantId) throw new Error('The blockade fell on no site at all')
+    if (!(blockade.moved > 0)) throw new Error('The blockade did not move the finish date')
+    if (!blockade.commissionsWithIt) throw new Error('A delayed plant would arrive late and already old')
+    if (!blockade.subjectText) throw new Error('The events panel does not say what is held up')
+    // The raw key would read "plant.ccgt#1" — the name convention has to be expanded for display.
+    if (/[#]|plant\./.test(blockade.subjectText)) {
+      throw new Error(`The panel shows a raw name key: ${blockade.subjectText}`)
+    }
+    if (!blockade.filed) throw new Error('Nothing was filed in the news about the delay')
+  }
+
   // --- The language switch keeps the run ---------------------------------
   // A reload is what rebuilds the overlay in the new language, and a reload is also what would
   // normally throw away the game in progress. The run is parked and picked up, so the clock, the

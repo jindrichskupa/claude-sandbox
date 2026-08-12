@@ -74,6 +74,14 @@ export type EffectTarget =
   | { kind: 'byCategory'; category: string }
   /** One plant, chosen by the director from those that match. */
   | { kind: 'onePlant'; category?: string; fuel?: string }
+  /**
+   * One project actually under construction.
+   *
+   * Separate from `onePlant`, which deliberately only ever picks a unit that is *operating*: a
+   * blockade of a finished station is not a thing, and a blockade of nothing in particular was
+   * what the construction event used to be.
+   */
+  | { kind: 'oneUnderConstruction' }
 
 export interface EventEffect {
   target: EffectTarget
@@ -88,6 +96,12 @@ export interface EventEffect {
  * A forced outage the event causes. Kept separate from the modifiers because "this unit is
  * broken" is a state, not a derating — the same distinction `LifecyclePhase` draws.
  */
+/** A project held up, and for how long. */
+export interface EventDelay {
+  target: EffectTarget
+  months: Sourced<number>
+}
+
 export interface EventOutage {
   target: EffectTarget
   hours: number
@@ -127,6 +141,17 @@ export interface EventDef {
   riskFactors: RiskFactor[]
   effects: EventEffect[]
   outage?: EventOutage
+  /**
+   * A named project this event holds up, and by how long.
+   *
+   * Kept out of the modifiers for the same reason an outage is: it is a change to a particular
+   * thing's schedule, not a scalar applied to a parameter. It also has to be, because a build
+   * time modifier could not do this job at all — `phaseEndsTick` is fixed the hour a project is
+   * committed, so a later change to `BuildTimeMonths` only ever reaches projects not yet started.
+   * The construction blockade said "everything under construction will take longer" and, in the
+   * one respect that mattered, did nothing.
+   */
+  delay?: EventDelay
   /** Always at least two, and at least one of them affordable. */
   choices: EventChoice[]
 }
@@ -495,6 +520,15 @@ export const EVENTS: EventDef[] = [
       { condition: 'lowPublicOpinion', multiplier: sourced(3, 'fraction', 'game-design', G) },
       { condition: 'recentBlackout', multiplier: sourced(1.8, 'fraction', 'game-design', G) },
     ],
+    // The site itself is held up, by name. The world-wide build time modifier this replaces could
+    // not touch a project already under way — see `EventDef.delay` — so the event announced a
+    // consequence it did not have, against a site it could not name.
+    delay: {
+      target: { kind: 'oneUnderConstruction' },
+      months: sourced(9, 'months', 'game-design', G, 'Long enough to matter, short of abandoning the project'),
+    },
+    // What it does to *future* projects stays: consents get harder everywhere once one site has
+    // been occupied, and that part a parameter really can express.
     effects: [
       {
         target: { kind: 'world' },

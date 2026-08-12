@@ -476,3 +476,74 @@ describe('events in a real scenario', () => {
     }
   })
 })
+
+/**
+ * The construction blockade, which used to be an announcement about nothing.
+ *
+ * It carried a world-wide `BuildTimeMonths` modifier and picked no site, so the panel could only
+ * say "Construction blockade" with no answer to the player's first question — which of my projects
+ * has stopped? Worse, the modifier could not do the job it was written for: `phaseEndsTick` is
+ * fixed the hour a project is committed, so a later change to build time only ever reaches
+ * projects that have not started. The event promised "everything under construction will take
+ * longer" and, for everything under construction, did nothing at all.
+ */
+describe('a blockade holds up a named site', () => {
+  const blockade = EVENTS.find((e) => e.id === 'construction_blockade')!
+
+  /** Put the blockade on the calendar and run it to the hour it lands. */
+  function land(ctx: DirectorContext) {
+    const director = new EventDirector()
+    director.state.pending.push({
+      uid: 'test-blockade',
+      defId: blockade.id,
+      raisedTick: ctx.tick,
+      landsTick: ctx.tick,
+      choiceId: 'accept',
+    })
+    director.step(ctx)
+    return director.state.active.find((a) => a.uid === 'test-blockade')!
+  }
+
+  /** A project genuinely under way: it finishes some time after the hour the event lands. */
+  function building(id: string, endsTick: number): PlantAsset {
+    return { ...plant(id, 'ccgt'), phase: LifecyclePhase.Building, phaseEndsTick: endsTick, commissionedTick: endsTick }
+  }
+
+  const FINISHES_AT = GRACE_TICKS + 1 + 5000
+
+  it('delays a real project rather than a parameter', () => {
+    // The delay has to reach `phaseEndsTick`, because that is the only thing that decides when a
+    // project finishes. A `BuildTimeMonths` modifier — which is what this event used to carry —
+    // is read when the project is committed and never again.
+    const site = building('p_new', FINISHES_AT)
+    const landed = land(context({ plants: [site] }))
+
+    expect(landed.delayedPlantId).toBe('p_new')
+    expect(landed.delayTicks).toBe(Math.round(blockade.delay!.months.value * (TICKS_PER_YEAR / 12)))
+    expect(site.phaseEndsTick).toBe(FINISHES_AT + landed.delayTicks!)
+  })
+
+  it('commissions later too, rather than ageing from a date it never met', () => {
+    // Commissioning is what a plant's age is measured from. Left where it was, a blockaded
+    // station would arrive nine months late and be nine months old on its first day.
+    const site = building('p_new', FINISHES_AT)
+    const landed = land(context({ plants: [site] }))
+    expect(site.commissionedTick).toBe(FINISHES_AT + landed.delayTicks!)
+    expect(site.commissionedTick).toBe(site.phaseEndsTick)
+  })
+
+  it('picks only from what is actually being built', () => {
+    // `onePlant` deliberately only ever chooses an *operating* unit, which is why the blockade
+    // needed a target of its own: a blockade of a finished station is not a thing.
+    const running = plant('p_running', 'ccgt')
+    const site = building('p_new', FINISHES_AT)
+    const landed = land(context({ plants: [running, site] }))
+    expect(landed.delayedPlantId).toBe('p_new')
+  })
+
+  it('falls on nothing when there is nothing being built', () => {
+    // Quietly no subject, rather than a crash or a site invented out of the operating fleet.
+    const landed = land(context({ plants: [plant('p_running', 'ccgt')] }))
+    expect(landed.delayedPlantId).toBeUndefined()
+  })
+})
