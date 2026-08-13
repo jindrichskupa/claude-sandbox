@@ -67,9 +67,30 @@ let exitCode = 0
 try {
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' })
 
-  // A new run opens paused behind the opening brief, which is the point of it — so the first
-  // thing this does is what a player does: read it and press Begin. Everything after this point
-  // is the game running, and the brief gets its own checks further down.
+  // A new run opens on the choice of grid, because the brief describes a grid and there is now
+  // more than one. So the first thing this does is what a player does: pick one, then read the
+  // brief and press Begin.
+  await page.waitForFunction(
+    () => document.getElementById('scenario-picker')?.classList.contains('visible'),
+    { timeout: 20_000 },
+  )
+  const choices = await page.evaluate(() => ({
+    cards: [...document.querySelectorAll('.scenario-card')].map((c) => ({
+      id: c.dataset.scenario,
+      name: c.querySelector('.scenario-name')?.textContent,
+      facts: [...c.querySelectorAll('.scenario-facts span')].map((f) => f.textContent),
+    })),
+    clockStopped: window.game.world.tick <= 2,
+  }))
+  console.log('grids on offer:', choices.cards)
+  if (!choices.cards.length) throw new Error('The picker offered no scenario at all')
+  if (!choices.clockStopped) throw new Error('The clock ran while the player was still choosing')
+  if (choices.cards.some((c) => !c.name || c.facts.length < 3)) {
+    throw new Error('A scenario card is missing its name or the facts under it')
+  }
+  await page.screenshot({ path: join(OUT, '00-choose-grid.png') })
+  await page.click('.scenario-card')
+
   await page.waitForFunction(() => document.getElementById('brief-begin') !== null, { timeout: 20_000 })
   const openedPaused = await page.evaluate(() => ({
     tick: window.game.world.tick,

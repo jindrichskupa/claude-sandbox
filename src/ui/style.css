@@ -1032,6 +1032,81 @@ button.danger:hover {
  * Over the map, not across it. Thirty years of decisions are on that map,
  * and a full-screen curtain would be the wrong way to end them.
  */
+/*
+ * The scenario picker, which is the first thing a new run shows.
+ *
+ * Over the map rather than replacing it: the map behind is already a grid, and half of what a
+ * card says — how much is standing, how tired it is — is easier to believe with one in view.
+ */
+#scenario-picker {
+  left: 50%;
+  top: 14%;
+  transform: translateX(-50%);
+  width: 460px;
+  padding: 20px 22px;
+  display: none;
+  z-index: 5;
+  max-height: calc(100vh - 14% - 24px);
+  overflow-y: auto;
+}
+
+#scenario-picker.visible {
+  display: block;
+}
+
+#scenario-picker h2 {
+  margin: 0 0 2px;
+  font-size: 18px;
+}
+
+#scenario-picker .subtitle {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-bottom: 14px;
+}
+
+.scenario-card {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.scenario-card:hover {
+  background: rgba(127, 212, 255, 0.08);
+  border-color: var(--accent);
+}
+
+.scenario-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.scenario-span {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 6px;
+}
+
+.scenario-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  margin-bottom: 8px;
+}
+
+/* Read off the scenario's own content, so they cannot drift from the fleet they describe. */
+.scenario-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 #game-over {
   left: 50%;
   top: 22%;

@@ -585,5 +585,12 @@
   "ui.projectInstalment": "Then {amount} a month for {years} years",
   "ui.payCash": "Pay from cash",
   "ui.loanProject": "Project facility",
-  "ui.loanDrawing": "drawing, interest rolling up"
+  "ui.loanDrawing": "drawing, interest rolling up",
+  "ui.chooseScenario": "Choose a grid",
+  "ui.chooseScenarioNote": "Each one is a different problem. What is already standing decides most of it.",
+  "ui.scenarioFleet": "{mw} inherited",
+  "ui.scenarioDemand": "{mw} to serve",
+  "ui.scenarioOldest": "oldest unit {years} years",
+  "ui.scenarioTowns": "{n} towns",
+  "ui.wrongScenario": "That save belongs to a grid this build does not have."
 }

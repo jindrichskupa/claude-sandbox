@@ -9,7 +9,9 @@
 
 import { Application } from 'pixi.js'
 import { buildWorld, loadWorld } from '@sim/scenario/build'
-import { FIRST_REGION } from '@content/scenarios/firstRegion'
+import { FIRST_REGION, type ScenarioContent } from '@content/scenarios/firstRegion'
+import { scenarioById } from '@content/scenarios'
+import { ScenarioPicker } from '@ui/scenarioPicker'
 import { MapView, nodeLabel, TILE_PX, type BuildMode } from '@render/mapView'
 import { PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
 import { LINE_TYPES } from '@content/lineTypes'
@@ -98,17 +100,23 @@ async function main(): Promise<void> {
   // lets a load happen without reloading the page.
   // A run parked by a language change comes straight back. Read once and cleared immediately, so
   // a failure to restore cannot strand the player in a loop of the same broken handover.
-  let world = buildWorld(FIRST_REGION)
+  // Which grid is being played, rather than the only one there used to be. A save records the
+  // scenario it belongs to and always did; until there was more than one, nothing read it back.
+  let scenario: ScenarioContent = FIRST_REGION
+  let world = buildWorld(scenario)
   let handedOver = false
   try {
     const parked = globalThis.localStorage?.getItem(LOCALE_HANDOVER_KEY)
     globalThis.localStorage?.removeItem(LOCALE_HANDOVER_KEY)
     if (parked) {
-      world = loadWorld(FIRST_REGION, (JSON.parse(parked) as SaveFile).data)
+      const file = JSON.parse(parked) as SaveFile
+      scenario = scenarioById(file.scenarioId) ?? FIRST_REGION
+      world = loadWorld(scenario, file.data)
       handedOver = true
     }
   } catch {
-    world = buildWorld(FIRST_REGION)
+    scenario = FIRST_REGION
+    world = buildWorld(scenario)
   }
   let hud!: Hud
   let map!: MapView
@@ -117,6 +125,12 @@ async function main(): Promise<void> {
   // again — the player has read it, and being made to dismiss it because they changed language
   // would be the interface punishing them for using a setting.
   let briefingShown = handedOver
+  /** Whether the grid in play is the player's choice rather than the default one booted behind it. */
+  let scenarioChosen = handedOver
+  // Assigned once, below, after the callbacks it needs exist. Declared here because `attach`
+  // opens it and runs before that line does.
+  // eslint-disable-next-line prefer-const
+  let picker!: ScenarioPicker
 
   let speed: Speed = 1
   /** What to resume at once the opening brief is closed. */
@@ -170,7 +184,7 @@ async function main(): Promise<void> {
   const switchLocale = (locale: Locale): void => {
     if (locale === getLocale()) return
     try {
-      const file = makeSaveFile(FIRST_REGION.id, world.toSaveData(), new Date().toISOString())
+      const file = makeSaveFile(scenario.id, world.toSaveData(), new Date().toISOString())
       globalThis.localStorage?.setItem(LOCALE_HANDOVER_KEY, JSON.stringify(file))
     } catch {
       // Storage refused. The language still changes; the run is the price, and the alternative
@@ -181,7 +195,7 @@ async function main(): Promise<void> {
   }
 
   const save = (): void => {
-    const file = makeSaveFile(FIRST_REGION.id, world.toSaveData(), new Date().toISOString())
+    const file = makeSaveFile(scenario.id, world.toSaveData(), new Date().toISOString())
     hud.setHint(t(writeLocalSave(file) ? 'ui.saved' : 'ui.saveFailed'))
   }
 
@@ -198,8 +212,17 @@ async function main(): Promise<void> {
       hud.setHint(t('ui.noSave'))
       return
     }
+    // Into the grid the save belongs to, not the one on screen. Restoring a save from another
+    // scenario onto this one would put its stations on somebody else's terrain and its towns
+    // nowhere at all — and the id to prevent it has been in the file since saving existed.
+    const saved = scenarioById(file.scenarioId)
+    if (!saved) {
+      hud.setHint(t('ui.wrongScenario'))
+      return
+    }
     try {
-      world = loadWorld(FIRST_REGION, file.data)
+      world = loadWorld(saved, file.data)
+      scenario = saved
     } catch {
       hud.setHint(t('ui.loadFailed'))
       return
@@ -234,6 +257,15 @@ async function main(): Promise<void> {
     hud.setSpeed(speed)
     map.syncToWorld()
     hud.update()
+    // The choice of grid comes before the brief, because the brief describes the grid. Shown on
+    // the first attach only, and never to a run that was already under way — a load or a language
+    // handover has picked its scenario already, and asking again would throw the run away.
+    if (!scenarioChosen) {
+      speed = 0
+      hud.setSpeed(0)
+      picker.setOpen(true)
+      return
+    }
     // Shown once per session, on the first attach only: a load is not a new run, and a briefing
     // that reappears every time the player restores a save is an interruption rather than help.
     if (!briefingShown) {
@@ -354,6 +386,28 @@ async function main(): Promise<void> {
         hud.selectNode(nodeId)
       },
     })
+
+  /**
+   * Start the run the player chose.
+   *
+   * Rebuilt only when the choice differs from the grid already booted behind the panel. Building
+   * a world means generating terrain, and doing it twice to arrive at the same map would be a
+   * second of nothing for no reason.
+   */
+  picker = new ScenarioPicker(overlay, {
+    onPick: (id) => {
+      const picked = scenarioById(id)
+      if (!picked) return
+      picker.setOpen(false)
+      scenarioChosen = true
+      if (picked.id !== scenario.id) {
+        scenario = picked
+        world = buildWorld(scenario)
+        world.step()
+      }
+      attach()
+    },
+  })
 
   // Run one tick immediately so the first frame shows a live system rather than an empty one.
   world.step()

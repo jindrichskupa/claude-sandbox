@@ -585,5 +585,12 @@
   "ui.projectInstalment": "Pak {amount} měsíčně po {years} let",
   "ui.payCash": "Zaplatit z hotovosti",
   "ui.loanProject": "Projektový úvěr",
-  "ui.loanDrawing": "čerpá se, úrok se kapitalizuje"
+  "ui.loanDrawing": "čerpá se, úrok se kapitalizuje",
+  "ui.chooseScenario": "Vyber soustavu",
+  "ui.chooseScenarioNote": "Každá je jiný problém. Většinu z něj rozhoduje to, co už stojí.",
+  "ui.scenarioFleet": "{mw} zděděno",
+  "ui.scenarioDemand": "{mw} k pokrytí",
+  "ui.scenarioOldest": "nejstarší blok {years} let",
+  "ui.scenarioTowns": "{n} měst",
+  "ui.wrongScenario": "Ten save patří k soustavě, kterou tahle verze nezná."
 }
