@@ -19,17 +19,18 @@
 
 import { buildWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
+import { scenarioById } from '@content/scenarios'
 import { NUCLEAR_ZEALOT, playScenario, type Strategy } from '../tests/autoPlayer'
 import { PLANT_TYPES } from '@content/plantTypes'
+
+// Which grid to ask the question about. The answer for the opening scenario is settled; the
+// second was authored to see whether a different starting position changes it.
+const content = scenarioById(process.argv[2] ?? '') ?? FIRST_REGION
 
 const variants: Array<{ label: string; strategy: Strategy }> = [
   {
     label: 'no facility at all',
     strategy: { ...NUCLEAR_ZEALOT, usesProjectFinance: false },
-  },
-  {
-    label: 'facility, as it stands',
-    strategy: NUCLEAR_ZEALOT,
   },
   {
     // One reactor and no more. Not a strategy anybody would write down — it is a control, to
@@ -48,9 +49,10 @@ const variants: Array<{ label: string; strategy: Strategy }> = [
   },
 ]
 
-console.log('variant                  end   outcome    unserved   carbon   cash     debt     built')
+console.log(`${content.id}: ${content.startYear}–${content.endYear}`)
+console.log('variant                    end   outcome    unserved   carbon   cash     debt     built')
 for (const { label, strategy } of variants) {
-  const world = buildWorld(FIRST_REGION)
+  const world = buildWorld(content)
   const result = playScenario(world, { strategy })
   const counts = new Map<string, number>()
   for (const line of result.built) {
@@ -58,7 +60,7 @@ for (const { label, strategy } of variants) {
     counts.set(typeId, (counts.get(typeId) ?? 0) + 1)
   }
   console.log(
-    `${label.padEnd(24)} ${String(result.year).padEnd(5)} ` +
+    `${label.padEnd(26)} ${String(result.year).padEnd(5)} ` +
       `${(result.bankrupt ? 'bankrupt' : result.outcome).padEnd(10)} ` +
       `${(result.unservedShare * 100).toFixed(2).padStart(6)}%  ` +
       `${result.carbonIntensity.toFixed(3).padStart(6)}  ` +

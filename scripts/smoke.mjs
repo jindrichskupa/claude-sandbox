@@ -83,13 +83,13 @@ try {
     clockStopped: window.game.world.tick <= 2,
   }))
   console.log('grids on offer:', choices.cards)
-  if (!choices.cards.length) throw new Error('The picker offered no scenario at all')
+  if (choices.cards.length < 2) throw new Error('The picker is not offering the grids the build has')
   if (!choices.clockStopped) throw new Error('The clock ran while the player was still choosing')
   if (choices.cards.some((c) => !c.name || c.facts.length < 3)) {
     throw new Error('A scenario card is missing its name or the facts under it')
   }
   await page.screenshot({ path: join(OUT, '00-choose-grid.png') })
-  await page.click('.scenario-card')
+  await page.click('.scenario-card[data-scenario="first-region"]')
 
   await page.waitForFunction(() => document.getElementById('brief-begin') !== null, { timeout: 20_000 })
   const openedPaused = await page.evaluate(() => ({

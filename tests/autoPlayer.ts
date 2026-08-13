@@ -417,12 +417,20 @@ function searchForSite(world: World, typeId: PlantTypeId): { x: number; y: numbe
 /**
  * Capacity in service or on its way, counted the way this utility counts it.
  *
+ * `includeBuilding` is the difference between two questions that look like one. Deciding whether
+ * to *build* counts what is already on order, or a utility orders the same station every month
+ * until the first one arrives. Deciding whether to *close* something must not: a megawatt that
+ * turns up in six years does not keep the lights on tonight. Counting it did, and the result was
+ * a gas-only system that shut its entire fleet as uneconomic the year the tariff fell, against
+ * two reactors that were still holes in the ground — eleven thousand hours of towns cut off,
+ * diagnosed by the post-mortem rather than by reading the code.
+ *
  * Not a fact about the fleet but a belief about it, which is why the strategy supplies the
  * weights. `LEAST_COST` counts firm plant at nameplate and everything else at nothing, which is
  * exactly what this function did before there was more than one player; the others count a wind
  * farm for the part of it that can be relied on in the worst hour of the year.
  */
-function plannedCapacityMw(world: World, strategy: Strategy): number {
+function plannedCapacityMw(world: World, strategy: Strategy, includeBuilding = true): number {
   let mw = 0
   for (const plant of world.plants) {
     const type = PLANT_TYPES[plant.typeId]
@@ -433,7 +441,7 @@ function plannedCapacityMw(world: World, strategy: Strategy): number {
     // that is what it will be when it arrives. The discount below is for wear, not for pessimism
     // about the future.
     if (plant.phase === LifecyclePhase.Building) {
-      mw += type.capacityMw.value * credit
+      if (includeBuilding) mw += type.capacityMw.value * credit
       continue
     }
     if (plant.phase !== LifecyclePhase.Operating) continue
@@ -496,7 +504,7 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
       if (lifeFraction(plant, world.tick) < 1) continue
       const type = PLANT_TYPES[plant.typeId]
       if (type.heatOnly) continue
-      const firmNow = plannedCapacityMw(world, strategy)
+      const firmNow = plannedCapacityMw(world, strategy, false)
       const lost = type.capacityMw.value * strategy.capacityCredit(plant.typeId)
       if (firmNow - lost < peakDemandMw * reserve) continue
       const result = retirePlant(world, plant.id)
@@ -510,7 +518,7 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
     //    the way through a 60 EUR/t carbon price because the units had life left in them. Real
     //    utilities closed exactly those plants for exactly that reason, and a harness that cannot
     //    do it is measuring an impossible strategy rather than a hard scenario.
-    const spare = plannedCapacityMw(world, strategy) - peakDemandMw * reserve
+    const spare = plannedCapacityMw(world, strategy, false) - peakDemandMw * reserve
     if (spare > 0) {
       for (const plant of world.plants) {
         if (plant.phase !== LifecyclePhase.Operating) continue

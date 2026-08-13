@@ -7,7 +7,7 @@
  * plant inherited on day one are the same kind of object, differing only in a number.
  */
 
-import type { ScenarioContent } from '@content/scenarios/firstRegion'
+import type { ScenarioContent } from '@content/scenarios/types'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { TICKS_PER_YEAR } from '../core/time'
 import type { VoltageLevel } from '@content/lineTypes'

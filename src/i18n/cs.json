@@ -592,5 +592,9 @@
   "ui.scenarioDemand": "{mw} k pokrytí",
   "ui.scenarioOldest": "nejstarší blok {years} let",
   "ui.scenarioTowns": "{n} měst",
-  "ui.wrongScenario": "Ten save patří k soustavě, kterou tahle verze nezná."
+  "ui.wrongScenario": "Ten save patří k soustavě, kterou tahle verze nezná.",
+  "scenario.longCoast.name": "Dlouhé pobřeží",
+  "scenario.longCoast.description": "Nic tu není dosloužilé. Mladá plynová flotila napájí pobřeží, které roste, a otázka zní, k čemu se zavázat na šedesát let, než dorazí cena uhlíku, kterou zatím nikdo neúčtuje.",
+  "objective.keepUpWithGrowth": "Udržet 2,4 GW regulovatelného výkonu do roku 2050",
+  "objective.halfLowCarbon": "Polovina energie z nespalovacích zdrojů do roku 2050"
 }

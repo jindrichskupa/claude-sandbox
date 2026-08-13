@@ -9,7 +9,8 @@
 
 import { Application } from 'pixi.js'
 import { buildWorld, loadWorld } from '@sim/scenario/build'
-import { FIRST_REGION, type ScenarioContent } from '@content/scenarios/firstRegion'
+import { FIRST_REGION } from '@content/scenarios/firstRegion'
+import type { ScenarioContent } from '@content/scenarios/types'
 import { scenarioById } from '@content/scenarios'
 import { ScenarioPicker } from '@ui/scenarioPicker'
 import { MapView, nodeLabel, TILE_PX, type BuildMode } from '@render/mapView'

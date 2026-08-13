@@ -8,10 +8,13 @@
  * the content was corrected.
  */
 
-import { FIRST_REGION, type ScenarioContent } from './firstRegion'
+import { FIRST_REGION } from './firstRegion'
+import { LONG_COAST } from './longCoast'
+import type { ScenarioContent } from './types'
 
 export const SCENARIOS: Record<string, ScenarioContent> = {
   [FIRST_REGION.id]: FIRST_REGION,
+  [LONG_COAST.id]: LONG_COAST,
 }
 
 export const SCENARIO_LIST: ScenarioContent[] = Object.values(SCENARIOS)

@@ -15,7 +15,7 @@ import { t } from '@i18n/index'
 import { formatMw } from '@i18n/index'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { SCENARIO_LIST } from '@content/scenarios'
-import type { ScenarioContent } from '@content/scenarios/firstRegion'
+import type { ScenarioContent } from '@content/scenarios/types'
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
