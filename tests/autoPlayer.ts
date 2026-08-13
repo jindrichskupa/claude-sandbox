@@ -232,6 +232,19 @@ export interface Strategy {
    * every earlier measurement was taken against it.
    */
   plansOnNameplate: boolean
+  /**
+   * Whether it will borrow against a project it cannot pay for out of the balance sheet.
+   *
+   * A real utility does, which is why the mechanism exists — but it is a conviction like the
+   * others, and one with a price: the facility costs more than corporate debt, the interest rolls
+   * up while the thing is being built, and the instalments run for twenty-five years whether the
+   * asset earns or not. Whether that trade is worth taking is exactly what the comparison is for,
+   * and it cannot be answered by a player who never faces it.
+   *
+   * False for `LEAST_COST`, which is the control and has to keep behaving as it did when every
+   * earlier measurement was taken against it.
+   */
+  usesProjectFinance: boolean
 }
 
 const firmCredit = (typeId: PlantTypeId): number =>
@@ -263,6 +276,7 @@ export const LEAST_COST: Strategy = {
   rank: (_world, _typeId, cost) => cost,
   closesOnPrinciple: () => false,
   plansOnNameplate: true,
+  usesProjectFinance: false,
 }
 
 export const GREEN_ZEALOT: Strategy = {
@@ -278,6 +292,7 @@ export const GREEN_ZEALOT: Strategy = {
   // Closes anything with a flue, in the order the dispatch would have run it.
   closesOnPrinciple: (typeId) => isThermal(typeId),
   plansOnNameplate: false,
+  usesProjectFinance: true,
 }
 
 export const FOSSIL_ZEALOT: Strategy = {
@@ -291,6 +306,7 @@ export const FOSSIL_ZEALOT: Strategy = {
   rank: (world, typeId, _cost) => levelisedCost(world, typeId, 0.5, { ignoreCarbon: true }),
   closesOnPrinciple: () => false,
   plansOnNameplate: false,
+  usesProjectFinance: true,
 }
 
 export const NUCLEAR_ZEALOT: Strategy = {
@@ -307,6 +323,7 @@ export const NUCLEAR_ZEALOT: Strategy = {
   rank: (_world, typeId, cost) => (PLANT_TYPES[typeId].category === 'nuclear' ? cost - 10_000 : cost),
   closesOnPrinciple: () => false,
   plansOnNameplate: false,
+  usesProjectFinance: true,
 }
 
 export const NOVELTY_SEEKER: Strategy = {
@@ -320,6 +337,7 @@ export const NOVELTY_SEEKER: Strategy = {
   rank: (_world, typeId, cost) => -PLANT_TYPES[typeId].availableFromYear.value * 1000 + cost,
   closesOnPrinciple: () => false,
   plansOnNameplate: false,
+  usesProjectFinance: true,
 }
 
 export const ARCHETYPES: Strategy[] = [
@@ -549,23 +567,35 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
     //    years: hydro won on cost, counted for nothing, so the gap never closed and it built
     //    until it went bankrupt. Choosing the cheapest thing that does not solve the problem is a
     //    very easy mistake for an optimiser to make, and worth the comment.
-    let choice: { typeId: PlantTypeId; site: { x: number; y: number }; cost: number; score: number } | null = null
+    let choice:
+      | { typeId: PlantTypeId; site: { x: number; y: number }; cost: number; score: number; financed: boolean }
+      | null = null
     for (const typeId of PLANT_TYPE_IDS) {
       const type = PLANT_TYPES[typeId]
       if (!strategy.builds(typeId)) continue
       if (strategy.capacityCredit(typeId) <= 0) continue
       const site = siteFor(world, typeId)
       if (!site) continue
-      if (!quotePlant(world, typeId, site.x, site.y).ok) continue
+      // Cash first, then a facility, which is the order a utility asks the question in: nobody
+      // arranges project finance for something they could simply buy. A facility is only reached
+      // for where the balance sheet has run out, which for most of the catalogue is never.
+      const cash = quotePlant(world, typeId, site.x, site.y)
+      const financed =
+        !cash.ok && strategy.usesProjectFinance ? quotePlant(world, typeId, site.x, site.y, true) : null
+      if (!cash.ok && !financed?.ok) continue
       const cost = levelisedCost(world, typeId, LOAD_FACTOR[type.weatherDependence] ?? 0.5)
       const score = strategy.rank(world, typeId, cost)
-      if (!choice || score < choice.score) choice = { typeId, site, cost, score }
+      if (!choice || score < choice.score) {
+        choice = { typeId, site, cost, score, financed: !cash.ok }
+      }
     }
     if (!choice) continue
 
-    const placed = beginPlantConstruction(world, choice.typeId, choice.site.x, choice.site.y)
+    const placed = beginPlantConstruction(world, choice.typeId, choice.site.x, choice.site.y, choice.financed)
     if (!placed.ok) continue
-    built.push(`${date.year}: ${choice.typeId} at ${Math.round(choice.cost)}/MWh`)
+    built.push(
+      `${date.year}: ${choice.typeId} at ${Math.round(choice.cost)}/MWh${choice.financed ? ' (financed)' : ''}`,
+    )
 
     // 4. Wire it in. A station nobody can reach generates nothing, and the cheapest connection
     //    that will carry its output is the one to build.

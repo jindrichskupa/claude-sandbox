@@ -25,7 +25,15 @@ import { describe, expect, it } from 'vitest'
 import { buildWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { PLANT_TYPES, PLANT_TYPE_IDS, type PlantTypeId } from '@content/plantTypes'
-import { ARCHETYPES, FOSSIL_ZEALOT, GREEN_ZEALOT, playScenario, type PlayResult } from './autoPlayer'
+import {
+  ARCHETYPES,
+  FOSSIL_ZEALOT,
+  GREEN_ZEALOT,
+  LEAST_COST,
+  NUCLEAR_ZEALOT,
+  playScenario,
+  type PlayResult,
+} from './autoPlayer'
 
 /** Everything a utility could in principle be asked to build, heat-only plant aside. */
 const GENERATORS = PLANT_TYPE_IDS.filter((id) => !PLANT_TYPES[id].heatOnly)
@@ -79,6 +87,32 @@ describe('the archetypes are actually different utilities', () => {
     const orphans = GENERATORS.filter((id) => !ARCHETYPES.some((s) => s.builds(id)))
     expect(orphans, 'no archetype would consider these').toEqual([])
   })
+})
+
+describe('what a facility changes, and what it does not', () => {
+  it('lets the nuclear utility commit to a reactor it could never have paid for', () => {
+    // The measured answer to a question the game could not previously ask. Before there was a way
+    // to borrow against a project, this archetype ranked reactors ten thousand euros a megawatt-
+    // hour ahead of everything else and still built lignite for thirty years, because a reactor
+    // costs seven and a half times the utility's opening cash.
+    const world = buildWorld(FIRST_REGION)
+    const result = playScenario(world, { strategy: NUCLEAR_ZEALOT, untilYear: FIRST_REGION.startYear + 2 })
+    console.log('nuclear archetype, first two years:', result.built)
+    expect(result.built.some((line) => line.includes('nuclear'))).toBe(true)
+    expect(result.built.some((line) => line.includes('financed'))).toBe(true)
+    expect(world.finances.loans.some((l) => l.kind === 'project')).toBe(true)
+  }, 300_000)
+
+  it('leaves the control alone, which every earlier measurement was taken against', () => {
+    // `LEAST_COST` does not use a facility, so nothing about this milestone may move it. Asserted
+    // rather than assumed: the pricing bug found while building this changed every quote in the
+    // game and was invisible until something compared two of them.
+    expect(LEAST_COST.usesProjectFinance).toBe(false)
+    const world = buildWorld(FIRST_REGION)
+    const result = playScenario(world, { untilYear: FIRST_REGION.startYear + 2 })
+    expect(world.finances.loans.some((l) => l.kind === 'project')).toBe(false)
+    expect(result.built.every((line) => !line.includes('financed'))).toBe(true)
+  }, 300_000)
 })
 
 describe('a conviction reaches the simulation and changes the answer', () => {
