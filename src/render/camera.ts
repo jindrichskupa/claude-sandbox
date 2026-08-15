@@ -23,10 +23,24 @@ export class Camera {
 
   /** Fit a world-space rectangle into the viewport with a margin. */
   fit(worldWidth: number, worldHeight: number, margin = 40): void {
-    const zx = (this.viewWidth - margin * 2) / worldWidth
-    const zy = (this.viewHeight - margin * 2) / worldHeight
+    this.fitBounds(0, 0, worldWidth, worldHeight, margin)
+  }
+
+  /**
+   * Fit an arbitrary world-space box, rather than always the whole map.
+   *
+   * The distinction is the difference between opening on a grid and opening on a rectangle with
+   * a grid somewhere in it. Only about a third of either map is within four tiles of anything the
+   * scenario placed — the rest is where the player builds, which is the point of it being there
+   * and not a reason to start zoomed out far enough to see all of it at once.
+   */
+  fitBounds(x0: number, y0: number, x1: number, y1: number, margin = 40): void {
+    const width = Math.max(1, x1 - x0)
+    const height = Math.max(1, y1 - y0)
+    const zx = (this.viewWidth - margin * 2) / width
+    const zy = (this.viewHeight - margin * 2) / height
     this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, Math.min(zx, zy)))
-    this.centerOn(worldWidth / 2, worldHeight / 2)
+    this.centerOn(x0 + width / 2, y0 + height / 2)
   }
 
   panByScreen(dxScreen: number, dyScreen: number): void {

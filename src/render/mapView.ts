@@ -21,7 +21,20 @@ import { judgeSite } from '@sim/build/siting'
 import type { PlantTypeId } from '@content/plantTypes'
 import { Camera } from './camera'
 import { t } from '@i18n/index'
-import { buildTileset, EDGE_E, EDGE_N, EDGE_S, EDGE_W, TILE_SOURCE_PX, variantFor, type Tileset } from './pixelArt'
+import {
+  buildTileset,
+  CORNER_NE,
+  CORNER_NW,
+  CORNER_SE,
+  CORNER_SW,
+  EDGE_E,
+  EDGE_N,
+  EDGE_S,
+  EDGE_W,
+  TILE_SOURCE_PX,
+  variantFor,
+  type Tileset,
+} from './pixelArt'
 import { buildSprites, type SpriteSet } from './sprites'
 import { routeLine, simplifyRoute } from '@sim/grid/routing'
 
@@ -243,6 +256,13 @@ export class MapView {
         const sprite = new Sprite(variants[variantFor(x, y) % variants.length])
         sprite.position.set(x * TILE_PX, y * TILE_PX)
         sprite.scale.set(TILE_SCALE)
+        // Shaded by the height the terrain was generated from, which until now was computed,
+        // saved and never looked at. The tile classes are cut out of that field by rank, so
+        // within any one class there is a full range of ground that all drew identically — a
+        // continuous landscape flattened into five colours. This puts the slope back without
+        // touching what the class means: high ground reads lighter, valleys darker, and the
+        // boundaries between classes stop being the only relief on the map.
+        sprite.tint = shadeFor(this.terrain.elevation[y * this.terrain.width + x] ?? 0.5)
         layer.addChild(sprite)
 
         if (tile !== Tile.Water) {
@@ -256,6 +276,28 @@ export class MapView {
             shore.position.set(x * TILE_PX, y * TILE_PX)
             shore.scale.set(TILE_SCALE)
             layer.addChild(shore)
+          }
+
+          // The corners, where the coast turns. A diagonal only counts when *neither* of the two
+          // cardinals beside it is water — otherwise the straight strips above already cover that
+          // corner and a second overlay would darken it into a blob. Without this a diagonal
+          // coastline is a staircase of square steps, and a tile whose only water neighbour is
+          // diagonal gets no shoreline at all.
+          let corners = 0
+          const diagonal = (dx: number, dy: number, bit: number): void => {
+            if (tileAtSafe(x + dx, y + dy) !== Tile.Water) return
+            if (tileAtSafe(x + dx, y) === Tile.Water || tileAtSafe(x, y + dy) === Tile.Water) return
+            corners |= bit
+          }
+          diagonal(1, -1, CORNER_NE)
+          diagonal(1, 1, CORNER_SE)
+          diagonal(-1, 1, CORNER_SW)
+          diagonal(-1, -1, CORNER_NW)
+          if (corners !== 0) {
+            const corner = new Sprite(this.tileset.shoreCorner[corners]!)
+            corner.position.set(x * TILE_PX, y * TILE_PX)
+            corner.scale.set(TILE_SCALE)
+            layer.addChild(corner)
           }
 
           if (riverAt(x, y) >= RIVER_VISIBLE) {
@@ -358,6 +400,41 @@ export class MapView {
    */
   destroy(): void {
     this.root.destroy({ children: true })
+  }
+
+  /**
+   * Open on the grid rather than on the map it sits in.
+   *
+   * Fitting the whole rectangle started every run zoomed out far enough to include the corners
+   * nothing is in — about two thirds of either map, which exists because the player has to have
+   * somewhere to build and not because it is worth looking at on the first frame. The margin is
+   * generous on purpose: the empty ground beside the grid is where the next station goes, so it
+   * should be in view, just not dominant.
+   */
+  fitToGrid(): void {
+    const nodes = this.world.network.allNodes()
+    if (!nodes.length) {
+      this.camera.fit(this.terrain.width * TILE_PX, this.terrain.height * TILE_PX)
+      return
+    }
+    const margin = 5
+    let x0 = Infinity
+    let y0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    for (const node of nodes) {
+      x0 = Math.min(x0, node.x)
+      y0 = Math.min(y0, node.y)
+      x1 = Math.max(x1, node.x)
+      y1 = Math.max(y1, node.y)
+    }
+    // Clamped to the map, so a grid hard against one edge does not fit a box half of which is
+    // open sea.
+    x0 = Math.max(0, x0 - margin)
+    y0 = Math.max(0, y0 - margin)
+    x1 = Math.min(this.terrain.width, x1 + margin + 1)
+    y1 = Math.min(this.terrain.height, y1 + margin + 1)
+    this.camera.fitBounds(x0 * TILE_PX, y0 * TILE_PX, x1 * TILE_PX, y1 * TILE_PX)
   }
 
   /** Redraw everything that depends on the latest dispatch. Called once per simulation tick. */
@@ -985,6 +1062,20 @@ function distanceToSegment(
   if (lengthSq === 0) return Math.hypot(px - a.x, py - a.y)
   const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lengthSq))
   return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy))
+}
+
+/**
+ * How dark a tile of a given height is drawn.
+ *
+ * A narrow range on purpose. The elevation field is what the tile classes were cut from, so a
+ * wide swing would fight the classes rather than shade them — and the map has to stay readable as
+ * a diagram of a power system, which is what it is for. Ten per cent either side of neutral is
+ * enough to see a valley and not enough to make anybody squint at a line crossing it.
+ */
+function shadeFor(elevation: number): number {
+  const shade = 0.9 + Math.max(0, Math.min(1, elevation)) * 0.2
+  const channel = Math.round(Math.max(0, Math.min(1, shade)) * 255)
+  return (channel << 16) | (channel << 8) | channel
 }
 
 /** A node's display name: either a place name or a localised technology plus its number. */

@@ -231,6 +231,18 @@ export interface Tileset {
   terrain: Record<Tile, Texture[]>
   /** Shoreline overlays, indexed by a 4-bit mask of which sides face water. */
   shoreline: Texture[]
+  /**
+   * Corner overlays, indexed by a 4-bit mask of which *diagonals* face water.
+   *
+   * Separate from the edge strips rather than folded into one 256-entry table, because the two
+   * are independent: a tile can have any combination of straight edges and any combination of
+   * corners, and the eight-bit product would be sixteen times the textures to say the same thing.
+   *
+   * Without these a coastline running diagonally is a staircase of square steps, and a tile whose
+   * only water neighbour is diagonal gets a mask of zero and no shoreline at all — a hard square
+   * corner sitting in the sea.
+   */
+  shoreCorner: Texture[]
   /** River overlays, indexed by a 4-bit mask of which sides the water continues toward. */
   river: Texture[]
 }
@@ -257,6 +269,12 @@ export const EDGE_E = 2
 export const EDGE_S = 4
 export const EDGE_W = 8
 
+/** The four diagonals, for the corner overlays. */
+export const CORNER_NE = 1
+export const CORNER_SE = 2
+export const CORNER_SW = 4
+export const CORNER_NW = 8
+
 /**
  * A strip of foam along whichever edges face open water.
  *
@@ -281,6 +299,62 @@ function paintShoreline(ctx: CanvasRenderingContext2D, mask: number, rng: () => 
   if (mask & EDGE_S) edge(true, false)
   if (mask & EDGE_W) edge(false, true)
   if (mask & EDGE_E) edge(false, false)
+
+  // Where two of those strips meet, the land is chamfered rather than left at ninety degrees.
+  //
+  // This is what a diagonal coastline is actually made of: not diagonal tiles, but a staircase of
+  // tiles each with water on two adjoining sides. Strips alone leave every one of those steps a
+  // hard square corner, and a run of them reads as masonry rather than as a shore. Taking a few
+  // pixels off the outside of the corner is enough for the eye to join them into a line.
+  const chamfer = (atRight: boolean, atBottom: boolean) => {
+    const depth = 4
+    for (let dy = 0; dy < depth; dy++) {
+      for (let dx = 0; dx < depth; dx++) {
+        const r = dx + dy
+        if (r >= depth) continue
+        if (r === depth - 1 && rng() < 0.5) continue
+        const x = atRight ? TILE_SOURCE_PX - 1 - dx : dx
+        const y = atBottom ? TILE_SOURCE_PX - 1 - dy : dy
+        px(ctx, x, y, r <= 1 ? PALETTE.foam : PALETTE.sand)
+      }
+    }
+  }
+  if (mask & EDGE_N && mask & EDGE_E) chamfer(true, false)
+  if (mask & EDGE_S && mask & EDGE_E) chamfer(true, true)
+  if (mask & EDGE_S && mask & EDGE_W) chamfer(false, true)
+  if (mask & EDGE_N && mask & EDGE_W) chamfer(false, false)
+}
+
+/**
+ * The rounded-off corner where the coast turns.
+ *
+ * A quarter-disc of foam and sand bitten out of the corner of the tile, drawn wherever the water
+ * lies diagonally. Bitten out rather than added: the land tile underneath is already painted, so
+ * what this contributes is the beach that softens the ninety-degree step the tile grid would
+ * otherwise leave there.
+ */
+function paintShoreCorner(ctx: CanvasRenderingContext2D, mask: number, rng: () => number): void {
+  ctx.clearRect(0, 0, TILE_SOURCE_PX, TILE_SOURCE_PX)
+  const corner = (atRight: boolean, atBottom: boolean) => {
+    // Three pixels deep, ragged, so a run of corners along a diagonal coast does not read as a
+    // row of identical stamps.
+    const depth = 3
+    for (let dy = 0; dy < depth; dy++) {
+      for (let dx = 0; dx < depth; dx++) {
+        // Inside the quarter-disc only, and the outermost ring is foam.
+        const r = dx + dy
+        if (r >= depth) continue
+        if (r === depth - 1 && rng() < 0.4) continue
+        const x = atRight ? TILE_SOURCE_PX - 1 - dx : dx
+        const y = atBottom ? TILE_SOURCE_PX - 1 - dy : dy
+        px(ctx, x, y, r === 0 ? PALETTE.foam : PALETTE.sand)
+      }
+    }
+  }
+  if (mask & CORNER_NE) corner(true, false)
+  if (mask & CORNER_SE) corner(true, true)
+  if (mask & CORNER_SW) corner(false, true)
+  if (mask & CORNER_NW) corner(false, false)
 }
 
 /** A river running through the tile, entering and leaving on whichever sides the mask says. */
@@ -328,18 +402,23 @@ export function buildTileset(seed = 1): Tileset {
   }
 
   const shoreline: Texture[] = []
+  const shoreCorner: Texture[] = []
   const river: Texture[] = []
   for (let mask = 0; mask < 16; mask++) {
     const shore = makeCanvas()
     paintShoreline(shore.ctx, mask, rng)
     shoreline.push(toTexture(shore.canvas))
 
+    const corner = makeCanvas()
+    paintShoreCorner(corner.ctx, mask, rng)
+    shoreCorner.push(toTexture(corner.canvas))
+
     const stream = makeCanvas()
     paintRiver(stream.ctx, mask, rng)
     river.push(toTexture(stream.canvas))
   }
 
-  return { terrain, shoreline, river }
+  return { terrain, shoreline, shoreCorner, river }
 }
 
 /** Pick a variant deterministically from tile coordinates, so the map does not shimmer. */
