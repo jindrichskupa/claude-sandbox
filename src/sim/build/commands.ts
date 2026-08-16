@@ -843,16 +843,22 @@ export function quoteAbandonment(world: World, plantId: string): Quote {
   const capacityMw = world.params.get(plant.id, Param.CapacityMw)
   const year = world.date.year
   const source = type.decommissionCostPerKw.sourceYear
+  const progress = buildProgress(world, plant)
   const totalCost =
     nominal(type.decommissionCostPerKw, year) *
     realDecommissioningFactor(year, source) *
     capacityMw *
     1000 *
     ABANDONMENT_COST_SHARE *
-    buildProgress(world, plant)
+    progress
+  // Scaled by progress like the cost is, and for the same reason: there is nothing to make safe
+  // on a site where nothing has been built yet. A player who misplaced a wind farm and cancelled
+  // it the same month gets the ground back within days, which is the right amount of forgiveness
+  // for a misclick; one who cancels a reactor eight years in waits years, which is the right
+  // amount for a decision.
   const buildTicks = Math.max(
     1,
-    Math.round(type.remediationYears.value * ABANDONMENT_TIME_SHARE * TICKS_PER_YEAR),
+    Math.round(type.remediationYears.value * ABANDONMENT_TIME_SHARE * progress * TICKS_PER_YEAR),
   )
 
   if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')

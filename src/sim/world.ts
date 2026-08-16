@@ -1346,6 +1346,41 @@ export class World {
     }
   }
 
+  /**
+   * Give the ground back.
+   *
+   * `Cleared` used to be a phase and nothing else: the plant stayed in the fleet and its node
+   * stayed on the map for ever, so `nodeNear` went on refusing to build within a tile and a half
+   * of a site that no longer existed. A player who misplaced a wind farm, cancelled it, and
+   * waited out the remediation still could not build beside it — not in five years, not ever. The
+   * test that was supposed to cover this asserted the phase reached `Cleared` and called that
+   * freeing the site, which is the failure mode a test name can hide.
+   *
+   * The node goes only when the site is genuinely finished with: no other unit standing on it —
+   * Prunéřov I and II share one — and no line still running to it. A node with a corridor
+   * attached is a switchyard whether or not anything generates there any more, and `removeNode`
+   * refuses it in any case.
+   *
+   * The plant leaves the fleet but not the accounts. `AssetBooks` is kept beside the world for
+   * exactly this reason: what a station cost is a fact about the run, and demolishing it does not
+   * make the money come back.
+   */
+  private releaseSites(cleared: PlantAsset[]): void {
+    for (const plant of cleared) {
+      const index = this.plants.indexOf(plant)
+      if (index >= 0) this.plants.splice(index, 1)
+      this.plantsById.delete(plant.id)
+
+      const stillThere = this.plants.some((p) => p.nodeId === plant.nodeId)
+      if (!stillThere) this.network.removeNode(plant.nodeId)
+    }
+    // The registry is keyed by source, and the layers that name individual plants — age, tech —
+    // are re-registered wholesale from the current fleet. Marking the tech layer dirty is what
+    // makes that happen this tick rather than at the next year boundary, and it is the whole of
+    // the cleanup: nothing reads a modifier whose target no longer exists.
+    this.techDirty = true
+  }
+
   private rollOutages(): void {
     const stream = this.rng.streamFor('outage')
     for (let i = 0; i < this.plants.length; i++) {
@@ -1451,6 +1486,8 @@ export class World {
   }
 
   private advanceLifecycles(): void {
+    /** Sites finished with this tick. Collected rather than removed inside the loop. */
+    const cleared: PlantAsset[] = []
     for (const plant of this.plants) {
       if (plant.phase === LifecyclePhase.Building && this.tick >= plant.phaseEndsTick) {
         plant.phase = LifecyclePhase.Operating
@@ -1512,6 +1549,7 @@ export class World {
         })
       } else if (plant.phase === LifecyclePhase.Remediating && this.tick >= plant.phaseEndsTick) {
         plant.phase = LifecyclePhase.Cleared
+        cleared.push(plant)
         this.postNews({
           category: 'fleet',
           importance: NewsImportance.Routine,
@@ -1522,6 +1560,7 @@ export class World {
         })
       }
     }
+    if (cleared.length > 0) this.releaseSites(cleared)
 
     // A finished line joins the grid. Until then it exists on the map but carries nothing,
     // which is what makes the construction time mean something.

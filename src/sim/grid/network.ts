@@ -202,6 +202,24 @@ export class Network {
     this._topologyEpoch++
   }
 
+  /**
+   * Take a site off the map entirely.
+   *
+   * Only for a node nothing is connected to, and that restriction is the whole safety of it:
+   * `addEdge` refuses an edge whose ends do not exist, so a node removed out from under a line
+   * would leave a graph the rest of the code is entitled to assume cannot happen. Refuses
+   * silently rather than throwing, because the caller's question is "is this site finished with",
+   * and "no, there is still a line to it" is an answer rather than an error.
+   */
+  removeNode(id: NodeId): boolean {
+    if (!this.nodes.has(id)) return false
+    if ((this.adjacency.get(id) ?? []).length > 0) return false
+    this.nodes.delete(id)
+    this.adjacency.delete(id)
+    this._topologyEpoch++
+    return true
+  }
+
   /** Energising or de-energising a line changes connectivity, so it counts as topology. */
   setEnergised(id: EdgeId, energised: boolean): void {
     const e = this.edges.get(id)

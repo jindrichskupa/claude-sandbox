@@ -28,11 +28,17 @@ import { corporateDebt } from '@sim/economy/economy'
 import type { PlantTypeId } from '@content/plantTypes'
 import type { World } from '@sim/world'
 
-/** The first square this technology may stand on. */
-function findSite(world: World, typeId: PlantTypeId): { x: number; y: number } {
+/**
+ * The first square this technology may stand on.
+ *
+ * `financed` matters and defaults to off: a project facility has a minimum size, so asking for a
+ * financed quote on a 50 MW wind farm refuses every square on the map for a reason that has
+ * nothing to do with the ground.
+ */
+function findSite(world: World, typeId: PlantTypeId, financed = false): { x: number; y: number } {
   for (let y = 0; y < world.terrain.height; y++) {
     for (let x = 0; x < world.terrain.width; x++) {
-      if (quotePlant(world, typeId, x, y, true).ok) return { x, y }
+      if (quotePlant(world, typeId, x, y, financed).ok) return { x, y }
     }
   }
   throw new Error(`nowhere to put a ${typeId}`)
@@ -147,7 +153,7 @@ describe('walking away from an unfinished project', () => {
 
     // Wherever the map will take one. The site is not the point of this test and pinning a
     // coordinate would make it break for a reason it is not about.
-    const site = findSite(world, 'nuclear')
+    const site = findSite(world, 'nuclear', true)
     const built = beginPlantConstruction(world, 'nuclear', site.x, site.y, true)
     expect(built.ok).toBe(true)
     const plantId = built.plantId!
@@ -169,6 +175,54 @@ describe('walking away from an unfinished project', () => {
     // And the balance is on the company's books, where it was not a moment ago.
     expect(corporateDebt(world.finances)).toBeGreaterThan(corporateBefore)
     expect(corporateDebt(world.finances) - corporateBefore).toBeCloseTo(loan.outstanding, -3)
+  })
+
+  it('gives the ground back, so a misplaced farm can be replaced', () => {
+    // The whole point of being able to cancel, and the case that found it broken. A player put a
+    // wind farm in the wrong place, cancelled it the same month, and could never build there
+    // again: the phase reached `Cleared` and stopped, while the plant stayed in the fleet and its
+    // node stayed on the map, so `nodeNear` went on refusing anything within a tile and a half.
+    // Not for a year, not for five — for ever.
+    const world = buildWorld(CZECHIA_1995)
+    world.finances.cash = 2_000_000_000
+
+    const site = findSite(world, 'wind')
+    const built = beginPlantConstruction(world, 'wind', site.x, site.y)
+    expect(built.ok).toBe(true)
+    world.step()
+
+    // Cancelled before anything is built, so there is nothing to make safe and nothing to wait
+    // for. That is the right amount of forgiveness for a misclick; a reactor eight years in is a
+    // different question and gets a different answer.
+    const quote = quoteAbandonment(world, built.plantId!)
+    expect(quote.totalCost).toBeLessThan(1000)
+    expect(abandonProject(world, built.plantId!).ok).toBe(true)
+
+    const nodeId = world.getPlant(built.plantId!)!.nodeId
+    for (let i = 0; i < 200; i++) world.step()
+
+    expect(world.plants.some((p) => p.id === built.plantId)).toBe(false)
+    expect(world.network.getNode(nodeId)).toBeUndefined()
+    expect(world.nodeNear(site.x, site.y, 1.5)).toBeNull()
+    // And the ground takes a farm again.
+    expect(quotePlant(world, 'wind', site.x, site.y).ok).toBe(true)
+  })
+
+  it('keeps a site that still has a line running to it', () => {
+    // The other half of the rule. Prunéřov is two units on one node with a 400 kV corridor to
+    // Řeporyje; clearing one of them must not take the switchyard, the line, or its twin with it.
+    const world = buildWorld(CZECHIA_1995)
+    const twin = world.getPlant('p_prunerov1')!
+    twin.phase = LifecyclePhase.Remediating
+    twin.phaseEndsTick = world.tick + 1
+
+    world.step()
+    world.step()
+
+    expect(world.plants.some((p) => p.id === 'p_prunerov1')).toBe(false)
+    expect(world.plants.some((p) => p.id === 'p_prunerov2')).toBe(true)
+    expect(world.network.getNode('n_prunerov')).toBeDefined()
+    expect(world.network.getEdge('l_prunerov_reporyje')).toBeDefined()
   })
 
   it('survives a save, so a cancelled project does not come back', () => {

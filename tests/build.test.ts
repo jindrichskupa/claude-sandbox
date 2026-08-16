@@ -229,9 +229,23 @@ describe('retirement', () => {
     expect(plant.phase).toBe(LifecyclePhase.Remediating)
 
     const type = PLANT_TYPES[plant.typeId]
+    const nodeId = plant.nodeId
     const remediationTicks = Math.round(type.remediationYears.value * TICKS_PER_YEAR)
     for (let i = 0; i < remediationTicks; i++) world.step()
     expect(plant.phase).toBe(LifecyclePhase.Cleared)
+
+    // And the station actually leaves, which is what this test is named after and what it did not
+    // check for a long time: it asserted the phase reached `Cleared` and stopped there, while the
+    // plant stayed in the fleet for ever.
+    expect(world.plants.some((p) => p.id === 'p_oldharbour')).toBe(false)
+    // The site does not, and that is the rule rather than an oversight: a corridor still runs to
+    // Old Harbour, so the ground holds a switchyard whether or not anything generates on it. The
+    // player gets it back by demolishing the line. `tests/inheritedProjects.test.ts` covers the
+    // other half — a site with nothing attached, which is the one a misplaced wind farm leaves.
+    expect(world.network.getNode(nodeId)).toBeDefined()
+    expect(world.network.edgesOf(nodeId).length).toBeGreaterThan(0)
+    // The money it cost is still a fact about the run. Demolishing a station does not refund it.
+    expect(world.books.for('p_oldharbour').lifetime.capital).not.toBe(0)
   })
 
   it('refuses to retire something already being dismantled', () => {
