@@ -40,6 +40,7 @@ export function toScenarioDef(content: ScenarioContent): ScenarioDef {
     endYear: content.endYear,
     feedInTariffs: content.feedInTariffs ?? {},
     ...(content.terrainRows ? { terrainRows: content.terrainRows } : {}),
+    ...(content.timeline ? { timeline: content.timeline } : {}),
   }
 }
 

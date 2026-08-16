@@ -8,6 +8,7 @@
  */
 
 import { ECONOMICS } from '@content/economics'
+import type { TimelineEntry } from '@content/scenarios/types'
 import { FUELS, type FuelId } from '@content/fuels'
 import { LINE_TYPES } from '@content/lineTypes'
 import { heatCapacityOf, mixBand, PLANT_TYPES } from '@content/plantTypes'
@@ -242,6 +243,8 @@ export interface ScenarioDef {
    * to drift apart.
    */
   terrainRows?: string[]
+  /** Dated history, if this scenario has any. See `TimelineEntry`. */
+  timeline?: TimelineEntry[]
 }
 
 const HISTORY_LENGTH = TICKS_PER_YEAR
@@ -818,6 +821,9 @@ export class World {
     this.rollOutages()
     this.rollLineFaults()
 
+    // 3a. History. What happened anyway, on the date it happened.
+    this.runTimeline(date.year)
+
     // 3b. Events. Raised, landed and retired here, before anything reads a parameter, so an
     //     event that lands this hour is felt this hour rather than next.
     const pendingBefore = new Set(this.director.state.pending.map((p) => p.uid))
@@ -1302,6 +1308,42 @@ export class World {
       ceilings.set(plant.id, { structural, now: range.ceiling })
     }
     return ceilings
+  }
+
+  /**
+   * Fire the scenario's dated history for a year, once, on its first hour.
+   *
+   * Whether an entry has already fired is not stored anywhere. It does not need to be: the first
+   * hour of a year is a property of the tick, so a save reloaded in June simply does not match and
+   * nothing re-fires, and a replay from tick zero fires everything exactly once in the same order.
+   * A `fired` set on the world would have been a second copy of a fact the clock already holds,
+   * and the kind that goes stale in a save file.
+   */
+  private runTimeline(year: number): void {
+    const timeline = this.scenario.timeline
+    if (!timeline || this.tick % TICKS_PER_YEAR !== 0) return
+
+    for (const entry of timeline) {
+      if (entry.year !== year) continue
+
+      if (entry.regimeId) {
+        // The same path an election takes, which is the point: a government installed by history
+        // revokes contracts, resets the carbon phase-in and serves a term exactly as an elected
+        // one does. It is only the reason it took office that differs.
+        if (this.state.policyRegimeId === entry.regimeId) continue
+        this.installGovernment(entry.regimeId, { titleKey: entry.headlineKey })
+        continue
+      }
+
+      if (entry.eventId && this.director.raiseScheduled(entry.eventId, this.tick)) {
+        this.postNews({
+          category: 'politics',
+          importance: NewsImportance.Notable,
+          titleKey: entry.headlineKey,
+          params: {},
+        })
+      }
+    }
   }
 
   private rollOutages(): void {
@@ -2172,18 +2214,44 @@ export class World {
     this.state.polls = result.shares
 
     const previousId = this.state.policyRegimeId
+    const revoked = this.installGovernment(result.winnerId, {
+      titleKey: previousId === result.winnerId ? 'news.governmentReturned' : 'news.governmentChanged',
+      params: { share: Math.round((result.shares[result.winnerId] ?? 0) * 100) },
+    })
+    this.lastElection = { year, fromId: previousId, toId: result.winnerId, contractsRevoked: revoked }
+  }
+
+  /**
+   * A government takes office.
+   *
+   * One path, whether the country voted for it or history installed it. Splitting the two was the
+   * first version and it was wrong in a way that hid: a government installed by the timeline
+   * skipped the contract revocation, the carbon phase-in base and the election clock — so the 2011
+   * levy, whose entire historical content is that it tore up contracts already signed, tore up
+   * nothing, and the next election overrode the whole timeline within a year.
+   *
+   * Resetting the election clock is the part that makes a scheduled government mean anything: it
+   * serves a term like any other, and only then does the player's record get to throw it out.
+   * That is also what happens in life.
+   *
+   * Returns how many support contracts it revoked, which the caller reports.
+   */
+  private installGovernment(
+    regimeId: string,
+    news: { titleKey: string; params?: Record<string, string | number> },
+  ): number {
     // Captured before the new government's modifiers are registered, because the phase-in starts
     // from what the outgoing one left behind, not from the scenario's opening price.
     this.state.carbonPriceAtTakeover = this.carbonPriceInForce()
     this.state.regimeTookOfficeTick = this.tick
-    this.state.policyRegimeId = result.winnerId
+    this.state.policyRegimeId = regimeId
     this.state.nextElectionTick = this.tick + Math.round(ELECTION_TERM_YEARS.value * TICKS_PER_YEAR)
     this.termPriceSum = 0
     this.termPriceTicks = 0
     this.termGenerationByFuel = new Map()
 
     let revoked = 0
-    const incoming = REGIMES_BY_ID.get(result.winnerId)
+    const incoming = REGIMES_BY_ID.get(regimeId)
     if (incoming && !incoming.levers.honoursContracts) {
       // The moment that makes support policy worth simulating. Everything promised by every
       // previous government stops, and the country pays for it in the cost of capital.
@@ -2203,23 +2271,20 @@ export class World {
     }
 
     this.applyRegime()
-    this.lastElection = { year, fromId: previousId, toId: result.winnerId, contractsRevoked: revoked }
 
-    // Two separate pieces of news, because they are two separate facts and the second one is
-    // worse. A government changing is politics; a government tearing up the contracts its
-    // predecessor signed is the thing that makes every future investment more expensive.
+    // Three separate pieces of news, because they are three separate facts and each one lands on
+    // a different decision. A government changing is politics; where it is taking the price of
+    // carbon is what a fleet has to plan against; and a government tearing up the contracts its
+    // predecessor signed is what makes every future investment more expensive.
     this.postNews({
       category: 'politics',
       importance: NewsImportance.Major,
-      titleKey: previousId === result.winnerId ? 'news.governmentReturned' : 'news.governmentChanged',
+      titleKey: news.titleKey,
       params: {
-        government: REGIMES_BY_ID.get(result.winnerId)?.nameKey ?? result.winnerId,
-        share: Math.round((result.shares[result.winnerId] ?? 0) * 100),
+        government: REGIMES_BY_ID.get(regimeId)?.nameKey ?? regimeId,
+        ...(news.params ?? {}),
       },
     })
-    // Where this government is taking the price of carbon, and by when. The single most
-    // consequential thing an incoming government does to a fleet, and the player has to hear it
-    // as an intention with a date rather than discover it as a bill.
     const incomingTarget = incoming?.levers.carbonPricePerTonne.value ?? this.scenario.carbonPricePerTonne
     if (Math.abs(incomingTarget - this.state.carbonPriceAtTakeover) > 1) {
       this.postNews({
@@ -2241,6 +2306,7 @@ export class World {
         params: { count: revoked },
       })
     }
+    return revoked
   }
 
   /**

@@ -604,5 +604,15 @@
   "ui.abandonCost": "Stop the work: {cost} to make the site safe, {years} yr to hand it back. Everything already spent is gone, and any project facility becomes ordinary debt.",
   "build.abandoning": "Work stopped. The site will be made safe and handed back.",
   "build.notAbandonable": "Only a project still being built can be abandoned",
-  "news.projectAbandoned": "{plant} abandoned: {mw} MW that will never be built"
+  "news.projectAbandoned": "{plant} abandoned: {mw} MW that will never be built",
+  "history.cz.euAccession": "Accession to the European Union: the market opens and the state-aid rules arrive with it",
+  "history.cz.feedInTariffs": "A guaranteed price for renewables, for fifteen years, cut by no more than 5% a year",
+  "history.cz.financialCrisis": "Credit dries up: the price of money doubles and demand stops growing",
+  "history.cz.solarLevy": "The government levies the solar plants it paid for, retroactively",
+  "history.cz.drought": "The driest summer on record: rivers low, and cooling water with them",
+  "history.cz.etsReform": "Carbon has a price again, and this time a date attached",
+  "history.cz.gasPriceClimb": "Gas climbs all year and nobody can say where it stops",
+  "history.cz.invasion": "War, and the pipelines from the east close",
+  "history.cz.securityTurn": "Security first: a windfall levy, a price cap, and coal back out of reserve",
+  "history.cz.coalDeadline": "The coal deadline moves forward, and a reactor goes to tender"
 }

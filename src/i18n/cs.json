@@ -604,5 +604,15 @@
   "ui.abandonCost": "Zastavit práce: {cost} na zabezpečení staveniště, {years} let na jeho vrácení. Vše dosud vynaložené je pryč a projektové financování se mění na běžný dluh.",
   "build.abandoning": "Práce zastaveny. Staveniště se zabezpečí a vrátí.",
   "build.notAbandonable": "Opustit lze jen rozestavěný projekt",
-  "news.projectAbandoned": "{plant} opuštěn: {mw} MW, které nikdy nevzniknou"
+  "news.projectAbandoned": "{plant} opuštěn: {mw} MW, které nikdy nevzniknou",
+  "history.cz.euAccession": "Vstup do Evropské unie: trh se otevírá a s ním přicházejí pravidla veřejné podpory",
+  "history.cz.feedInTariffs": "Garantovaná výkupní cena pro obnovitelné zdroje na patnáct let, snižovat ji lze nejvýš o 5 % ročně",
+  "history.cz.financialCrisis": "Úvěry vysychají: cena peněz se zdvojnásobila a poptávka přestala růst",
+  "history.cz.solarLevy": "Stát zpětně zdanil solární elektrárny, které sám zaplatil",
+  "history.cz.drought": "Nejsušší léto v záznamech: nízké řeky a s nimi i chladicí voda",
+  "history.cz.etsReform": "Uhlík má zase cenu, a tentokrát k ní i datum",
+  "history.cz.gasPriceClimb": "Plyn stoupá celý rok a nikdo neumí říct, kde se zastaví",
+  "history.cz.invasion": "Válka, a plynovody z východu se zavírají",
+  "history.cz.securityTurn": "Bezpečnost především: mimořádná daň, cenový strop a uhlí zpátky z rezervy",
+  "history.cz.coalDeadline": "Konec uhlí se posouvá dopředu a jaderný blok jde do tendru"
 }

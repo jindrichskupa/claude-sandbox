@@ -545,4 +545,118 @@ export const CZECHIA_1995: ScenarioContent = {
   ],
 
   feedInTariffs: {},
+
+  /**
+   * What happened anyway, between 1995 and 2025.
+   *
+   * The rest of this game's politics is emergent: elections read the price, the blackouts, the
+   * emissions and the import exposure, and the player's own record decides who governs. That
+   * stays true here — every one of these governments faces the next election normally and can be
+   * thrown out. What the timeline adds is the half of Czech energy policy that was decided in
+   * Brussels, Berlin and Moscow, and that no amount of running a good system would have avoided.
+   *
+   * **On neutrality.** This is a record, not an argument, and the test of that is that it hurts in
+   * both directions. A support scheme arrives and is torn up retroactively. A carbon price arrives,
+   * collapses, and arrives again. A decarbonisation government is followed by a security
+   * government that brings coal back and taxes the windfall. Every entry names something that
+   * happened and says where the claim comes from. Nothing here is scheduled because it would make
+   * the scenario harder; several entries make it easier, and one of them — the feed-in tariff era —
+   * is the single most profitable thing that happens to the player in thirty years, right up until
+   * the government takes it back.
+   *
+   * **On granularity.** The regime table has six positions and history has more than six moods, so
+   * each entry picks the government whose stated priorities match the period rather than
+   * reproducing a coalition. Where the fit is imperfect it is noted on the entry.
+   */
+  timeline: [
+    {
+      year: 2004,
+      regimeId: 'market_liberal',
+      headlineKey: 'history.cz.euAccession',
+      source: 'Accession to the European Union, 1 May 2004; Energy Act 458/2000 and the opening of the market',
+    },
+    {
+      // The feed-in tariff era, and the reason it went the way it did. Act 180/2005 guaranteed a
+      // price for fifteen years and capped how fast the regulator could cut it — five per cent a
+      // year — while the cost of a solar panel fell by roughly forty per cent a year. About
+      // 1,650 MW went in over 2009 and 2010, most of it in the last months before the cap moved.
+      //
+      // Nothing here schedules that boom. `market_liberal` is the government that offers the
+      // tariff; the roofs and the farms arrive because the offer is worth taking, which is the
+      // model working rather than the author making a point.
+      year: 2006,
+      regimeId: 'market_liberal',
+      headlineKey: 'history.cz.feedInTariffs',
+      source: 'Act 180/2005 Coll. on the promotion of electricity from renewable sources',
+    },
+    {
+      // The financial crisis. Not a policy at all — the price of money.
+      year: 2008,
+      eventId: 'interest_shock',
+      headlineKey: 'history.cz.financialCrisis',
+      source: 'Global financial crisis, 2008; European credit conditions 2008-09',
+    },
+    {
+      // And the government tears its own promise up. A 26% levy on solar plant commissioned in
+      // 2009 and 2010, applied to contracts already signed, sold as protecting household bills.
+      // `affordability` is the position that does this: it does not honour its predecessors'
+      // contracts and it levies a windfall, both of which are exactly what happened.
+      //
+      // This is the entry to point at if anyone claims the timeline has a side. The support was
+      // real, the boom was real, the bill to households was real, and so was the retroactive cut —
+      // and the cut is the reason capital was expensive in Czech energy for a decade afterwards.
+      year: 2011,
+      regimeId: 'affordability',
+      headlineKey: 'history.cz.solarLevy',
+      source: 'Act 402/2010 Coll.; the 26% levy on 2009-2010 photovoltaic plant, in force from 2011',
+    },
+    {
+      // The 2015 drought, which took river flows and cooling water together — the Czech summer
+      // that made "enough water to run the coal fleet" a sentence people said out loud.
+      year: 2015,
+      eventId: 'drought',
+      headlineKey: 'history.cz.drought',
+      source: 'Czech drought of 2015; Vltava and Elbe flows at record lows',
+    },
+    {
+      // The carbon price comes back. The market stability reserve took the allowance from about
+      // five euros to twenty-five in two years, and the Green Deal put a date on the rest of it.
+      // `clean_firm` rather than `renewables_push` because that is the Czech reading of it:
+      // decarbonise with the reactor, keep the district heating, and argue about the rest.
+      year: 2019,
+      regimeId: 'clean_firm',
+      headlineKey: 'history.cz.etsReform',
+      source: 'EU ETS Market Stability Reserve from 2019; European Green Deal, December 2019',
+    },
+    {
+      year: 2021,
+      eventId: 'fuel_price_spike',
+      headlineKey: 'history.cz.gasPriceClimb',
+      source: 'European gas price rise through 2021; TTF from 20 to over 100 EUR/MWh',
+    },
+    {
+      // The invasion, and everything that followed it in one year: the gas cut, the price cap,
+      // the windfall levy, and lignite units pulled back out of reserve. `energy_security` is
+      // that government exactly — it does not honour contracts, it levies ninety per cent of a
+      // windfall, and it pays for coal.
+      year: 2022,
+      eventId: 'gas_supply_interruption',
+      headlineKey: 'history.cz.invasion',
+      source: 'Russian invasion of Ukraine, February 2022; Nord Stream flows to zero, September 2022',
+    },
+    {
+      year: 2022,
+      regimeId: 'energy_security',
+      headlineKey: 'history.cz.securityTurn',
+      source: 'Czech windfall levy (60%, from 2023) and the EU emergency price cap, Council Regulation 2022/1854',
+    },
+    {
+      // And back again, because that is what the record shows: the coal deadline moved forward
+      // from 2038 to 2033 and the reactor tender went ahead in the same years as the windfall tax.
+      year: 2024,
+      regimeId: 'clean_firm',
+      headlineKey: 'history.cz.coalDeadline',
+      source: 'Czech coal phase-out target brought forward to 2033; Dukovany unit 5 tender, 2024',
+    },
+  ],
 }

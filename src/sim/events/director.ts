@@ -307,6 +307,38 @@ export class EventDirector {
     return { spent, landed }
   }
 
+  /**
+   * Raise an event because of the date rather than because of a dice roll.
+   *
+   * Everything after the raising is identical: the same forewarning, the same choices, the same
+   * modifiers through the same registry with the same origin the interface can explain. Only the
+   * reason it was raised differs, and that is the point — history is not a special kind of shock,
+   * it is an ordinary shock with a known date.
+   *
+   * Deliberately outside the severity budget and the cooldown. Those exist so a run of bad luck
+   * cannot pile up faster than a player can respond, and they are right for sampled events. A
+   * scheduled one is not luck: it is in the briefing from the first minute of the scenario, which
+   * is a better warning than the director can give about anything it rolls. Letting a busy year
+   * postpone the invasion of Ukraine would also be, on reflection, quite strange.
+   *
+   * Returns whether it raised anything, so the caller can file the headline.
+   */
+  raiseScheduled(defId: string, tick: number): boolean {
+    const def = EVENTS_BY_ID.get(defId)
+    if (!def) return false
+    if (this.state.pending.some((p) => p.defId === defId)) return false
+    if (this.state.active.some((a) => a.defId === defId)) return false
+
+    this.state.pending.push({
+      uid: `h${this.state.nextUid++}`,
+      defId,
+      raisedTick: tick,
+      landsTick: tick + def.forewarningHours.value,
+      choiceId: null,
+    })
+    return true
+  }
+
   /** Events whose warning period has run out. */
   private land(context: DirectorContext): ActiveEvent[] {
     const landed: ActiveEvent[] = []

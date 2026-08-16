@@ -91,6 +91,54 @@ export interface InProgressSpec {
   costRemainingShare: number
 }
 
+/**
+ * Something that happened on a date, whatever the player was doing.
+ *
+ * The politics in this game is emergent: elections read the price, the blackouts, the emissions
+ * and the import exposure, and the player's own record decides who governs. That is the right
+ * default and it stays the default. What it cannot express is history — the things that happened
+ * *to* a Czech utility between 1995 and 2025 because of decisions taken in Brussels, Berlin and
+ * Moscow, which no amount of running a good system would have avoided.
+ *
+ * A timeline entry is one of those. It is not a difficulty knob and must not be used as one:
+ * every entry names a real event, carries a source like every other number in `content/`, and
+ * the set as a whole has to point in both directions or it is an argument rather than a record.
+ *
+ * Fairness is handled the way it is for any other event. A scheduled `EventDef` keeps its
+ * choices, so there is always something the player can do; and unlike a sampled event it is
+ * *known in advance*, because the briefing can list the timeline. Being told in 1995 that a
+ * carbon price arrives in 2005 is the fairest warning this game gives about anything.
+ */
+export type TimelineEntry = {
+  /** The year it lands, at the start of it. */
+  year: number
+  /** What it was, one line, for the briefing and the news feed. */
+  headlineKey: string
+  /** Where the claim comes from. Same discipline as `Sourced`. */
+  source: string
+} & (
+  | {
+      /**
+       * An event from the catalogue, fired on a date instead of sampled by risk.
+       *
+       * Historical events are ordinary `EventDef`s with a base rate of zero, so the sampler never
+       * raises them and the fairness test still covers them. One registry, one set of rules.
+       */
+      eventId: string
+      regimeId?: never
+    }
+  | {
+      /**
+       * A government takes office.
+       *
+       * A one-off installation, not a lock: the next election runs normally and can throw it out
+       * again. The timeline sets the field, the player's record still decides the match.
+       */
+      regimeId: string
+      eventId?: never
+    }
+)
+
 export interface LineSpec {
   id: string
   from: string
@@ -166,4 +214,12 @@ export interface ScenarioContent {
    * one. See `terrainFromRows`.
    */
   terrainRows?: string[]
+  /**
+   * Dated history: what happened anyway, whatever the player did.
+   *
+   * Optional, and both invented scenarios leave it out on purpose — an invented region has no
+   * history to be faithful to, and giving it one would be authoring difficulty and calling it a
+   * record. See `TimelineEntry`.
+   */
+  timeline?: TimelineEntry[]
 }
