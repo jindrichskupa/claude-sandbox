@@ -2386,6 +2386,30 @@ export class World {
     }
   }
 
+  /**
+   * The year so far, as the three numbers a brief is actually judged on.
+   *
+   * Year to date rather than this hour, because both of these are shares and an hourly share is
+   * unreadable: unserved energy is zero almost always and then briefly enormous, and carbon
+   * intensity swings with whatever happened to be on the margin at three in the morning. The
+   * figures the objectives are judged on are annual, so the headline shows the same thing
+   * accumulating rather than a different thing that happens to share a name.
+   */
+  yearToDate(): { carbonIntensity: number; unservedShare: number; soldMwh: number } {
+    // The month that has not closed yet counts too. `yearLedger` only takes a month when the
+    // month settles, so reading it alone leaves both figures blank through every January and
+    // then jumping — the headline would go dark once a year for six minutes of real time, which
+    // is exactly when a player who just watched a December blackout wants to look at it.
+    const sold = this.yearLedger.energySoldMwh + this.openLedger.energySoldMwh
+    const unserved = this.yearLedger.energyUnservedMwh + this.openLedger.energyUnservedMwh
+    const co2 = this.yearLedger.co2Tonnes + this.openLedger.co2Tonnes
+    return {
+      carbonIntensity: sold > 0 ? co2 / sold : 0,
+      unservedShare: sold + unserved > 0 ? unserved / (sold + unserved) : 0,
+      soldMwh: sold,
+    }
+  }
+
   private closeYear(): void {
     // Public opinion follows outcomes the utility produced — reliability and emissions —
     // never the identity of the technologies that produced them.

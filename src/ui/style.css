@@ -74,13 +74,40 @@ body {
   right: 12px;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 10px 16px;
+  /* Tightened from 18px when the bar gained a carbon figure and a reliability figure. Eleven
+     stats at eighteen pixels is two hundred pixels of nothing, which at 1280 was the difference
+     between fitting and not. */
+  gap: 13px;
+  padding: 10px 14px;
   /* Deliberately no wrapping. A second row of stats pushes the clock and the speed controls
-   * down onto the Build and Politics toggles, which sit just below it — so the bar shrinks its
-   * widest entries instead. */
+   * down onto the Build and Politics toggles, which sit just below it — so the bar drops its
+   * least important entries instead. */
   flex-wrap: nowrap;
   overflow: hidden;
+}
+
+/* The stats, and the only part of the bar allowed to run out of room. `min-width: 0` is what
+ * makes that true: without it a flex item refuses to shrink below its content, so eleven stats
+ * pushed the speed controls off the screen instead of being clipped themselves. */
+.stat-box {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Dropped when the window cannot hold everything. Both are context rather than verdict: what the
+ * weather is doing, and how much came out against how much was asked for. The figures the player
+ * is judged on stay. */
+@media (max-width: 1500px) {
+  /* Scoped to the bar so it outranks `.stat { display: flex }` regardless of source order. The
+     first attempt used a bare `.stat-optional`, which is the same specificity as `.stat` and
+     appears earlier in this file — so it lost, silently, and the rule did nothing at all. */
+  #topbar .stat-optional {
+    display: none;
+  }
 }
 
 .stat {

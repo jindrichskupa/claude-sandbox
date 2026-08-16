@@ -114,6 +114,20 @@ function stat(label: string, wide = false): { root: HTMLDivElement; value: HTMLD
   return { root, value }
 }
 
+/**
+ * The reliability the scenario asked for, if it asked for any.
+ *
+ * Read from the brief rather than fixed here, so the headline turns red at the threshold the
+ * player is actually being judged against — which differs between scenarios and is the only
+ * number that means anything to them.
+ */
+function unservedLimitOf(world: World): number | null {
+  for (const objective of world.scenario.objectives) {
+    if (objective.condition.kind === 'unservedShareBelow') return objective.condition.threshold
+  }
+  return null
+}
+
 export class Hud {
   private readonly stats: Record<string, HTMLDivElement> = {}
   private readonly clock: HTMLDivElement
@@ -145,11 +159,18 @@ export class Hud {
     const topbar = el('div', 'panel')
     topbar.id = 'topbar'
 
+    // The stats live in a box of their own that is allowed to run out of room. Everything after
+    // it — the clock and the speed controls — must not, and before this they did: eleven stats at
+    // 1280 pushed 3x, 10x and 50x off the right-hand edge, where `overflow: hidden` quietly ate
+    // them. A player on a small screen could not change speed at all, and nothing said so.
+    const statBox = el('div', 'stat-box')
     for (const [key, label] of [
-      ['cash', 'ui.cash'],
+      ['cash', 'ui.cashAndDebt'],
       ['demand', 'ui.demand'],
       ['generation', 'ui.generation'],
       ['price', 'ui.price'],
+      ['unserved', 'ui.unservedYtd'],
+      ['carbon', 'ui.carbonIntensity'],
       ['heat', 'ui.heat'],
       ['temperature', 'ui.temperature'],
       ['monthProfit', 'ui.monthProfit'],
@@ -158,11 +179,14 @@ export class Hud {
       // The government's name and the heat figure are words, not numbers, and need more room
       // than a stat of the same width would give them.
       const s = stat(t(label), key === 'government' || key === 'heat')
+      // Which stats a narrow window drops, worst first. Reliability, money and the government
+      // are never dropped: they are what the player is judged on and who is doing the judging.
+      if (key === 'temperature' || key === 'generation') s.root.classList.add('stat-optional')
       this.stats[key] = s.value
-      topbar.appendChild(s.root)
+      statBox.appendChild(s.root)
     }
+    topbar.appendChild(statBox)
 
-    topbar.appendChild(el('div', 'spacer'))
     this.clock = el('div')
     this.clock.id = 'clock'
     topbar.appendChild(this.clock)
@@ -523,7 +547,10 @@ export class Hud {
     // would otherwise stand still for six minutes of real time at normal speed while everything
     // it measures moved every hour. Red is still judged on the settled balance, because that is
     // what actually decides whether the utility can pay.
-    this.stats.cash!.textContent = formatMoney(world.liveCash)
+    // One stat for both halves of the balance sheet. They are read together — cash against what
+    // is owed is the question, and either alone answers it wrongly — and the bar does not wrap,
+    // so a slot spent on debt is a slot taken from something else. See the note on `#topbar`.
+    this.stats.cash!.textContent = `${formatMoney(world.liveCash)} / ${formatMoney(world.finances.debt)}`
     this.stats.cash!.className = `stat-value ${world.finances.cash < 0 ? 'bad' : ''}`
 
     if (snap && dispatch) {
@@ -560,6 +587,22 @@ export class Hud {
     const profit = world.lastMonthProfit()
     this.stats.monthProfit!.textContent = formatMoney(profit)
     this.stats.monthProfit!.className = `stat-value ${profit >= 0 ? 'good' : 'bad'}`
+
+    // Year to date, both of them, because that is the window the objectives judge and an hourly
+    // share of either is noise. See `World.yearToDate`.
+    const ytd = world.yearToDate()
+    this.stats.unserved!.textContent = ytd.soldMwh > 0 ? `${(ytd.unservedShare * 100).toFixed(2)}%` : '—'
+    // Coloured against the scenario's own reliability brief rather than against a number chosen
+    // here, so the headline turns red when the player is failing the thing they were asked to do.
+    const limit = unservedLimitOf(world)
+    this.stats.unserved!.className =
+      `stat-value ${limit !== null && ytd.unservedShare > limit ? 'bad' : limit !== null && ytd.unservedShare > limit * 0.5 ? 'warn' : ''}`
+
+    // Deliberately not coloured. Every other figure on this bar is judged against something —
+    // solvency, the reliability brief, the price cap — and carbon is judged only where a scenario
+    // asks for it. Painting it red everywhere would be this project's one forbidden thing: a
+    // thumb on the scale wearing the costume of a warning light.
+    this.stats.carbon!.textContent = ytd.soldMwh > 0 ? `${ytd.carbonIntensity.toFixed(3)} t/MWh` : '—'
 
     const regime = REGIMES_BY_ID.get(world.state.policyRegimeId)
     this.stats.government!.textContent = regime ? t(regime.nameKey) : '—'

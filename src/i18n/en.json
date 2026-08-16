@@ -615,5 +615,8 @@
   "history.cz.invasion": "War, and the pipelines from the east close",
   "history.cz.securityTurn": "Security first: a windfall levy, a price cap, and coal back out of reserve",
   "history.cz.coalDeadline": "The coal deadline moves forward, and a reactor goes to tender",
-  "brief.history": "{year} — {headline}"
+  "brief.history": "{year} — {headline}",
+  "ui.unservedYtd": "Unserved, year",
+  "ui.carbonIntensity": "Carbon",
+  "ui.cashAndDebt": "Cash / debt"
 }
