@@ -60,7 +60,15 @@ describe('the opening scenario, played', () => {
     //
     // What is asserted is only that when it does choose, it chooses on cost rather than on a
     // technology named here.
-    expect(result.built.every((line) => line.includes('/MWh'))).toBe(true)
+    //
+    // Checked against the *number* rather than the unit it is printed in. The first version
+    // matched the string "/MWh", which meant it was really asserting a log format: when the
+    // harness stopped ranking on cost per megawatt-hour and started ranking on cost per firm
+    // kilowatt-year — the same claim, correctly measured — this test failed while nothing it
+    // describes had changed.
+    for (const line of result.built) {
+      expect(line).toMatch(/ at -?\d+\//)
+    }
 
     // A long run of building, retiring and dispatching without the model falling over: the
     // solver never gives up, the clock always advances, and the run ends in a decided state.

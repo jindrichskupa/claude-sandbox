@@ -99,7 +99,7 @@ export interface PlayResult {
  * and a real investor still gets it wrong; what matters here is that it uses no number the game
  * does not use and expresses no preference the content does not justify.
  */
-function levelisedCost(
+export function levelisedCost(
   world: World,
   typeId: PlantTypeId,
   capacityFactor: number,
@@ -143,6 +143,167 @@ function levelisedCost(
   return (
     (capitalPerMwYear + fixedPerMwYear) / mwhPerMwYear + type.varOpexPerMwh.value + fuelPerMwh + carbonPerMwh
   )
+}
+
+/**
+ * What a megawatt of firm capacity costs for a year, at the duty this plant would actually get.
+ *
+ * The harness used to rank candidates on cost per megawatt-hour, and that was a category error
+ * hiding in plain sight for four scenarios' worth of measurements. The decision being taken is
+ * always the same one — the fleet is short of capacity against the peak, buy some — and cost per
+ * megawatt-hour answers a different question. A peaking turbine is *by definition* the most
+ * expensive energy and the cheapest availability on the board; measured on the Czech grid it came
+ * last on euros per megawatt-hour in every year sampled and first on euros per firm kilowatt in
+ * every year sampled. No number in `content/` could have made it choosable. It was the ruler.
+ *
+ * This is the screening curve every capacity plan in the industry is built on: annual fixed cost
+ * of a firm megawatt, plus what it burns over the hours it will run. Which hours depends on where
+ * it lands in the merit order, so that is measured against the fleet rather than assumed.
+ */
+export function screeningCostPerFirmKwYear(
+  world: World,
+  typeId: PlantTypeId,
+  capacityCredit: number,
+  options: { ignoreCarbon?: boolean } = {},
+): number {
+  const type = PLANT_TYPES[typeId]
+  const target = quoteTargetFor(typeId)
+  const capexPerKw = world.params.get(target, Param.CapexPerKw)
+  const fixedPerKwYear = world.params.get(target, Param.FixedOpexPerKwYear)
+  const life = Math.max(5, type.designLifeYears.value)
+  const credit = Math.max(0.01, capacityCredit)
+
+  // What is owed whether it runs or not, per kilowatt that will answer in the worst hour.
+  //
+  // Annualised with a capital recovery factor rather than divided by the design life, which is
+  // the difference between comparing these technologies and merely listing them. Straight-line
+  // division prices money as free: a sixty-year reactor at six thousand euros a kilowatt came out
+  // at a hundred a year against a twenty-five-year turbine's twenty-two, and on that arithmetic
+  // the least-cost utility bought reactors and finished the scenario with a fifth of the cash it
+  // had under the model this replaced. Nobody lends for sixty years at nothing.
+  const fixed = (capexPerKw * capitalRecoveryFactor(life) + fixedPerKwYear) / credit
+
+  // A store's capital is bought for the same reason a peaker's is — to be there in the evening —
+  // so the fixed half is the same shape. What it costs to run is the round trip on bought energy.
+  if (type.storage) {
+    const cycles = 365
+    const mwhPerMw = Math.max(1, type.storage.energyMwh.value / type.capacityMw.value) * cycles
+    // A store buys at the bottom of the day and sells at the top, so what it displaces is the
+    // same dearest machine, and what it pays is that machine's cost at the round trip. Priced
+    // against the fleet rather than the spot price for the reason given on `dearestRunningCost`.
+    const dear = dearestRunningCostPerMwh(world, options)
+    const bought = Math.max(5, dear * 0.4) / Math.max(0.3, type.storage.roundTripEfficiency.value)
+    return fixed + ((type.varOpexPerMwh.value + bought - dear) * mwhPerMw) / 1000
+  }
+
+  const hours = expectedDutyHours(world, typeId)
+  const running = levelisedRunningCostPerMwh(world, typeId, options)
+
+  // What the energy is worth, netted off. A plant does not only add capacity: every hour it runs
+  // is an hour the dearest machine already on the system does not, so its fuel bill has to be set
+  // against the fuel bill it displaces. Without this term the model answers "what is the cheapest
+  // way to add a megawatt" and nothing else, and it shows: on its first outing the least-cost
+  // utility swapped three combined-cycle sets for eight peaking turbines, covered the same peak
+  // and ended nine hundred million poorer, because eight peakers burn gas at half the efficiency
+  // whenever they are called. That is the model being blind in the opposite direction to the one
+  // it replaced, which is not progress.
+  const displaced = dearestRunningCostPerMwh(world, options)
+  return fixed + ((running - displaced) * hours) / 1000
+}
+
+/**
+ * What the most expensive machine on the system costs to run.
+ *
+ * The benchmark a new plant is displacing, because that is the one it pushes off the merit order
+ * first. Taken from the fleet rather than from the market price on purpose: the clearing price is
+ * a spot figure that was zero in 1995 and seven thousand in a collapsing 2040, and a planning
+ * decision made against either of those is not a plan.
+ */
+function dearestRunningCostPerMwh(world: World, options: { ignoreCarbon?: boolean } = {}): number {
+  let dearest = 0
+  for (const plant of world.plants) {
+    const type = PLANT_TYPES[plant.typeId]
+    if (type.heatOnly || type.storage || type.weatherDependence !== 'none') continue
+    if (plant.phase !== LifecyclePhase.Operating) continue
+    dearest = Math.max(dearest, levelisedRunningCostPerMwh(world, plant.typeId, options))
+  }
+  return dearest
+}
+
+/**
+ * What a euro of capital costs per year, over a life of `years`.
+ *
+ * The standard annuity: `r / (1 - (1+r)^-n)`. At the rate below, a reactor's sixty years costs
+ * 7.1% of its capital a year and a peaker's twenty-five costs 8.6% — close, which is the point.
+ * Undiscounted, the same two are 1.7% and 4.0%, and the long asset wins by a factor nobody
+ * financing it would recognise.
+ */
+function capitalRecoveryFactor(years: number): number {
+  const r = PLANNING_DISCOUNT_RATE
+  return r / (1 - Math.pow(1 + r, -years))
+}
+
+/**
+ * The rate the harness plans at.
+ *
+ * A utility's weighted cost of capital, not the game's lending rate: `ECONOMICS.loanInterestRate`
+ * is what a *loan* costs, and most of what gets built here is bought outright, so a planner that
+ * used it would be pricing the wrong money. Seven per cent real is the ordinary assumption for
+ * regulated network businesses and it is the harness's opinion rather than the game's — no
+ * simulation code reads it, exactly like `LOAD_FACTOR` and `CAPACITY_CREDIT` beside it.
+ */
+const PLANNING_DISCOUNT_RATE = 0.07
+
+/** Fuel, carbon and variable operating cost. Everything that stops the moment the plant does. */
+function levelisedRunningCostPerMwh(
+  world: World,
+  typeId: PlantTypeId,
+  options: { ignoreCarbon?: boolean } = {},
+): number {
+  const type = PLANT_TYPES[typeId]
+  const efficiency = Math.max(0.05, world.params.get(quoteTargetFor(typeId), Param.Efficiency))
+  if (type.fuel === 'none') return type.varOpexPerMwh.value
+  const fuel = FUELS[type.fuel]
+  const fuelPerMwh = (fuel.pricePerMwhThermal.value * (world.state.fuelPriceIndex[type.fuel] ?? 1)) / efficiency
+  const carbonPerMwh = options.ignoreCarbon
+    ? 0
+    : (fuel.co2PerMwhThermal.value * world.state.carbonPricePerTonne) / efficiency
+  return type.varOpexPerMwh.value + fuelPerMwh + carbonPerMwh
+}
+
+/**
+ * How many hours a year this plant would run, given what it costs against the fleet it joins.
+ *
+ * Measured rather than assumed, because assuming it is what broke the old model: a flat half of
+ * the year for everything dispatchable made a peaker look like a bad baseload station instead of
+ * a good peaker. The merit order decides duty, so the fleet's own marginal costs are the ruler —
+ * a machine cheaper to run than most of what is already there runs most of the year, and one
+ * dearer than all of it runs only the hours nothing else can cover.
+ *
+ * The mapping from rank to hours is a load duration curve in three strokes. It is crude and says
+ * so; what matters is that it is monotonic in the right direction and reaches the right order of
+ * magnitude at both ends — a few hundred hours for a peaker, most of the year for baseload.
+ */
+function expectedDutyHours(world: World, typeId: PlantTypeId): number {
+  const weather = PLANT_TYPES[typeId].weatherDependence
+  // Weather decides duty for anything the weather drives; the merit order has no say.
+  if (weather !== 'none') return (LOAD_FACTOR[weather] ?? 0.5) * TICKS_PER_YEAR
+
+  const mine = levelisedRunningCostPerMwh(world, typeId)
+  let cheaper = 0
+  let counted = 0
+  for (const plant of world.plants) {
+    const type = PLANT_TYPES[plant.typeId]
+    if (type.heatOnly || type.storage || type.weatherDependence !== 'none') continue
+    if (plant.phase !== LifecyclePhase.Operating) continue
+    counted++
+    if (levelisedRunningCostPerMwh(world, plant.typeId) < mine) cheaper++
+  }
+  // No fleet to compare against — an empty map, or the first thing ever built. Mid-merit.
+  if (counted === 0) return 0.45 * TICKS_PER_YEAR
+  const position = cheaper / counted
+  // Cheapest on the system runs flat out; dearest runs the top of the curve and little else.
+  return Math.max(300, (1 - position) ** 1.6 * 0.92 * TICKS_PER_YEAR)
 }
 
 /**
@@ -202,10 +363,12 @@ export interface Strategy {
   /**
    * Which of the things it will build it prefers. Lower wins.
    *
-   * Given the levelised cost so a strategy that ranks on cost can simply return it, and the year
-   * so one that ranks on novelty can reach for `availableFromYear`.
+   * Given the *screening* cost — annual euros per firm kilowatt at the duty this plant would get —
+   * because that is what the decision is about. The planner only ever builds because the fleet is
+   * short against the peak, and the cost of a megawatt-hour is the answer to a different question.
+   * See `screeningCostPerFirmKwYear`.
    */
-  rank: (world: World, typeId: PlantTypeId, costPerMwh: number) => number
+  rank: (world: World, typeId: PlantTypeId, costPerFirmKwYear: number) => number
   /**
    * Whether it will close an inherited plant on principle, once the lights can spare it, rather
    * than only when the plant is worn out or losing money.
@@ -303,7 +466,11 @@ export const FOSSIL_ZEALOT: Strategy = {
   // Ranks on the cost *without* carbon, which is the belief rather than an error: this utility
   // does not think the carbon price will last, so it does not price it into an investment that
   // will run for forty years. It pays it every hour regardless, which is the point.
-  rank: (world, typeId, _cost) => levelisedCost(world, typeId, 0.5, { ignoreCarbon: true }),
+  // Ranked as though carbon were free, which is the whole of this conviction: the machine is
+  // chosen on what it costs to build and burn, and the levy on the exhaust is somebody else's
+  // politics. Same screening question as everyone else, one term removed.
+  rank: (world, typeId, _cost) =>
+    screeningCostPerFirmKwYear(world, typeId, FOSSIL_ZEALOT.capacityCredit(typeId), { ignoreCarbon: true }),
   closesOnPrinciple: () => false,
   plansOnNameplate: false,
   usesProjectFinance: true,
@@ -579,7 +746,6 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
       | { typeId: PlantTypeId; site: { x: number; y: number }; cost: number; score: number; financed: boolean }
       | null = null
     for (const typeId of PLANT_TYPE_IDS) {
-      const type = PLANT_TYPES[typeId]
       if (!strategy.builds(typeId)) continue
       if (strategy.capacityCredit(typeId) <= 0) continue
       const site = siteFor(world, typeId)
@@ -591,7 +757,7 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
       const financed =
         !cash.ok && strategy.usesProjectFinance ? quotePlant(world, typeId, site.x, site.y, true) : null
       if (!cash.ok && !financed?.ok) continue
-      const cost = levelisedCost(world, typeId, LOAD_FACTOR[type.weatherDependence] ?? 0.5)
+      const cost = screeningCostPerFirmKwYear(world, typeId, strategy.capacityCredit(typeId))
       const score = strategy.rank(world, typeId, cost)
       if (!choice || score < choice.score) {
         choice = { typeId, site, cost, score, financed: !cash.ok }
@@ -602,7 +768,7 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
     const placed = beginPlantConstruction(world, choice.typeId, choice.site.x, choice.site.y, choice.financed)
     if (!placed.ok) continue
     built.push(
-      `${date.year}: ${choice.typeId} at ${Math.round(choice.cost)}/MWh${choice.financed ? ' (financed)' : ''}`,
+      `${date.year}: ${choice.typeId} at ${Math.round(choice.cost)}/kW-firm-yr${choice.financed ? ' (financed)' : ''}`,
     )
 
     // 4. Wire it in. A station nobody can reach generates nothing, and the cheapest connection
