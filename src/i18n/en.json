@@ -596,5 +596,8 @@
   "scenario.longCoast.name": "The Long Coast",
   "scenario.longCoast.description": "Nothing here is worn out. A young gas fleet serves a coast that keeps growing, and the question is what to commit to for sixty years while the carbon price nobody is charging yet arrives.",
   "objective.keepUpWithGrowth": "Hold 2.4 GW of dispatchable capacity by 2050",
-  "objective.halfLowCarbon": "Half the energy from something that does not burn, by 2050"
+  "objective.halfLowCarbon": "Half the energy from something that does not burn, by 2050",
+  "scenario.czechia1995.name": "Czechia, 1995",
+  "scenario.czechia1995.description": "A real country at a date when everything was still open. Half the power comes from lignite under the northern mountains, a third of the country is heated by the same stations, and the second reactor is a hole in the ground at Temelín that somebody has to decide about.",
+  "objective.replaceTheBasin": "Hold 6.5 GW of dispatchable capacity by 2025"
 }

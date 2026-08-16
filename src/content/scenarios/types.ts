@@ -113,4 +113,15 @@ export interface ScenarioContent {
    * withdrawn, which is what makes it interesting.
    */
   feedInTariffs?: Partial<Record<PlantTypeId, number>>
+  /**
+   * The map, drawn rather than generated. One string per row, one character per tile.
+   *
+   *     ~  water          .  plain        f  forest       h  hill      M  mountain
+   *                       ,  plain+river  F  forest+river H  hill+river
+   *
+   * For a region that exists. The generator classifies terrain by rank and slopes the land toward
+   * one corner, which guarantees a coast — right for an invented place and wrong for a landlocked
+   * one. See `terrainFromRows`.
+   */
+  terrainRows?: string[]
 }

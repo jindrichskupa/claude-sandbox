@@ -190,6 +190,107 @@ function computeWindExposure(
 }
 
 /**
+ * Terrain somebody drew, rather than terrain the generator invented.
+ *
+ * The generator classifies by rank, which guarantees a sensible mix — twenty per cent water, a
+ * spine of mountains — whatever the noise does, and pushes the low ground toward one corner so
+ * there is always a coast. That is exactly right for an invented region and exactly wrong for a
+ * real one. A landlocked country would come out with a sea in it, and no seed produces the
+ * Ore Mountains along one border and a basin behind them, because the generator has never heard
+ * of either.
+ *
+ * So a scenario may supply its own map as a picture. One character per tile:
+ *
+ *     ~  water          .  plain        f  forest       h  hill      M  mountain
+ *                       ,  plain+river  F  forest+river H  hill+river
+ *
+ * Everything else the simulation needs is derived rather than drawn, because everything else is
+ * a consequence of the shape: elevation from the tile class and then smoothed, so the shading and
+ * the routing costs read as a landscape rather than as five terraces; wind from the same function
+ * the generated maps use, so an authored ridge is worth what a generated one is worth; and the
+ * river index from the drawn channels. Nobody should have to hand-author a flow accumulation
+ * field, and if they did it would disagree with the picture.
+ */
+const AUTHORED_TILES: Record<string, { tile: Tile; river: boolean }> = {
+  '~': { tile: Tile.Water, river: false },
+  '.': { tile: Tile.Plain, river: false },
+  ',': { tile: Tile.Plain, river: true },
+  f: { tile: Tile.Forest, river: false },
+  F: { tile: Tile.Forest, river: true },
+  h: { tile: Tile.Hill, river: false },
+  H: { tile: Tile.Hill, river: true },
+  M: { tile: Tile.Mountain, river: false },
+}
+
+/** Where each class sits on the height scale before smoothing. */
+const AUTHORED_ELEVATION: Record<Tile, number> = {
+  [Tile.Water]: 0.08,
+  [Tile.Plain]: 0.34,
+  [Tile.Forest]: 0.48,
+  [Tile.Hill]: 0.68,
+  [Tile.Mountain]: 0.92,
+}
+
+export class TerrainError extends Error {}
+
+export function terrainFromRows(seed: number, rows: string[]): TerrainMap {
+  const height = rows.length
+  if (height === 0) throw new TerrainError('An authored map needs at least one row.')
+  const width = rows[0]!.length
+  for (const [y, row] of rows.entries()) {
+    if (row.length !== width) {
+      throw new TerrainError(`Row ${y} is ${row.length} tiles wide; the first row is ${width}.`)
+    }
+  }
+
+  const tiles = new Uint8Array(width * height)
+  const elevation = new Float32Array(width * height)
+  const windIndex = new Float32Array(width * height)
+  const riverIndex = new Float32Array(width * height)
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const ch = rows[y]![x]!
+      const entry = AUTHORED_TILES[ch]
+      if (!entry) throw new TerrainError(`Unknown terrain character ${JSON.stringify(ch)} at ${x},${y}.`)
+      const i = y * width + x
+      tiles[i] = entry.tile
+      elevation[i] = AUTHORED_ELEVATION[entry.tile]
+      // Drawn channels are full-sized rivers. The generated maps grade theirs by accumulation,
+      // and an authored map cannot: what is drawn is the Elbe or it is nothing.
+      riverIndex[i] = entry.river ? 1 : 0
+    }
+  }
+
+  // Two passes of a box blur over the height, which is what turns five terraces into a slope.
+  // Only the height is smoothed — the tile classes stay exactly as drawn, because they are what
+  // the siting rules read and a blurred mountain would quietly become buildable.
+  const scratch = new Float32Array(elevation.length)
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let sum = 0
+        let n = 0
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx
+            const ny = y + dy
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+            sum += elevation[ny * width + nx]!
+            n++
+          }
+        }
+        scratch[y * width + x] = sum / n
+      }
+    }
+    elevation.set(scratch)
+  }
+
+  computeWindExposure(seed, width, height, elevation, tiles, windIndex)
+  return { width, height, tiles, elevation, windIndex, riverIndex }
+}
+
+/**
  * Water runs downhill and gathers. Each tile sends its flow to its lowest neighbour, and
  * repeating that from the highest ground down accumulates a drainage network — so rivers end
  * up in the valleys where they belong instead of being scattered noise, and they get larger

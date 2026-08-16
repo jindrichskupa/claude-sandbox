@@ -49,9 +49,9 @@ import { Param } from './params/types'
 import { availableRange, dispatch, lineCapacityOf, lossDemandOf, type DispatchResult } from './dispatch/dispatch'
 import { WeatherModel, type ClimateDef, type Weather } from './weather/weather'
 import { weatherModifiers, WEATHER_SOURCE } from './weather/effects'
-import { generateTerrain, windSiteFactor, type TerrainMap } from './map/terrain'
+import { generateTerrain, terrainFromRows, windSiteFactor, type TerrainMap } from './map/terrain'
 import { planStorage, settleStorage, isStorage, FORECAST_WINDOW_HOURS, type StoragePlan } from './dispatch/storage'
-import { dispatchHeat, isHeatStore, settleHeatStore, type HeatResult } from './heat/heat'
+import { dispatchHeat, isHeatStore, settleHeatStore, type ChpCommitment, type HeatResult } from './heat/heat'
 import { CARBON_PHASE_IN_YEARS, ELECTION_TERM_YEARS, REGIMES_BY_ID } from '@content/policies'
 import { initialFuelIndices, policyModifiers, POLICY_SOURCE, stepFuelPrices, importExposure } from './policy/regime'
 import {
@@ -234,6 +234,14 @@ export interface ScenarioDef {
   endYear: number
   /** Guaranteed price per MWh by technology, paid outside the market. */
   feedInTariffs: Partial<Record<string, number>>
+  /**
+   * A map somebody drew, one character per tile. Absent for scenarios happy with a generated one.
+   *
+   * When present it is the authority on the map's size too: `mapWidth` and `mapHeight` must agree
+   * with it, and the scenario test checks that they do rather than leaving two sources of truth
+   * to drift apart.
+   */
+  terrainRows?: string[]
 }
 
 const HISTORY_LENGTH = TICKS_PER_YEAR
@@ -266,6 +274,20 @@ interface ScheduledSpend {
   perTick: number
   remainingTicks: number
   kind: 'capex' | 'decommissioning'
+}
+
+/**
+ * The map a scenario plays on: drawn if the scenario drew one, generated otherwise.
+ *
+ * Exported because more than the world asks this question — the tests that check no station
+ * stands in open water used to call `generateTerrain` directly, which quietly examined a map
+ * nobody would ever play on and passed a drawn scenario that had a whole city in a lake. One
+ * answer, one place. A region that exists has a shape no seed will produce; see `terrainFromRows`.
+ */
+export function terrainFor(scenario: ScenarioDef): TerrainMap {
+  return scenario.terrainRows
+    ? terrainFromRows(scenario.seed, scenario.terrainRows)
+    : generateTerrain(scenario.seed, scenario.mapWidth, scenario.mapHeight)
 }
 
 export class World {
@@ -400,7 +422,7 @@ export class World {
 
   constructor(readonly scenario: ScenarioDef) {
     this.rng = new RandomSource(scenario.seed)
-    this.terrain = generateTerrain(scenario.seed, scenario.mapWidth, scenario.mapHeight)
+    this.terrain = terrainFor(scenario)
     this.weatherModel = new WeatherModel(this.rng, scenario.climate)
     this.electricIslands = new IslandCache(this.network, 'electric')
     this.heatIslands = new IslandCache(this.network, 'heat')
@@ -946,6 +968,17 @@ export class World {
     this.lastDispatch = result
     this.lastLossDemand = lossDemandOf(result, this.network)
 
+    // What every unit could have delivered *this* hour, taken before the settlement below writes
+    // this hour's output onto the plants. That ordering is the whole point: `availableRange`
+    // measures the ramp window from `plant.outputMw`, so asking it afterwards asks what the fleet
+    // can reach *next* hour, which on a cold start is nearly twice as much. The post-mortem then
+    // sees a fleet with plenty of headroom, a town in the dark, and no explanation — which is how
+    // this was found, on the first hour of the Czech scenario.
+    //
+    // Only on hours that actually went short, so it costs nothing on a system that is working.
+    const ceilings =
+      result.totalUnservedMw > UNSERVED_EPSILON_MW ? this.plantCeilings(heat.commitments) : null
+
     // 8. Money and wear from what actually ran.
     const tariff = this.params.getOr('world', Param.TariffPerMwh, this.scenario.tariffPerMwh)
     const heatTariff = this.params.getOr('world', Param.HeatTariffPerMwh, this.scenario.heatTariffPerMwh)
@@ -1106,27 +1139,7 @@ export class World {
     // mode a notification system has.
     // Why, before the hour that explains it is gone. Only on hours that actually went short, so
     // this costs nothing on a system that is working — which is nearly all of them.
-    if (result.totalUnservedMw > UNSERVED_EPSILON_MW) {
-      // From the same function the dispatch bounded the units with, so the post-mortem cannot
-      // disagree with the hour it is explaining. `structural` drops the ramp limit back out,
-      // because a fleet that could not get there in time is a different failure from one that was
-      // never big enough — and the two have opposite answers.
-      const ceilings = new Map<string, PlantCeilings>()
-      for (const plant of this.plants) {
-        if (PLANT_TYPES[plant.typeId].heatOnly) continue
-        const commitment = heat.commitments.get(plant.id)
-        const range = availableRange(plant, this.params, commitment)
-        const capacity = this.params.get(plant.id, Param.CapacityMw)
-        const availability = this.params.getOr(plant.id, Param.Availability, 1)
-        const derate = commitment?.capacityDerateMw ?? 0
-        const forced = commitment?.forcedOutputMw
-        const structural =
-          forced !== null && forced !== undefined
-            ? Math.max(0, Math.min(capacity * availability, forced))
-            : Math.max(0, capacity * availability - derate)
-        ceilings.set(plant.id, { structural, now: range.ceiling })
-      }
-
+    if (ceilings) {
       this.shortfalls.record(
         classifyHour({
           network: this.network,
@@ -1242,6 +1255,53 @@ export class World {
     this.history[this.historyCount % HISTORY_LENGTH] = snapshot
     this.historyCount++
     return snapshot
+  }
+
+  /**
+   * What every unit could have delivered this hour, structurally and as it stood.
+   *
+   * From the same function the dispatch bounded the units with, so the post-mortem cannot
+   * disagree with the hour it is explaining. `structural` drops the ramp limit back out, because
+   * a fleet that could not get there in time is a different failure from one that was never big
+   * enough — and the two have opposite answers.
+   *
+   * Must be called *before* the hour's output is written onto the plants: `availableRange`
+   * measures the ramp window from `plant.outputMw`, so afterwards it answers a question about
+   * next hour.
+   */
+  private plantCeilings(commitments: Map<string, ChpCommitment>): Map<string, PlantCeilings> {
+    const ceilings = new Map<string, PlantCeilings>()
+    for (const plant of this.plants) {
+      if (PLANT_TYPES[plant.typeId].heatOnly) continue
+      const capacity = this.params.get(plant.id, Param.CapacityMw)
+      const availability = this.params.getOr(plant.id, Param.Availability, 1)
+
+      // Storage is the one thing `availableRange` cannot answer for, because its limit is not a
+      // rating but a reservoir: the dispatch bounds it by `dischargeCeilingMw`, which knows how
+      // much energy is in there. Asking the rating instead credits an empty pumped station with
+      // three hundred megawatts it does not have.
+      //
+      // `structural` keeps the rating on purpose. Given notice the reservoir would have been
+      // filled, so a fleet is not too *small* because a store is empty; it is a system that could
+      // not get there from where it was, which is what `ramp` means.
+      if (isStorage(plant)) {
+        const plan = this.lastStoragePlans.get(plant.id)
+        const now = plan?.mode === 'discharging' ? plan.dischargeCeilingMw : 0
+        ceilings.set(plant.id, { structural: capacity * availability, now })
+        continue
+      }
+
+      const commitment = commitments.get(plant.id)
+      const range = availableRange(plant, this.params, commitment)
+      const derate = commitment?.capacityDerateMw ?? 0
+      const forced = commitment?.forcedOutputMw
+      const structural =
+        forced !== null && forced !== undefined
+          ? Math.max(0, Math.min(capacity * availability, forced))
+          : Math.max(0, capacity * availability - derate)
+      ceilings.set(plant.id, { structural, now: range.ceiling })
+    }
+    return ceilings
   }
 
   private rollOutages(): void {

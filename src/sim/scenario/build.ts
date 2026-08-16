@@ -39,6 +39,7 @@ export function toScenarioDef(content: ScenarioContent): ScenarioDef {
     objectives: content.objectives,
     endYear: content.endYear,
     feedInTariffs: content.feedInTariffs ?? {},
+    ...(content.terrainRows ? { terrainRows: content.terrainRows } : {}),
   }
 }
 
@@ -184,6 +185,12 @@ export function buildWorld(content: ScenarioContent): World {
     }
     // Start on the ageing curve rather than pristine — these units have a history.
     plant.conditionPct = expectedCondition(plant, 0)
+    // And start them *running*. A scenario opens at midnight on the first of January, and an
+    // inherited system at midnight is not a field of cold machines: it is a fleet at overnight
+    // minimum. Left at zero the first hour is a cold start, every unit is held to one ramp step,
+    // and the country goes dark for an hour it did nothing to deserve — which the post-mortem
+    // duly reported as a ramp failure, correctly and uselessly.
+    plant.outputMw = type.minLoadFraction.value * type.capacityMw.value
     world.addPlant(plant)
   }
 

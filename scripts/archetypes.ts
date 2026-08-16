@@ -25,15 +25,19 @@
  * burns has genuinely inherited somebody else's problem. Reading the failures is the point;
  * automatic judgement is not on offer.
  *
- * Run: npx tsx scripts/archetypes.ts
+ * Run: npx tsx scripts/archetypes.ts [scenarioId] [untilYear]
  */
 
 import { buildWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
+import { scenarioById } from '@content/scenarios'
 import { ARCHETYPES, playScenario, type PlayResult } from '../tests/autoPlayer'
 import { PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
 
-const untilYear = Number(process.argv[2]) || FIRST_REGION.endYear
+// Which grid to play. There are three now, and a comparison that can only ever be run on the
+// first one measures the neutrality of a third of the content.
+const content = scenarioById(process.argv[2] ?? '') ?? FIRST_REGION
+const untilYear = Number(process.argv[3]) || content.endYear
 
 /** What it actually put in the ground, counted by technology, from the build log. */
 function fleetAdded(result: PlayResult): string {
@@ -47,7 +51,7 @@ function fleetAdded(result: PlayResult): string {
 
 const results: PlayResult[] = []
 for (const strategy of ARCHETYPES) {
-  const world = buildWorld(FIRST_REGION)
+  const world = buildWorld(content)
   const started = Date.now()
   const result = playScenario(world, { strategy, untilYear })
   results.push(result)

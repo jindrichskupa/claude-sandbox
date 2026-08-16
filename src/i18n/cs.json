@@ -596,5 +596,8 @@
   "scenario.longCoast.name": "Dlouhé pobřeží",
   "scenario.longCoast.description": "Nic tu není dosloužilé. Mladá plynová flotila napájí pobřeží, které roste, a otázka zní, k čemu se zavázat na šedesát let, než dorazí cena uhlíku, kterou zatím nikdo neúčtuje.",
   "objective.keepUpWithGrowth": "Udržet 2,4 GW regulovatelného výkonu do roku 2050",
-  "objective.halfLowCarbon": "Polovina energie z nespalovacích zdrojů do roku 2050"
+  "objective.halfLowCarbon": "Polovina energie z nespalovacích zdrojů do roku 2050",
+  "scenario.czechia1995.name": "Česko, 1995",
+  "scenario.czechia1995.description": "Skutečná země v době, kdy bylo ještě všechno otevřené. Polovina výroby stojí na hnědém uhlí pod Krušnými horami, třetinu země vytápějí tytéž elektrárny a druhá jaderná elektrárna je rozestavěná jáma u Temelína, o které musí někdo rozhodnout.",
+  "objective.replaceTheBasin": "Udržet do roku 2025 alespoň 6,5 GW řiditelného výkonu"
 }

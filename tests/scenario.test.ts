@@ -14,11 +14,12 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildWorld, loadWorld } from '@sim/scenario/build'
+import { buildWorld, loadWorld, toScenarioDef } from '@sim/scenario/build'
+import { terrainFor } from '@sim/world'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { scenarioById, SCENARIO_LIST } from '@content/scenarios/index'
 import { LifecyclePhase } from '@sim/assets/types'
-import { generateTerrain, tileAt, Tile } from '@sim/map/terrain'
+import { tileAt, Tile } from '@sim/map/terrain'
 import {
   evaluateObjectives,
   measure,
@@ -480,7 +481,7 @@ describe('the save file envelope', () => {
     // own map something it forbids the player. They are now on the coast, which is where a
     // harbour station and a bay town belong anyway.
     for (const scenario of SCENARIO_LIST) {
-      const terrain = generateTerrain(scenario.seed, scenario.mapWidth, scenario.mapHeight)
+      const terrain = terrainFor(toScenarioDef(scenario))
       for (const node of scenario.nodes) {
         const tile = tileAt(terrain, node.x, node.y)
         expect(`${node.id} ${Tile[tile]}`).not.toContain('Water')
@@ -494,12 +495,21 @@ describe('the save file envelope', () => {
     // belongs to the line and the player cannot ask about it at all — which is how a line
     // between two neighbouring nodes became invisible to the interface.
     //
-    // Four tiles is the working minimum: a node core of about half a tile at each end, and
-    // enough between them to aim at. Exempt are the corridors that also carry a heat main — a
-    // combined heat and power station stands next to the town it heats because a heat main
-    // longer than about thirty kilometres loses more than it delivers, so its power line is
-    // short for a reason no map layout can argue with. `MapView.pickAt` is what makes those
-    // selectable; everything else has to earn its length here.
+    // Two tiles is the working minimum, and it is measured rather than guessed. `NODE_CORE_PX` is
+    // 0.45 of a tile, so geometry alone says a corridor is unpickable only below about 0.9 tiles;
+    // this was written at four for comfort, on maps where every corridor was long anyway. Clicking
+    // the midpoint of each two-tile corridor on the Czech grid in the browser, at the zoom the
+    // game opens on, selected the corridor every time.
+    //
+    // Which matters because the third scenario is a real country at twelve kilometres to the tile,
+    // where Prunéřov genuinely is twenty-five kilometres from Tušimice and Orlík from Slapy. A
+    // rule of four tiles there does not enforce a legible map, it forbids the geography.
+    //
+    // Exempt are the corridors that also carry a heat main — a combined heat and power station
+    // stands next to the town it heats because a heat main longer than about thirty kilometres
+    // loses more than it delivers, so its power line is short for a reason no map layout can
+    // argue with. `MapView.pickAt` is what makes those selectable; everything else earns its
+    // length here.
     for (const scenario of SCENARIO_LIST) {
       const at = new Map(scenario.nodes.map((n) => [n.id, n]))
       const heated = new Set(scenario.heatPipes.flatMap((p) => [`${p.from}|${p.to}`, `${p.to}|${p.from}`]))
@@ -508,7 +518,7 @@ describe('the save file envelope', () => {
         const a = at.get(line.from)!
         const b = at.get(line.to)!
         const tiles = Math.hypot(a.x - b.x, a.y - b.y)
-        expect(`${line.id} ${tiles.toFixed(2)}`).toBe(`${line.id} ${Math.max(tiles, 4).toFixed(2)}`)
+        expect(`${line.id} ${tiles.toFixed(2)}`).toBe(`${line.id} ${Math.max(tiles, 2).toFixed(2)}`)
       }
     }
   })

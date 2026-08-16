@@ -221,13 +221,19 @@ export class MapView {
     const layer = this.terrainLayer
     layer.removeChildren()
 
-    // Open water well beyond the map bounds, so panning to the edge shows a coastline
+    // What lies beyond the map bounds, so panning to the edge shows the country continuing
     // rather than the abrupt rectangle where the tile array happens to stop.
     // A tiling sprite rather than a flat rectangle: six thousand individual water sprites
     // would be absurd, and a plain fill makes the world stop at a hard rectangle.
+    //
+    // Read off the map's own border rather than assumed to be sea. A generated region slopes
+    // into water and its border is water, so this still paints open sea for those; a drawn
+    // landlocked one is ringed by mountain, and framing it in ocean would put a coast on a
+    // country that has none.
+    const beyond = this.surroundTile()
     const bleed = 24
     const openSea = new TilingSprite({
-      texture: this.tileset.terrain[Tile.Water][0]!,
+      texture: this.tileset.terrain[beyond][0]!,
       width: (this.terrain.width + bleed * 2) * TILE_SOURCE_PX,
       height: (this.terrain.height + bleed * 2) * TILE_SOURCE_PX,
     })
@@ -236,7 +242,7 @@ export class MapView {
     layer.addChild(openSea)
 
     const tileAtSafe = (x: number, y: number): Tile => {
-      if (x < 0 || y < 0 || x >= this.terrain.width || y >= this.terrain.height) return Tile.Water
+      if (x < 0 || y < 0 || x >= this.terrain.width || y >= this.terrain.height) return beyond
       return this.terrain.tiles[y * this.terrain.width + x] as Tile
     }
     const riverAt = (x: number, y: number): number => {
@@ -400,6 +406,41 @@ export class MapView {
    */
   destroy(): void {
     this.root.destroy({ children: true })
+  }
+
+  /**
+   * What the map is surrounded by, taken as the commonest tile on its own border.
+   *
+   * The renderer used to answer "water" without asking, which is right for every generated
+   * region — they are classified by quantile onto a slope, so a fifth of the map is water and
+   * all of it is at the low edge. It is wrong for a drawn one. A country with a mountain rim
+   * should continue into mountains, and the same answer feeds the shoreline overlay, so
+   * nothing draws a beach along the frame of a landlocked map.
+   */
+  private surroundTile(): Tile {
+    const counts = new Map<Tile, number>()
+    const { width, height, tiles } = this.terrain
+    const bump = (x: number, y: number): void => {
+      const tile = tiles[y * width + x] as Tile
+      counts.set(tile, (counts.get(tile) ?? 0) + 1)
+    }
+    for (let x = 0; x < width; x++) {
+      bump(x, 0)
+      bump(x, height - 1)
+    }
+    for (let y = 1; y < height - 1; y++) {
+      bump(0, y)
+      bump(width - 1, y)
+    }
+    let best = Tile.Water
+    let bestCount = -1
+    for (const [tile, count] of counts) {
+      if (count > bestCount) {
+        best = tile
+        bestCount = count
+      }
+    }
+    return best
   }
 
   /**
