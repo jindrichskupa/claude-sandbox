@@ -15,6 +15,7 @@
 import { t } from '@i18n/index'
 import type { World } from '@sim/world'
 import { nextConcern, openingBrief, type Concern } from '@sim/scenario/briefing'
+import { expandName } from './newsPanel'
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -72,8 +73,18 @@ export class BriefingPanel {
     this.root.classList.add('visible')
     this.root.replaceChildren()
     this.root.appendChild(el('h2', undefined, t('brief.title')))
+    const lines = el('div', 'brief-lines')
+    this.root.appendChild(lines)
     for (const line of openingBrief(this.world)) {
-      this.root.appendChild(el('div', 'brief-line', t(line.key, line.params)))
+      // Parameters that are themselves translation keys are expanded first, by the same rule the
+      // news feed uses. The timeline's headlines arrive that way: `sim/` never imports the
+      // dictionary, so a brief line about 1995 knowing what happens in 2022 has to name the key
+      // and let the interface read it.
+      const params: Record<string, string | number> = {}
+      for (const [key, value] of Object.entries(line.params ?? {})) {
+        params[key] = typeof value === 'string' ? expandName(value) : value
+      }
+      lines.appendChild(el('div', 'brief-line', t(line.key, params)))
     }
     const actions = el('div', 'obj-saves')
     const begin = el('button', undefined, t('brief.begin'))

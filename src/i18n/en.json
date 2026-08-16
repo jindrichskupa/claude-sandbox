@@ -614,5 +614,6 @@
   "history.cz.gasPriceClimb": "Gas climbs all year and nobody can say where it stops",
   "history.cz.invasion": "War, and the pipelines from the east close",
   "history.cz.securityTurn": "Security first: a windfall levy, a price cap, and coal back out of reserve",
-  "history.cz.coalDeadline": "The coal deadline moves forward, and a reactor goes to tender"
+  "history.cz.coalDeadline": "The coal deadline moves forward, and a reactor goes to tender",
+  "brief.history": "{year} — {headline}"
 }

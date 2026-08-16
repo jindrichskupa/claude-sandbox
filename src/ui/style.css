@@ -1772,7 +1772,18 @@ button.danger:hover {
 }
 
 #briefing.visible {
-  display: block;
+  /* Column rather than block, so the button stays pinned below a list that may scroll. The brief
+     was a fixed five lines until a scenario gained a timeline and it became fifteen; on a short
+     window that put Begin off the bottom of the screen, which is the same way the end screen
+     broke and for the same reason. */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 96px);
+}
+
+#briefing.visible .brief-lines {
+  overflow-y: auto;
+  min-height: 0;
 }
 
 #briefing h2 {

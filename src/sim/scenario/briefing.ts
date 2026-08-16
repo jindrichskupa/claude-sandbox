@@ -166,6 +166,22 @@ export function openingBrief(world: World): BriefLine[] {
     params: { year: world.scenario.endYear, years: world.scenario.endYear - world.scenario.startYear },
   })
 
+  // And what is already scheduled to happen to them, if the scenario has a history.
+  //
+  // The fairness argument for the timeline rests on this line existing. A dated event bypasses the
+  // severity budget and the cooldown that protect the player from a run of bad luck, and what
+  // justifies that is being told about it in advance rather than discovering it in 2011. Being
+  // warned in the first minute of the scenario that a carbon price arrives in 2019 and a war in
+  // 2022 is the fairest notice this game gives about anything — but only if the notice is
+  // actually given, and for one commit it was claimed in a comment and nowhere else.
+  //
+  // Headlines only, with their years. Not what each one does: a brief that explained the
+  // consequences would be telling the player how to play thirty years in advance, and working
+  // out what a carbon price does to a lignite fleet is the game.
+  for (const entry of world.scenario.timeline ?? []) {
+    lines.push({ key: 'brief.history', params: { year: entry.year, headline: entry.headlineKey } })
+  }
+
   return lines
 }
 

@@ -614,5 +614,6 @@
   "history.cz.gasPriceClimb": "Plyn stoupá celý rok a nikdo neumí říct, kde se zastaví",
   "history.cz.invasion": "Válka, a plynovody z východu se zavírají",
   "history.cz.securityTurn": "Bezpečnost především: mimořádná daň, cenový strop a uhlí zpátky z rezervy",
-  "history.cz.coalDeadline": "Konec uhlí se posouvá dopředu a jaderný blok jde do tendru"
+  "history.cz.coalDeadline": "Konec uhlí se posouvá dopředu a jaderný blok jde do tendru",
+  "brief.history": "{year} — {headline}"
 }
