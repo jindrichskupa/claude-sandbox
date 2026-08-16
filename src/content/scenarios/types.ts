@@ -45,8 +45,50 @@ export interface PlantSpec {
   nodeId: string
   typeId: PlantTypeId
   name: string
-  /** How old the unit already is when the scenario begins. */
+  /** How old the unit already is when the scenario begins. Ignored for a unit still being built. */
   ageYears: number
+  /**
+   * Work already under way when the scenario opens.
+   *
+   * A brownfield start is not only machines: it is also somebody else's half-finished commitments.
+   * Without this a scenario can hand the player a fleet but not a decision about a hole in the
+   * ground — and for Czechia in 1995 the hole in the ground at Temelín *was* the decision.
+   *
+   * The money already spent is gone and is not modelled: a sunk cost that the player can still
+   * see on a balance sheet is a sunk cost they will keep trying to recover, which is the one
+   * behaviour this should not encourage. Only what is left to pay is scheduled.
+   */
+  inProgress?: InProgressSpec
+}
+
+export interface InProgressSpec {
+  /**
+   * `building` is a unit that has never run; `refurbishing` is one that has, and is in pieces.
+   *
+   * The difference matters on the day it finishes: a new unit starts its life then, an overhauled
+   * one goes back to the life it already had, extended.
+   */
+  kind: 'building' | 'refurbishing'
+  /** Years still to run when the scenario opens. */
+  yearsRemaining: number
+  /**
+   * Years the work has already taken.
+   *
+   * Written down rather than derived, because it is a fact the scenario knows and nothing else
+   * can recover: a reactor seven years from finishing may be seven years from a standing start or
+   * fifteen years into a build that was meant to take six, and what it costs to walk away from
+   * the two is not the same. See `quoteAbandonment`.
+   */
+  yearsElapsed: number
+  /**
+   * What fraction of the project's cost has still to be paid.
+   *
+   * A reactor eight years into construction and seven from finishing is not half paid for, because
+   * the expensive part — the machinery, the instrumentation, the commissioning — comes last. The
+   * scenario states the share rather than deriving it from the time left, because the two are not
+   * proportional in any real project.
+   */
+  costRemainingShare: number
 }
 
 export interface LineSpec {

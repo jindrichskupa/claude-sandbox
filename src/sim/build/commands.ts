@@ -25,7 +25,7 @@ import { judgeSite } from './siting'
 import { isBuildable } from '../map/terrain'
 import { routeLine, simplifyRoute } from '../grid/routing'
 import { Param } from '../params/types'
-import { canAfford, openProjectFacility, quoteProjectFinance } from '../economy/economy'
+import { canAfford, openProjectFacility, quoteProjectFinance, recallProjectFinance } from '../economy/economy'
 import { REGIMES_BY_ID } from '@content/policies'
 import { offerContract } from '../policy/contracts'
 import type { World } from '../world'
@@ -184,6 +184,7 @@ export function beginPlantConstruction(
     nodeId,
     phase: LifecyclePhase.Building,
     phaseEndsTick: world.tick + quote.buildTicks,
+    buildStartTick: world.tick,
     // Set on commissioning; until then the plant has no age.
     commissionedTick: world.tick + quote.buildTicks,
     // The vintage is the year it enters service, not the year it was ordered — which is the
@@ -794,6 +795,132 @@ export function retirePlant(world: World, plantId: string): { ok: boolean; quote
     params: {
       plant: world.plantDisplayName(plantId),
       months: Math.max(1, Math.round(quote.buildTicks / (TICKS_PER_YEAR / 12))),
+    },
+    subjectId: plantId,
+    subjectKind: 'plant',
+  })
+
+  return { ok: true, quote }
+}
+
+// ---------------------------------------------------------------------------
+// Abandonment
+// ---------------------------------------------------------------------------
+
+/**
+ * How far through its construction a project is, 0 at the ground-breaking and 1 at commissioning.
+ *
+ * Derived from the clock rather than from the money, because the clock is the thing that cannot
+ * be argued with: a project may be over or under budget, but the day it is due is the day it is
+ * due. Used to price walking away — a hole in the ground and a finished containment awaiting fuel
+ * are both "unfinished" and cost wildly different amounts to leave.
+ */
+export function buildProgress(world: World, plant: PlantAsset): number {
+  if (plant.phase !== LifecyclePhase.Building) return 1
+  const started = plant.buildStartTick ?? world.tick
+  const total = plant.phaseEndsTick - started
+  if (total <= 0) return 1
+  return Math.max(0, Math.min(1, (world.tick - started) / total))
+}
+
+/**
+ * What walking away from an unfinished project would cost.
+ *
+ * Not zero, and not the full decommissioning bill either. A site that has been dug and poured has
+ * to be made safe and handed back, and the further it went the more there is to make safe — but a
+ * unit that never ran has none of the contamination that makes retiring an operating station
+ * expensive, which for a reactor is most of the bill. `ABANDONMENT_SHARE` is that difference.
+ */
+export function quoteAbandonment(world: World, plantId: string): Quote {
+  const plant = world.getPlant(plantId)
+  if (!plant) return refuse('build.noSuchPlant')
+  // Building only. Abandoning a *refurbishment* would mean reassembling a machine that is in
+  // pieces on the turbine hall floor, which is a different question with a different answer, and
+  // pretending it is this one would be worse than not offering it.
+  if (plant.phase !== LifecyclePhase.Building) return refuse('build.notAbandonable')
+
+  const type = PLANT_TYPES[plant.typeId]
+  const capacityMw = world.params.get(plant.id, Param.CapacityMw)
+  const year = world.date.year
+  const source = type.decommissionCostPerKw.sourceYear
+  const totalCost =
+    nominal(type.decommissionCostPerKw, year) *
+    realDecommissioningFactor(year, source) *
+    capacityMw *
+    1000 *
+    ABANDONMENT_COST_SHARE *
+    buildProgress(world, plant)
+  const buildTicks = Math.max(
+    1,
+    Math.round(type.remediationYears.value * ABANDONMENT_TIME_SHARE * TICKS_PER_YEAR),
+  )
+
+  if (!canAfford(world.finances, totalCost)) return refuse('build.cannotAfford')
+  return { ok: true, totalCost, buildTicks }
+}
+
+/**
+ * What making an unfinished site safe costs, against making a worn-out one safe.
+ *
+ * A machine that never ran is not contaminated, its ash pond was never filled and its fuel was
+ * never loaded. What is left is civil works to demolish or hand over, which is real money and a
+ * fraction of the real bill.
+ */
+const ABANDONMENT_COST_SHARE = 0.3
+
+/**
+ * And how long it takes, which is a smaller fraction still.
+ *
+ * The years in `remediationYears` are mostly waiting rather than working — a spent fuel store
+ * cooling down, contaminated ground being monitored — and none of that applies to a site where
+ * nothing was ever run. What is left is demolition, which is a schedule of work and finishes when
+ * the work does. Nuclear is the case that makes the difference plain: twenty years to release the
+ * site of a reactor that operated, three for a containment that never held fuel.
+ */
+const ABANDONMENT_TIME_SHARE = 0.15
+
+/**
+ * Walk away from a project that is not finished.
+ *
+ * Until this existed, committing to a long build was the one irreversible act in the game: order a
+ * reactor and you paid for seventy-seven months whatever happened to the tariff, the government or
+ * the demand it was ordered for. That is not how the industry works, and it is not an interesting
+ * constraint — it makes the *decision* to start something the only decision, which is backwards
+ * for a game about running a system through decades of change.
+ *
+ * What it costs is the point:
+ *
+ *   - Everything already paid is gone. There is no refund and no salvage.
+ *   - The site has to be made safe, priced by how far the work got.
+ *   - A project facility becomes an ordinary corporate loan, at once. Non-recourse debt is
+ *     non-recourse against a *project*; a sponsor who cancels the project has no project for the
+ *     lender's claim to sit against, so the claim comes back to the company. That converts a debt
+ *     the borrowing limit ignored into one it counts, which is exactly the moment a player who
+ *     financed two reactors and cancelled one finds out what they signed.
+ */
+export function abandonProject(world: World, plantId: string): { ok: boolean; quote: Quote } {
+  const quote = quoteAbandonment(world, plantId)
+  if (!quote.ok) return { ok: false, quote }
+
+  const plant = world.getPlant(plantId)!
+  world.cancelSpending(plantId)
+  recallProjectFinance(world.finances, plantId, world.tick)
+
+  // Straight to remediation: there is nothing to dismantle that was ever assembled, so the
+  // decommissioning phase — which is the taking-apart — has nothing to do. The site is occupied
+  // until it is handed back, and then it is free like any other cleared site.
+  plant.phase = LifecyclePhase.Remediating
+  plant.phaseEndsTick = world.tick + quote.buildTicks
+  plant.online = false
+  plant.outputMw = 0
+  world.scheduleSpending(plantId, quote.totalCost, quote.buildTicks, 'decommissioning')
+  world.reportNews({
+    category: 'construction',
+    importance: NewsImportance.Major,
+    titleKey: 'news.projectAbandoned',
+    params: {
+      plant: world.plantDisplayName(plantId),
+      mw: Math.round(world.params.get(plantId, Param.CapacityMw)),
     },
     subjectId: plantId,
     subjectKind: 'plant',

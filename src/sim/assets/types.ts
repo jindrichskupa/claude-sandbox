@@ -61,6 +61,16 @@ export interface PlantAsset {
   /** Tick at which the current phase ends. Meaningless while Operating. */
   phaseEndsTick: number
   /**
+   * When work began on a unit that is still being built. Negative for an inherited project, on
+   * the same principle as `commissionedTick`: somebody broke ground before the scenario opened.
+   *
+   * Kept because how far through a project is cannot be recovered from the time left alone — a
+   * reactor with seven years to run may be seven years from a standing start or fifteen years into
+   * a build that was supposed to take six. `quoteAbandonment` prices walking away from it, and the
+   * two cases are not worth the same.
+   */
+  buildStartTick?: number
+  /**
    * When the unit entered service. Inherited plants have a negative value — they were
    * commissioned before the scenario begins, which is the whole point of a brownfield start.
    */

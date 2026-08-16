@@ -599,5 +599,10 @@
   "objective.halfLowCarbon": "Half the energy from something that does not burn, by 2050",
   "scenario.czechia1995.name": "Czechia, 1995",
   "scenario.czechia1995.description": "A real country at a date when everything was still open. Half the power comes from lignite under the northern mountains, a third of the country is heated by the same stations, and the second reactor is a hole in the ground at Temelín that somebody has to decide about.",
-  "objective.replaceTheBasin": "Hold 6.5 GW of dispatchable capacity by 2025"
+  "objective.replaceTheBasin": "Hold 6.5 GW of dispatchable capacity by 2025",
+  "ui.abandon": "Abandon",
+  "ui.abandonCost": "Stop the work: {cost} to make the site safe, {years} yr to hand it back. Everything already spent is gone, and any project facility becomes ordinary debt.",
+  "build.abandoning": "Work stopped. The site will be made safe and handed back.",
+  "build.notAbandonable": "Only a project still being built can be abandoned",
+  "news.projectAbandoned": "{plant} abandoned: {mw} MW that will never be built"
 }

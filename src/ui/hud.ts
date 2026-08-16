@@ -25,6 +25,7 @@ import { MAX_NAME_LENGTH } from '@sim/naming'
 import { reconcile } from './reconcile'
 import {
   nextVoltage,
+  quoteAbandonment,
   quoteLineDemolition,
   substationBaysFree,
   quoteLineRenewal,
@@ -68,6 +69,8 @@ export interface HudCallbacks {
   onRetire: (plantId: string) => void
   onMothball: (plantId: string, mothball: boolean) => void
   onRefurbish: (plantId: string) => void
+  /** Stop an unfinished project. See `abandonProject`. */
+  onAbandon: (plantId: string) => void
   onChooseEvent: (uid: string, choiceId: string) => void
   onSetMaintenance: (level: number) => void
   onSetInsured: (insured: boolean) => void
@@ -1361,6 +1364,21 @@ export class Hud {
       const retire = el('button', 'danger', t('ui.retire'))
       retire.addEventListener('click', () => this.callbacks.onRetire(plant.id))
       row.appendChild(retire)
+    } else if (plant.phase === LifecyclePhase.Building) {
+      // What it would cost to stop, on the button rather than behind a confirmation. The money
+      // already spent is gone either way, and saying so on the tooltip is the only defence the
+      // player has against throwing good money after it.
+      const quote = quoteAbandonment(this.world, plant.id)
+      const abandon = el('button', 'danger', t('ui.abandon'))
+      abandon.title = quote.ok
+        ? t('ui.abandonCost', {
+            cost: formatMoney(quote.totalCost),
+            years: Math.max(1, Math.round(quote.buildTicks / TICKS_PER_YEAR)),
+          })
+        : t(quote.reasonKey ?? 'build.notAbandonable', quote.reasonParams)
+      abandon.disabled = !quote.ok
+      abandon.addEventListener('click', () => this.callbacks.onAbandon(plant.id))
+      row.appendChild(abandon)
     }
     return row
   }

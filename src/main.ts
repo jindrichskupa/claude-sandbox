@@ -39,6 +39,7 @@ import {
   quoteLine,
   quotePlant,
   reactivatePlant,
+  abandonProject,
   refurbishPlant,
   retirePlant,
   upgradeLine,
@@ -304,6 +305,12 @@ async function main(): Promise<void> {
       onRefurbish: (plantId) => {
         const result = refurbishPlant(world, plantId)
         hud.setHint(result.ok ? t('build.refurbishing') : t(result.quote.reasonKey ?? 'build.notRefurbishable'))
+        hud.update()
+      },
+      onAbandon: (plantId) => {
+        const result = abandonProject(world, plantId)
+        hud.setHint(result.ok ? t('build.abandoning') : t(result.quote.reasonKey ?? 'build.notAbandonable'))
+        hud.selectNode(null)
         hud.update()
       },
       onMothball: (plantId, mothball) => {

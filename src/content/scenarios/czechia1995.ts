@@ -26,12 +26,19 @@
  * system — coal in the north-west, load in Prague and Ostrava, one reactor, a long thin country
  * to carry it across — and never about its size.
  *
- * Two more honest departures. **Dlouhé stráně** was commissioned in 1996, not 1995, and is here
- * at zero years old — a year early, because a scenario about Czech flexibility without its
- * pumped storage would be a stranger distortion than a twelve-month one. **Temelín is absent**,
- * and that is the point: in 1995 it was eight years into construction, four years from its
- * original commissioning date, and the argument over whether to finish it was the loudest thing
- * in Czech energy. The scenario hands the player the empty site and the same decision.
+ * ## What is not finished
+ *
+ * Three things on this map are not machines but somebody else's unfinished work, which is half of
+ * what a real handover consists of. **Temelín** is eight years into construction with seven to go
+ * and no unit running — the loudest argument in Czech energy that year, and the player inherits
+ * both the hole in the ground and the argument. **Dlouhé stráně** is a year from finishing after
+ * seventeen, which is the reverse case: the cheap end of somebody else's decade. **Tušimice** is
+ * in pieces, in the middle of the desulphurisation programme that between 1992 and 1998 decided
+ * which lignite units had a future.
+ *
+ * None of the three is a decoration. The reactor can be finished or walked away from — see
+ * `abandonProject`, which exists because of this scenario — and either answer costs money the
+ * player would rather spend on something else.
  *
  * ## Why it is hard
  *
@@ -158,9 +165,9 @@ export const CZECHIA_1995: ScenarioContent = {
     { id: 'n_orlik', kind: 'plant', x: 17, y: 16, name: 'Orlík' },
     { id: 'n_slapy', kind: 'plant', x: 18, y: 14, name: 'Slapy' },
 
-    // The empty site. Eight years of construction and no unit; whether it is ever finished is the
-    // player's decision rather than the scenario's.
-    { id: 'n_temelin', kind: 'substation', x: 15, y: 18, name: 'Temelín', kvLevels: [400] },
+    // Eight years of construction and no unit yet. Whether it is ever finished is the player's
+    // decision rather than the scenario's — see the plant list.
+    { id: 'n_temelin', kind: 'plant', x: 15, y: 18, name: 'Temelín' },
 
     // The backbone. Three switching stations, which is what turns a coalfield in the north-west
     // and a load in the north-east into one grid.
@@ -299,7 +306,20 @@ export const CZECHIA_1995: ScenarioContent = {
     // apiece, which is the closest the catalogue's 600 MW block comes to the real sites.
     { id: 'p_prunerov1', nodeId: 'n_prunerov', typeId: 'lignite', name: 'Prunéřov I', ageYears: 28 },
     { id: 'p_prunerov2', nodeId: 'n_prunerov', typeId: 'lignite', name: 'Prunéřov II', ageYears: 14 },
-    { id: 'p_tusimice', nodeId: 'n_tusimice', typeId: 'lignite', name: 'Tušimice II', ageYears: 21 },
+    // In pieces, in the middle of the retrofit that decided which lignite units had a future.
+    // Between 1992 and 1998 ČEZ desulphurised the fleet it meant to keep and closed the rest; the
+    // units that got scrubbers ran on for another quarter century. The game has no separate model
+    // for flue gas desulphurisation and treats it as the general overhaul it also was — new
+    // burners, turbine work and twenty more years — which is honest about what it buys and silent
+    // about the part it does not model, the emissions the scrubber was actually for.
+    {
+      id: 'p_tusimice',
+      nodeId: 'n_tusimice',
+      typeId: 'lignite',
+      name: 'Tušimice II',
+      ageYears: 21,
+      inProgress: { kind: 'refurbishing', yearsElapsed: 1, yearsRemaining: 1.5, costRemainingShare: 0.6 },
+    },
     { id: 'p_pocerady', nodeId: 'n_pocerady', typeId: 'lignite', name: 'Počerady', ageYears: 25 },
     { id: 'p_ledvice', nodeId: 'n_ledvice', typeId: 'lignite', name: 'Ledvice', ageYears: 29 },
     { id: 'p_melnik', nodeId: 'n_melnik', typeId: 'lignite', name: 'Mělník I', ageYears: 34 },
@@ -323,7 +343,44 @@ export const CZECHIA_1995: ScenarioContent = {
     // The flexibility. Dalešice was built to follow Dukovany; Dlouhé stráně is brand new — a
     // year early, see the note at the top of the file.
     { id: 'p_dalesice', nodeId: 'n_dalesice', typeId: 'pumped', name: 'Dalešice', ageYears: 17 },
-    { id: 'p_dlouhestrane', nodeId: 'n_dlouhestrane', typeId: 'pumped', name: 'Dlouhé stráně', ageYears: 0 },
+    // A year from finishing, seventeen years after the first spade went in — begun in 1978,
+    // abandoned for most of the eighties for want of money, restarted, and switched on in 1996.
+    // The last year of a project is the cheap part, which is why the player inherits a bargain:
+    // six hundred megawatts of flexibility for the price of finishing somebody else's decade.
+    {
+      id: 'p_dlouhestrane',
+      nodeId: 'n_dlouhestrane',
+      typeId: 'pumped',
+      name: 'Dlouhé stráně',
+      ageYears: 0,
+      inProgress: { kind: 'building', yearsElapsed: 17, yearsRemaining: 1, costRemainingShare: 0.08 },
+    },
+
+    // And the hole in the ground.
+    //
+    // Temelín was begun in 1987 as four Soviet-design units, cut to two in 1990, and in 1995 it
+    // was eight years in with nothing running, four years past its first commissioning date, and
+    // the loudest argument in Czech energy. It was finished in 2002 — fifteen years, against a
+    // plan of six.
+    //
+    // One block rather than two, on the same rule as Dukovany: this scenario is the real fleet
+    // rounded to the units the game owns, at about half the country's size.
+    //
+    // The share left to pay is set by what it does to *this* utility rather than by the real
+    // percentage, and the difference is worth stating. By 1995 roughly a third of the eventual
+    // bill had been spent, so two thirds were left; but the catalogue prices a reactor at Western
+    // 2020 rates, four times what Temelín cost per kilowatt, and two thirds of that against a
+    // half-scale utility's cash flow would not be a decision, it would be a foregone bankruptcy.
+    // What is kept true is the pressure: finishing it costs about a year of everything the company
+    // earns, every year, for seven years. That is what the argument was about.
+    {
+      id: 'p_temelin',
+      nodeId: 'n_temelin',
+      typeId: 'nuclear',
+      name: 'Temelín 1',
+      ageYears: 0,
+      inProgress: { kind: 'building', yearsElapsed: 8, yearsRemaining: 7, costRemainingShare: 0.35 },
+    },
 
     // The heating plants. Backpressure coal sets, which is what makes the winter hard: on a
     // January evening these are not a choice the dispatch makes, they are an output it is given.

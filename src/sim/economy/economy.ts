@@ -569,6 +569,42 @@ export function openProjectFacility(
 }
 
 /**
+ * Call in a project facility whose project has been cancelled.
+ *
+ * Non-recourse debt is non-recourse against a *project*. A sponsor who abandons the project has
+ * no project left for the lender's claim to sit against, so the claim comes back to the company —
+ * and it comes back now, not on the commissioning date of a station that will never commission.
+ *
+ * Three things change and each one hurts in a different place. What is left undrawn is cancelled,
+ * because there is nothing left to fund. Repayments start immediately, so a balance that was
+ * quietly capitalising its interest turns into a monthly instalment out of cash. And the loan
+ * stops being a project loan, which means `corporateDebt` starts counting it — the borrowing limit
+ * ignored it while it was somebody else's risk, and a player who financed two reactors and
+ * cancelled one discovers that afternoon how much room they actually have.
+ *
+ * Returns what came back onto the company, so the caller can say so.
+ */
+export function recallProjectFinance(finances: Finances, assetId: string, tick: number): number {
+  const loan = finances.loans.find((l) => l.kind === 'project' && l.assetId === assetId)
+  if (!loan) return 0
+  const recalled = loan.outstanding
+  loan.kind = 'planned'
+  loan.repaymentsStartTick = tick
+  delete loan.commitment
+  delete loan.drawn
+  // A cancelled facility is not repaid over the tenor of a station that will not exist. What is
+  // left of the original term stands, but never less than a few years — a lender who has just
+  // lost its security does not extend, and it does not demand the lot back on Friday either.
+  const floor = tick + Math.round(MIN_RECALLED_TERM_YEARS * TICKS_PER_YEAR)
+  if (loan.maturesTick < floor) loan.maturesTick = floor
+  loan.principal = loan.outstanding
+  return recalled
+}
+
+/** How long a lender gives a sponsor to repay a facility whose project died. */
+const MIN_RECALLED_TERM_YEARS = 5
+
+/**
  * Draw the lender's share of one instalment of construction spending.
  *
  * Called as the money is actually spent, so the facility funds building the thing and nothing

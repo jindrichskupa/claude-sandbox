@@ -599,5 +599,10 @@
   "objective.halfLowCarbon": "Polovina energie z nespalovacích zdrojů do roku 2050",
   "scenario.czechia1995.name": "Česko, 1995",
   "scenario.czechia1995.description": "Skutečná země v době, kdy bylo ještě všechno otevřené. Polovina výroby stojí na hnědém uhlí pod Krušnými horami, třetinu země vytápějí tytéž elektrárny a druhá jaderná elektrárna je rozestavěná jáma u Temelína, o které musí někdo rozhodnout.",
-  "objective.replaceTheBasin": "Udržet do roku 2025 alespoň 6,5 GW řiditelného výkonu"
+  "objective.replaceTheBasin": "Udržet do roku 2025 alespoň 6,5 GW řiditelného výkonu",
+  "ui.abandon": "Opustit",
+  "ui.abandonCost": "Zastavit práce: {cost} na zabezpečení staveniště, {years} let na jeho vrácení. Vše dosud vynaložené je pryč a projektové financování se mění na běžný dluh.",
+  "build.abandoning": "Práce zastaveny. Staveniště se zabezpečí a vrátí.",
+  "build.notAbandonable": "Opustit lze jen rozestavěný projekt",
+  "news.projectAbandoned": "{plant} opuštěn: {mw} MW, které nikdy nevzniknou"
 }

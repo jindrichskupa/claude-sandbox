@@ -7,7 +7,7 @@
  * plant inherited on day one are the same kind of object, differing only in a number.
  */
 
-import type { ScenarioContent } from '@content/scenarios/types'
+import type { InProgressSpec, ScenarioContent } from '@content/scenarios/types'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { TICKS_PER_YEAR } from '../core/time'
 import type { VoltageLevel } from '@content/lineTypes'
@@ -41,6 +41,55 @@ export function toScenarioDef(content: ScenarioContent): ScenarioDef {
     feedInTariffs: content.feedInTariffs ?? {},
     ...(content.terrainRows ? { terrainRows: content.terrainRows } : {}),
   }
+}
+
+/**
+ * Somebody else's unfinished project, handed over as it stood.
+ *
+ * The scenario says how long is left and how much is left to pay; everything else follows from
+ * the same fields the player's own projects use, so an inherited hole in the ground and one the
+ * player dug are the same object. That is the point — `abandonProject` works on either, and the
+ * lifecycle code has no idea which is which.
+ *
+ * The design life of a unit still being built is the vintage of the year it will *enter service*,
+ * not the year the scenario opens. A reactor ordered in 1987 and finished in 2002 is a 2002
+ * machine, which is the same rule `buildPlant` applies to the player's own orders.
+ */
+function applyInProgress(
+  world: World,
+  plant: PlantAsset,
+  spec: InProgressSpec,
+  startYear: number,
+): void {
+  const type = PLANT_TYPES[plant.typeId]
+  const ticks = Math.max(1, Math.round(spec.yearsRemaining * TICKS_PER_YEAR))
+  const fullCost = type.capexPerKw.value * type.capacityMw.value * 1000
+
+  plant.phase = spec.kind === 'building' ? LifecyclePhase.Building : LifecyclePhase.Refurbishing
+  plant.phaseEndsTick = ticks
+  plant.online = false
+  plant.outputMw = 0
+
+  if (spec.kind === 'building') {
+    plant.commissionedTick = ticks
+    // Negative, like an inherited plant's commissioning tick: somebody broke ground years before
+    // the scenario opened, and how long ago decides what walking away costs.
+    plant.buildStartTick = -Math.round(spec.yearsElapsed * TICKS_PER_YEAR)
+    plant.conditionPct = 1
+    plant.capexPaid = 0
+    plant.cumulativeRunHours = 0
+    plant.cumulativeStarts = 0
+    plant.designLifeYears =
+      type.designLifeYears.value *
+      designLifeFactor(plant.typeId, startYear + spec.yearsRemaining, type.designLifeYears.sourceYear)
+  }
+
+  // What is left to pay, spread over what is left to build. The rest was spent by whoever the
+  // player took over from and is not on the books — see `InProgressSpec`. An overhaul is a
+  // fraction of a new machine, and the catalogue already says what fraction, so the share the
+  // scenario writes means the same thing for both kinds: how much of *this project* is left.
+  const projectCost = spec.kind === 'building' ? fullCost : fullCost * type.refurbishCostFraction.value
+  world.scheduleSpending(plant.id, projectCost * Math.max(0, spec.costRemainingShare), ticks, 'capex')
 }
 
 export function buildWorld(content: ScenarioContent): World {
@@ -191,6 +240,8 @@ export function buildWorld(content: ScenarioContent): World {
     // and the country goes dark for an hour it did nothing to deserve — which the post-mortem
     // duly reported as a ramp failure, correctly and uselessly.
     plant.outputMw = type.minLoadFraction.value * type.capacityMw.value
+
+    if (spec.inProgress) applyInProgress(world, plant, spec.inProgress, content.startYear)
     world.addPlant(plant)
   }
 
