@@ -26,6 +26,9 @@
  * automatic judgement is not on offer.
  *
  * Run: npx tsx scripts/archetypes.ts [scenarioId] [untilYear]
+ *
+ * `untilYear` past the scenario's own end plays on past the verdict, which is what the free-play
+ * mode does and what a question about 2050 on a scenario written to 2025 is actually asking.
  */
 
 import { buildWorld } from '@sim/scenario/build'
