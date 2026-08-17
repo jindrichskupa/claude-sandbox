@@ -65,6 +65,30 @@
  * And the district heating plant, rebuilt twice and still made of 1950s steel, runs out between 2028
  * and 2042 — Třebovice first, Trmice last — while heat, unlike electricity, cannot be left
  * undelivered in February at any price.
+ *
+ * ## What it measures as, played
+ *
+ * All five archetypes to 2050, on the same seed (`scripts/cashLine.ts czechia-2015 <strategy> 2050`):
+ *
+ *     nuclear     0.76% unserved  0.273 t/MWh  10.3bn cash  3/5 objectives
+ *     fossil      1.35%           0.448        30.2bn       2/5
+ *     least-cost  3.93%           0.445        27.5bn       2/5
+ *     green       5.70%           0.281        19.3bn       2/5
+ *     novelty    11.52%           0.478        0, 7.2bn debt 2/5
+ *
+ * Two things to read off that, one good and one a defect elsewhere.
+ *
+ * The good one: **the pressure here is physical, not financial.** Every one of them loses, and every
+ * one loses on the lights rather than on the money — the fleet dies faster than a crude planner
+ * replaces it, and no amount of cash in the bank buys a reactor in under nine years. That is the
+ * scenario working: 1995's bots mostly died insolvent, and starting in the year the bill comes due
+ * moves the failure from the balance sheet to the system.
+ *
+ * The defect: four of the five end debt-free with between 10 and 30 billion, which no utility that
+ * failed its brief should. That is not this scenario — it is the regulated tariff paying depreciation
+ * on a modern-equivalent rate base out as free cash flow, in every scenario, and it is why the money
+ * cannot be lost. Recorded here because a reader comparing these five numbers deserves to know which
+ * of them is a finding about Czechia and which is a finding about `sim/economy/tariff.ts`.
  */
 
 import { TEMPERATE_CLIMATE } from '../../sim/weather/weather'
