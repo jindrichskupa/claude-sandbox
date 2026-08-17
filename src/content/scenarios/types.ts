@@ -48,6 +48,21 @@ export interface PlantSpec {
   /** How old the unit already is when the scenario begins. Ignored for a unit still being built. */
   ageYears: number
   /**
+   * Overhauls this machine has already had before the scenario opens.
+   *
+   * Age alone cannot describe an inherited thermal fleet, and getting it wrong is not cosmetic:
+   * a Czech lignite unit from 1974 is 41 years old in 2015 against a 45-year design life, so on
+   * age alone it dies in the scenario's fourth year — when in life it was comprehensively
+   * rebuilt in between and runs into the 2040s. That rebuild is the whole reason half the fleet
+   * survived, and a scenario that could not say so would be handing the player a fleet that
+   * collapses for a reason that never happened.
+   *
+   * Counted rather than described, because what an overhaul buys belongs to the technology and
+   * not to the scenario: `applyOverhaul` reads the extension, the efficiency gain and the
+   * diminishing return off the plant type, exactly as it does when the player pays for one.
+   */
+  refurbishments?: number
+  /**
    * Work already under way when the scenario opens.
    *
    * A brownfield start is not only machines: it is also somebody else's half-finished commitments.

@@ -599,6 +599,8 @@
   "objective.halfLowCarbon": "Half the energy from something that does not burn, by 2050",
   "scenario.czechia1995.name": "Czechia, 1995",
   "scenario.czechia1995.description": "A real country at a date when everything was still open. Half the power comes from lignite under the northern mountains, a third of the country is heated by the same stations, and the second reactor is a hole in the ground at Temelín that somebody has to decide about.",
+  "scenario.czechia2015.name": "Czechia, 2015",
+  "scenario.czechia2015.description": "The same country twenty years on, with the easy part already spent. Temelín is finished, a gigawatt of solar is on a guaranteed price that expires inside fifteen years, and every unit in the lignite basin has been rebuilt once — which is the only reason it is still running.",
   "objective.replaceTheBasin": "Hold 6.5 GW of dispatchable capacity by 2025",
   "ui.abandon": "Abandon",
   "ui.abandonCost": "Stop the work: {cost} to make the site safe, {years} yr to hand it back. Everything already spent is gone, and any project facility becomes ordinary debt.",

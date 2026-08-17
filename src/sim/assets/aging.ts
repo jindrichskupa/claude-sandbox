@@ -7,7 +7,7 @@
  * on the first day rather than thirty years in — which is the point of a brownfield start.
  */
 
-import { PLANT_TYPES } from '@content/plantTypes'
+import { PLANT_TYPES, type PlantTypeDef } from '@content/plantTypes'
 import { RELIABILITY } from '@content/reliability'
 import { TICKS_PER_YEAR } from '../core/time'
 import { cycleLifeUsed } from '../dispatch/storage'
@@ -48,6 +48,29 @@ export function expectedCondition(plant: PlantAsset, tick: number): number {
   const f = lifeFraction(plant, tick)
   if (f <= 1) return Math.max(0, 1 - 0.35 * f)
   return Math.max(0.1, 0.65 - 0.5 * (f - 1))
+}
+
+/**
+ * Book one completed overhaul against a machine.
+ *
+ * Here rather than at the two call sites — the world, when an overhaul it started finishes, and
+ * the scenario loader, when a brownfield fleet arrives with overhauls already behind it — because
+ * the two must not be able to disagree about what an overhaul is worth. A scenario that inherited
+ * a differently-valued refurbishment would be quietly playing a different game.
+ *
+ * Diminishing returns: each overhaul buys less than the one before, because what is left to
+ * renew after the second time is the shell and the foundations.
+ */
+export function applyOverhaul(plant: PlantAsset, type: PlantTypeDef): void {
+  const escalation = 1 / (1 + plant.refurbishments * 0.5)
+  plant.refurbishments++
+  plant.lifeExtension += type.refurbishLifeExtension.value * escalation
+  plant.efficiencyUplift += type.refurbishEfficiencyGain.value * escalation
+  plant.capacityUplift += type.refurbishCapacityGain.value * escalation
+  // Worn parts are gone, but the shell and the foundations are still the old ones.
+  plant.conditionPct = Math.min(1, plant.conditionPct + 0.55 * escalation)
+  // Replacing the cells is replacing the thing that wears out.
+  if (type.storage?.cycleLife) plant.cyclesUsed = 0
 }
 
 /**

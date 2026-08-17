@@ -545,3 +545,67 @@ describe('the save file envelope', () => {
     }
   })
 })
+
+/**
+ * Two dates, one country.
+ *
+ * Czechia is in the catalogue twice — 1995 and 2015 — and the second date exists because the first
+ * one's interesting decade arrives thirty-five years in. What must not happen is the two drifting
+ * into being two different countries, which a pair of hand-maintained copies of a fifty-by-
+ * twenty-four character grid would do at the first correction. Hence one shared map module, and
+ * hence this: the property that made the split worth making.
+ */
+describe('the two Czech dates', () => {
+  const cz1995 = scenarioById('czechia-1995')!
+  const cz2015 = scenarioById('czechia-2015')!
+
+  it('stand on exactly the same ground and the same sites', () => {
+    expect(cz2015.terrainRows).toBe(cz1995.terrainRows)
+    expect(cz2015.nodes).toBe(cz1995.nodes)
+    expect(cz2015.heatPipes).toBe(cz1995.heatPipes)
+    expect(cz2015.kmPerTile).toBe(cz1995.kmPerTile)
+  })
+
+  it('describe the same regions, resized rather than redrawn', () => {
+    // Same thirteen load points in the same order, so a player who knows one map knows the other.
+    expect(cz2015.cities.map((c) => c.id)).toEqual(cz1995.cities.map((c) => c.id))
+    // Electricity up, district heat down: the two trends that actually ran between the dates, and
+    // the reason a single "growth" multiplier would have been wrong.
+    const elec = (s: typeof cz1995) => s.cities.reduce((t, c) => t + c.baseDemandMw, 0)
+    const heat = (s: typeof cz1995) => s.cities.reduce((t, c) => t + c.baseHeatDemandMwth, 0)
+    expect(elec(cz2015)).toBeGreaterThan(elec(cz1995))
+    expect(heat(cz2015)).toBeLessThan(heat(cz1995))
+  })
+
+  it('carry the same corridors, twenty years older, plus what was built in between', () => {
+    const older = new Map(cz1995.lines.map((l) => [l.id, l]))
+    let rebuilt = 0
+    for (const line of cz2015.lines) {
+      const was = older.get(line.id)
+      if (!was) continue
+      // Either it aged by exactly the gap between the dates, or the scenario says it was rebuilt.
+      if (line.ageYears === was.ageYears + 20) continue
+      rebuilt++
+      expect(line.ageYears).toBeLessThan(was.ageYears + 20)
+    }
+    // Every 1995 corridor still exists in 2015 — nothing was dismantled — and a handful were not
+    // simply left to age.
+    expect(cz2015.lines.length).toBeGreaterThan(cz1995.lines.length)
+    expect(rebuilt).toBeGreaterThan(0)
+  })
+
+  it('opens 2015 on a fleet that is running, not a field of cold machines', () => {
+    // The failure this catches is a real one from the first Czech scenario: inherited plant left at
+    // zero output means hour one is a cold start, every unit is held to one ramp step, and the
+    // country goes dark for an hour it did nothing to deserve.
+    const world = buildWorld(cz2015)
+    const generating = world.plants.filter((p) => p.phase === LifecyclePhase.Operating && p.outputMw > 0)
+    expect(generating.length).toBeGreaterThan(10)
+
+    for (let i = 0; i < 48; i++) world.step()
+    const day = world.recentHistory(48)
+    const unserved = day.reduce((t, snap) => t + snap.unservedMw, 0)
+    const demanded = day.reduce((t, snap) => t + snap.demandMw, 0)
+    expect(unserved / Math.max(1, demanded)).toBeLessThan(0.001)
+  })
+})

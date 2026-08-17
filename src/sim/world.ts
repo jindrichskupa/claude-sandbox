@@ -39,6 +39,7 @@ import {
   advanceCondition,
   ageYears,
   agingModifiers,
+  applyOverhaul,
   forcedOutageRate,
   terminalFailureShare,
   AGE_SOURCE,
@@ -1507,17 +1508,7 @@ export class World {
           subjectKind: 'plant',
         })
       } else if (plant.phase === LifecyclePhase.Refurbishing && this.tick >= plant.phaseEndsTick) {
-        const type = PLANT_TYPES[plant.typeId]
-        // Diminishing returns: each overhaul buys less than the one before.
-        const escalation = 1 / (1 + plant.refurbishments * 0.5)
-        plant.refurbishments++
-        plant.lifeExtension += type.refurbishLifeExtension.value * escalation
-        plant.efficiencyUplift += type.refurbishEfficiencyGain.value * escalation
-        plant.capacityUplift += type.refurbishCapacityGain.value * escalation
-        // Worn parts are gone, but the shell and the foundations are still the old ones.
-        plant.conditionPct = Math.min(1, plant.conditionPct + 0.55 * escalation)
-        // Replacing the cells is replacing the thing that wears out.
-        if (PLANT_TYPES[plant.typeId].storage?.cycleLife) plant.cyclesUsed = 0
+        applyOverhaul(plant, PLANT_TYPES[plant.typeId])
         plant.phase = LifecyclePhase.Operating
         plant.online = true
         this.postNews({

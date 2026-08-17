@@ -52,6 +52,16 @@
  */
 
 import { TEMPERATE_CLIMATE } from '../../sim/weather/weather'
+import {
+  czechiaCities,
+  CZECHIA_HEAT_PIPES,
+  CZECHIA_KM_PER_TILE,
+  CZECHIA_LINES_1995,
+  CZECHIA_MAP_HEIGHT,
+  CZECHIA_MAP_WIDTH,
+  CZECHIA_NODES,
+  CZECHIA_TERRAIN_ROWS,
+} from './czechiaMap'
 import type { ScenarioContent } from './types'
 
 export const CZECHIA_1995: ScenarioContent = {
@@ -60,12 +70,9 @@ export const CZECHIA_1995: ScenarioContent = {
   descriptionKey: 'scenario.czechia1995.description',
   startYear: 1995,
   seed: 19950101,
-  mapWidth: 50,
-  mapHeight: 24,
-  // The land runs about forty tiles west to east for the country's four hundred and ninety
-  // kilometres. Which also means the Ostrava corner really is four hundred kilometres from the
-  // lignite, and the map will make the player feel it.
-  kmPerTile: 12,
+  mapWidth: CZECHIA_MAP_WIDTH,
+  mapHeight: CZECHIA_MAP_HEIGHT,
+  kmPerTile: CZECHIA_KM_PER_TILE,
   // A utility that has been spending on a half-built reactor for eight years. The debt is the
   // interesting number: it is what makes the first replacement decision a financing decision.
   startingCash: 420_000_000,
@@ -80,217 +87,14 @@ export const CZECHIA_1995: ScenarioContent = {
   initialRegimeId: 'affordability',
   climate: TEMPERATE_CLIMATE,
 
-  /**
-   * The map, drawn rather than generated.
-   *
-   * A landlocked basin ringed by border mountains: the Krušné hory and Krkonoše along the north,
-   * Šumava down the south-west, the Českomoravská vrchovina as the highland in the middle, the
-   * Jeseníky and Beskydy in the east. The flat ground is where it is in life — the north Bohemian
-   * lignite basin, the Elbe lowland, the Haná and the Ostrava basin — and the rivers are the
-   * Vltava, the Elbe, the Ohře, the Morava and the Odra.
-   */
-  terrainRows: [
-    'MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM',
-    'MMMMMMMMMMMMMMMMMHMMMMMhhMMMMMMMMMMMMMMMMMMMMMMMMM',
-    'MMMMMMMMMMMMMMMhhHhhhhhhhhHhMMMMMMMMMMMMMMMMMMMMMM',
-    'MMMMMMMMMMMhhhhhfFffffffffFhhhhhhhhhMMMMMMMMMMMMMM',
-    'MMMMMMMMMMMhfffff,........fFfffffffhhhMMMMMMMMMMMM',
-    'MMMMMMMMMMhhf.....,........,......fffhhhMMMMMMMMMM',
-    'MMMMMMMMhhHFF,,,,,,,,.......,.......ffFhhhhhHMMMMM',
-    'MMMMMMhhHFff.........,,,....,.........FffffHhMMMMM',
-    'MMMMMMhfff...........,..,,.,.......f..,...FfhMMMMM',
-    'MMMMMMhff...........,.....,.......fff.,..FfhhMMMMM',
-    'MMMMMMhhff..........,............ffhff,.ffhhMMMMMM',
-    'MMMMMMMhhf.........,.........ffffffff.,.fhhMMMMMMM',
-    'MMMMMMMMhff........,......ffffffffff..,.fhMMMMMMMM',
-    'MMMMMMMMhhf.......,.....ffffhhhffff..,..fhMMMMMMMM',
-    'MMMMMMMMMhff......,....ffffhhhhhfff..,..fhMMMMMMMM',
-    'MMMMMMMMMhhf.....,....ffffffhhhfff...,..fhhMMMMMMM',
-    'MMMMMMMMMMhff....,....fffffffffff...,...ffhMMMMMMM',
-    'MMMMMMMMMMhhff..,.....ffffffffff....,..ffhhMMMMMMM',
-    'MMMMMMMMMMMhhff,.......ffffffff.....,.ffhhMMMMMMMM',
-    'MMMMMMMMMMMMhhFfff......f.....,,,,..,.fhhMMMMMMMMM',
-    'MMMMMMMMMMMMMHhhhfffffffffff......,.FffhMMMMMMMMMM',
-    'MMMMMMMMMMMMMHMMhhhhhhhhhhhfffff...FfhhhMMMMMMMMMM',
-    'MMMMMMMMMMMMMMMMMMMMMMMMMMhhhhhffffFhhMMMMMMMMMMMM',
-    'MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMhhhfhhhMMMMMMMMMMMMM',
-  ],
+  terrainRows: CZECHIA_TERRAIN_ROWS,
 
-  nodes: [
-    // The thirteen load points. Each is a region rather than a town: Prague here is Prague and
-    // the ring around it, Ostrava is the whole Moravian-Silesian industrial belt.
-    { id: 'n_praha', kind: 'city', x: 20, y: 10, name: 'Praha' },
-    { id: 'n_usti', kind: 'city', x: 17, y: 5, name: 'Ústí nad Labem' },
-    { id: 'n_kvary', kind: 'city', x: 10, y: 9, name: 'Karlovy Vary' },
-    { id: 'n_plzen', kind: 'city', x: 13, y: 13, name: 'Plzeň' },
-    { id: 'n_budejovice', kind: 'city', x: 20, y: 19, name: 'České Budějovice' },
-    { id: 'n_liberec', kind: 'city', x: 23, y: 4, name: 'Liberec' },
-    { id: 'n_hradec', kind: 'city', x: 27, y: 9, name: 'Hradec Králové' },
-    { id: 'n_pardubice', kind: 'city', x: 26, y: 12, name: 'Pardubice' },
-    { id: 'n_jihlava', kind: 'city', x: 26, y: 17, name: 'Jihlava' },
-    { id: 'n_brno', kind: 'city', x: 32, y: 18, name: 'Brno' },
-    { id: 'n_olomouc', kind: 'city', x: 36, y: 14, name: 'Olomouc' },
-    { id: 'n_zlin', kind: 'city', x: 38, y: 18, name: 'Zlín' },
-    { id: 'n_ostrava', kind: 'city', x: 40, y: 13, name: 'Ostrava' },
+  nodes: CZECHIA_NODES,
 
-    // The lignite basin under the Krušné hory. Six stations inside sixty kilometres of each
-    // other, all burning fuel that comes out of the ground beside them, and between them more
-    // than half the country's electricity.
-    { id: 'n_prunerov', kind: 'plant', x: 12, y: 7, name: 'Prunéřov' },
-    { id: 'n_tusimice', kind: 'plant', x: 14, y: 7, name: 'Tušimice' },
-    { id: 'n_pocerady', kind: 'plant', x: 17, y: 7, name: 'Počerady' },
-    { id: 'n_ledvice', kind: 'plant', x: 15, y: 6, name: 'Ledvice' },
-    // Down the Elbe from the basin, on rail-hauled lignite rather than a conveyor.
-    { id: 'n_melnik', kind: 'plant', x: 21, y: 7, name: 'Mělník' },
-    { id: 'n_chvaletice', kind: 'plant', x: 25, y: 10, name: 'Chvaletice' },
-    // Hard coal, at the far end of the country, on the Ostrava coalfield.
-    { id: 'n_detmarovice', kind: 'plant', x: 41, y: 11, name: 'Dětmarovice' },
-
-    // The heating plants. Every one of these sits inside or beside the city it heats, because a
-    // hot-water main is not a transmission line and thirty kilometres is already a long one.
-    { id: 'n_malesice', kind: 'plant', x: 21, y: 10, name: 'Praha-Malešice' },
-    { id: 'n_trmice', kind: 'plant', x: 18, y: 6, name: 'Trmice' },
-    { id: 'n_tisova', kind: 'plant', x: 10, y: 10, name: 'Tisová' },
-    { id: 'n_opatovice', kind: 'plant', x: 28, y: 10, name: 'Opatovice' },
-    { id: 'n_trebovice', kind: 'plant', x: 40, y: 11, name: 'Ostrava-Třebovice' },
-
-    // The reactor, out on the plateau, with its pumped storage three tiles away — which is not a
-    // coincidence in life either.
-    { id: 'n_dukovany', kind: 'plant', x: 30, y: 19, name: 'Dukovany' },
-    { id: 'n_dalesice', kind: 'plant', x: 28, y: 17, name: 'Dalešice' },
-    { id: 'n_dlouhestrane', kind: 'plant', x: 35, y: 10, name: 'Dlouhé stráně' },
-
-    // The Vltava cascade, from the Šumava border down to Prague.
-    { id: 'n_lipno', kind: 'plant', x: 14, y: 19, name: 'Lipno' },
-    { id: 'n_orlik', kind: 'plant', x: 17, y: 16, name: 'Orlík' },
-    { id: 'n_slapy', kind: 'plant', x: 18, y: 14, name: 'Slapy' },
-
-    // Eight years of construction and no unit yet. Whether it is ever finished is the player's
-    // decision rather than the scenario's — see the plant list.
-    { id: 'n_temelin', kind: 'plant', x: 15, y: 18, name: 'Temelín' },
-
-    // The backbone. Three switching stations, which is what turns a coalfield in the north-west
-    // and a load in the north-east into one grid.
-    { id: 'n_reporyje', kind: 'substation', x: 19, y: 12, name: 'Řeporyje' },
-    { id: 'n_krasikov', kind: 'substation', x: 34, y: 13, name: 'Krasíkov' },
-    { id: 'n_nosovice', kind: 'substation', x: 41, y: 15, name: 'Nošovice' },
-  ],
-
-  /**
-   * Thirteen regions, about 2.44 GW of base load between them, which peaks near 4.8.
-   *
-   * Split by 1995 population with an industrial weighting on top — Ostrava and the north-west
-   * consumed far more per head than their population implies, because that is where the steel,
-   * the chemicals and the smelting were, and Prague rather less. Heat is on for the six regions
-   * whose district heating is fed by a station on this map; the other seven burned gas and coal
-   * in their own cellars, as most of the country did.
-   */
-  cities: [
-    {
-      id: 'c_praha',
-      nodeId: 'n_praha',
-      name: 'Praha',
-      population: 2320,
-      baseDemandMw: 469,
-      baseHeatDemandMwth: 190,
-    },
-    {
-      id: 'c_usti',
-      nodeId: 'n_usti',
-      name: 'Ústí nad Labem',
-      population: 826,
-      baseDemandMw: 255,
-      baseHeatDemandMwth: 130,
-    },
-    {
-      id: 'c_kvary',
-      nodeId: 'n_kvary',
-      name: 'Karlovy Vary',
-      population: 305,
-      baseDemandMw: 78,
-      baseHeatDemandMwth: 60,
-    },
-    {
-      id: 'c_plzen',
-      nodeId: 'n_plzen',
-      name: 'Plzeň',
-      population: 555,
-      baseDemandMw: 130,
-      baseHeatDemandMwth: 0,
-    },
-    {
-      id: 'c_budejovice',
-      nodeId: 'n_budejovice',
-      name: 'České Budějovice',
-      population: 700,
-      baseDemandMw: 134,
-      baseHeatDemandMwth: 0,
-    },
-    {
-      id: 'c_liberec',
-      nodeId: 'n_liberec',
-      name: 'Liberec',
-      population: 428,
-      baseDemandMw: 91,
-      baseHeatDemandMwth: 0,
-    },
-    {
-      id: 'c_hradec',
-      nodeId: 'n_hradec',
-      name: 'Hradec Králové',
-      population: 553,
-      baseDemandMw: 112,
-      baseHeatDemandMwth: 85,
-    },
-    {
-      id: 'c_pardubice',
-      nodeId: 'n_pardubice',
-      name: 'Pardubice',
-      population: 508,
-      baseDemandMw: 130,
-      baseHeatDemandMwth: 85,
-    },
-    {
-      id: 'c_jihlava',
-      nodeId: 'n_jihlava',
-      name: 'Jihlava',
-      population: 521,
-      baseDemandMw: 94,
-      baseHeatDemandMwth: 0,
-    },
-    {
-      id: 'c_brno',
-      nodeId: 'n_brno',
-      name: 'Brno',
-      population: 1130,
-      baseDemandMw: 240,
-      baseHeatDemandMwth: 0,
-    },
-    {
-      id: 'c_olomouc',
-      nodeId: 'n_olomouc',
-      name: 'Olomouc',
-      population: 645,
-      baseDemandMw: 124,
-      baseHeatDemandMwth: 0,
-    },
-    {
-      id: 'c_zlin',
-      nodeId: 'n_zlin',
-      name: 'Zlín',
-      population: 597,
-      baseDemandMw: 139,
-      baseHeatDemandMwth: 0,
-    },
-    {
-      id: 'c_ostrava',
-      nodeId: 'n_ostrava',
-      name: 'Ostrava',
-      population: 1290,
-      baseDemandMw: 440,
-      baseHeatDemandMwth: 190,
-    },
-  ],
+  // Thirteen regions, about 2.44 GW of base load between them, which peaks near 4.8. The numbers
+  // themselves are in `czechiaMap`, because they are the shape of Czech demand rather than a fact
+  // about 1995; this is the date that defines them, so it takes them unscaled.
+  cities: czechiaCities({ electric: 1, heat: 1, population: 1 }),
 
   /**
    * Twenty generating units and the boilers behind the heat network.
@@ -407,96 +211,25 @@ export const CZECHIA_1995: ScenarioContent = {
     { id: 'p_trebovice_boiler_c', nodeId: 'n_trebovice', typeId: 'heat_boiler', name: 'Třebovice Boiler C', ageYears: 11 },
   ],
 
-  /**
-   * The 400 kV backbone and what hangs off it.
-   *
-   * Built in the seventies and early eighties to get lignite from the north-west to the industry
-   * in the north-east, which is precisely the corridor it still is. The 220 kV network beneath it
-   * is older, and the regional 110 kV feeds are older still.
-   */
-  lines: [
-    // The western coalfield onto the backbone.
-    { ageYears: 24, id: 'l_prunerov_reporyje', from: 'n_prunerov', to: 'n_reporyje', kv: 400, circuits: 2 },
-    { ageYears: 21, id: 'l_pocerady_reporyje', from: 'n_pocerady', to: 'n_reporyje', kv: 400, circuits: 1 },
-    { ageYears: 30, id: 'l_melnik_reporyje', from: 'n_melnik', to: 'n_reporyje', kv: 400, circuits: 2 },
-    { ageYears: 26, id: 'l_prunerov_tusimice', from: 'n_prunerov', to: 'n_tusimice', kv: 220, circuits: 1 },
-    { ageYears: 28, id: 'l_ledvice_usti', from: 'n_ledvice', to: 'n_usti', kv: 220, circuits: 2 },
-    { ageYears: 27, id: 'l_trmice_usti', from: 'n_trmice', to: 'n_usti', kv: 110, circuits: 1 },
-    { ageYears: 33, id: 'l_tisova_kvary', from: 'n_tisova', to: 'n_kvary', kv: 110, circuits: 2 },
-    { ageYears: 31, id: 'l_kvary_prunerov', from: 'n_kvary', to: 'n_prunerov', kv: 220, circuits: 1 },
-    { ageYears: 29, id: 'l_tisova_plzen', from: 'n_tisova', to: 'n_plzen', kv: 220, circuits: 1 },
+  lines: CZECHIA_LINES_1995,
 
-    // Prague and the middle.
-    { ageYears: 20, id: 'l_reporyje_praha', from: 'n_reporyje', to: 'n_praha', kv: 400, circuits: 2 },
-    { ageYears: 34, id: 'l_malesice_praha', from: 'n_malesice', to: 'n_praha', kv: 110, circuits: 2 },
-    { ageYears: 32, id: 'l_reporyje_plzen', from: 'n_reporyje', to: 'n_plzen', kv: 220, circuits: 1 },
-    { ageYears: 38, id: 'l_slapy_reporyje', from: 'n_slapy', to: 'n_reporyje', kv: 110, circuits: 1 },
-    { ageYears: 34, id: 'l_orlik_slapy', from: 'n_orlik', to: 'n_slapy', kv: 220, circuits: 1 },
-    { ageYears: 34, id: 'l_orlik_budejovice', from: 'n_orlik', to: 'n_budejovice', kv: 220, circuits: 1 },
-    { ageYears: 36, id: 'l_lipno_budejovice', from: 'n_lipno', to: 'n_budejovice', kv: 110, circuits: 1 },
-    // The 400 kV compound at Temelín, waiting for a unit that does not exist. Strung to the
-    // backbone in the eighties on the assumption the station would be finished in 1991.
-    { ageYears: 12, id: 'l_temelin_reporyje', from: 'n_temelin', to: 'n_reporyje', kv: 400, circuits: 2 },
-    { ageYears: 12, id: 'l_temelin_budejovice', from: 'n_temelin', to: 'n_budejovice', kv: 220, circuits: 1 },
-
-    // The north-east corridor: the reason the backbone exists.
-    { ageYears: 22, id: 'l_reporyje_chvaletice', from: 'n_reporyje', to: 'n_chvaletice', kv: 400, circuits: 1 },
-    { ageYears: 22, id: 'l_chvaletice_opatovice', from: 'n_chvaletice', to: 'n_opatovice', kv: 400, circuits: 1 },
-    { ageYears: 22, id: 'l_opatovice_krasikov', from: 'n_opatovice', to: 'n_krasikov', kv: 400, circuits: 1 },
-    { ageYears: 20, id: 'l_krasikov_nosovice', from: 'n_krasikov', to: 'n_nosovice', kv: 400, circuits: 1 },
-    { ageYears: 20, id: 'l_detmarovice_nosovice', from: 'n_detmarovice', to: 'n_nosovice', kv: 400, circuits: 2 },
-    { ageYears: 33, id: 'l_opatovice_hradec', from: 'n_opatovice', to: 'n_hradec', kv: 220, circuits: 2 },
-    { ageYears: 28, id: 'l_chvaletice_hradec', from: 'n_chvaletice', to: 'n_hradec', kv: 220, circuits: 1 },
-    { ageYears: 33, id: 'l_opatovice_pardubice', from: 'n_opatovice', to: 'n_pardubice', kv: 110, circuits: 2 },
-    { ageYears: 30, id: 'l_chvaletice_pardubice', from: 'n_chvaletice', to: 'n_pardubice', kv: 110, circuits: 2 },
-    { ageYears: 35, id: 'l_hradec_liberec', from: 'n_hradec', to: 'n_liberec', kv: 220, circuits: 1 },
-    // The northern rim, which is what stops the corner behind the Krkonoše from being fed down
-    // one line through the middle of the country. Both of these are real corridors: the long
-    // 400 kV from the coalfield, and the older 220 kV along the Elbe.
-    { ageYears: 19, id: 'l_ledvice_liberec', from: 'n_ledvice', to: 'n_liberec', kv: 400, circuits: 1 },
-    { ageYears: 30, id: 'l_usti_liberec', from: 'n_usti', to: 'n_liberec', kv: 220, circuits: 1 },
-    { ageYears: 26, id: 'l_krasikov_olomouc', from: 'n_krasikov', to: 'n_olomouc', kv: 220, circuits: 2 },
-    { ageYears: 18, id: 'l_dlouhestrane_krasikov', from: 'n_dlouhestrane', to: 'n_krasikov', kv: 400, circuits: 1 },
-    { ageYears: 24, id: 'l_nosovice_ostrava', from: 'n_nosovice', to: 'n_ostrava', kv: 400, circuits: 2 },
-    { ageYears: 34, id: 'l_trebovice_ostrava', from: 'n_trebovice', to: 'n_ostrava', kv: 110, circuits: 2 },
-    // The second way into the Ostrava basin, up the Morava valley. Without it the whole
-    // industrial east hangs on one corridor, which measured as twenty islanded hours in the
-    // first year alone.
-    { ageYears: 25, id: 'l_olomouc_ostrava', from: 'n_olomouc', to: 'n_ostrava', kv: 220, circuits: 1 },
-
-    // Moravia and the plateau. The reactor feeds Brno and the backbone; Dalešice hangs off it,
-    // which is how it was built.
-    { ageYears: 11, id: 'l_dukovany_brno', from: 'n_dukovany', to: 'n_brno', kv: 400, circuits: 2 },
-    { ageYears: 11, id: 'l_dukovany_reporyje', from: 'n_dukovany', to: 'n_reporyje', kv: 400, circuits: 1 },
-    { ageYears: 17, id: 'l_dalesice_dukovany', from: 'n_dalesice', to: 'n_dukovany', kv: 400, circuits: 1 },
-    { ageYears: 30, id: 'l_dukovany_jihlava', from: 'n_dukovany', to: 'n_jihlava', kv: 110, circuits: 1 },
-    { ageYears: 28, id: 'l_jihlava_reporyje', from: 'n_jihlava', to: 'n_reporyje', kv: 220, circuits: 1 },
-    { ageYears: 24, id: 'l_brno_krasikov', from: 'n_brno', to: 'n_krasikov', kv: 400, circuits: 1 },
-    { ageYears: 29, id: 'l_brno_zlin', from: 'n_brno', to: 'n_zlin', kv: 220, circuits: 1 },
-    { ageYears: 27, id: 'l_zlin_nosovice', from: 'n_zlin', to: 'n_nosovice', kv: 220, circuits: 1 },
-    { ageYears: 31, id: 'l_olomouc_zlin', from: 'n_olomouc', to: 'n_zlin', kv: 110, circuits: 1 },
-  ],
+  heatPipes: CZECHIA_HEAT_PIPES,
 
   /**
-   * The heat network.
+   * Fifty-five years, and the last twenty-five are the point.
    *
-   * Six regions on district heating, which is roughly the share of Czech households that were and
-   * are. Opatovice is the interesting one and it is real: a single station out in the fields
-   * feeding both Hradec Králové and Pardubice down mains long enough that the losses are a line
-   * item rather than a rounding error.
+   * This was thirty, ending in 2025, and thirty was measurably the wrong number. Five scripted
+   * utilities played it to 2025 and every one of them arrived comfortable — cash piled up, the
+   * inherited fleet still standing, nothing decided. Then the same five played on: the lignite
+   * basin reaches the end of its life between 2028 and 2039, and by 2041 the cheapest of them was
+   * bankrupt with 2.5% of demand undelivered. The scenario's whole subject — a fleet built inside
+   * fifteen years coming due inside fifteen years — happened *after* the credits rolled.
+   *
+   * 2050 is not an arbitrary extension either. A reactor commissioned in 1985 with a sixty-year
+   * life is due in 2045, so ending here is the first horizon at which the player has to answer for
+   * both the coal and the nuclear, which is the actual Czech question.
    */
-  heatPipes: [
-    { id: 'h_malesice_praha', from: 'n_malesice', to: 'n_praha', dn: 700, pipes: 2 },
-    { id: 'h_trmice_usti', from: 'n_trmice', to: 'n_usti', dn: 700, pipes: 1 },
-    { id: 'h_tisova_kvary', from: 'n_tisova', to: 'n_kvary', dn: 400, pipes: 1 },
-    { id: 'h_opatovice_hradec', from: 'n_opatovice', to: 'n_hradec', dn: 400, pipes: 1 },
-    { id: 'h_opatovice_pardubice', from: 'n_opatovice', to: 'n_pardubice', dn: 400, pipes: 2 },
-    { id: 'h_trebovice_ostrava', from: 'n_trebovice', to: 'n_ostrava', dn: 700, pipes: 2 },
-  ],
-
-  // Thirty years. Long enough that the whole lignite fleet reaches the end of its design life
-  // inside the run, short enough that it is one utility's problem rather than three.
-  endYear: 2025,
+  endYear: 2050,
 
   objectives: [
     {

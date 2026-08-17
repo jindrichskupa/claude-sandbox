@@ -14,7 +14,7 @@ import type { VoltageLevel } from '@content/lineTypes'
 import { PLAYER, type GridEdge, type GridNode } from '../grid/network'
 import { routeLine, simplifyRoute } from '../grid/routing'
 import { LifecyclePhase, type CityAsset, type PlantAsset } from '../assets/types'
-import { expectedCondition } from '../assets/aging'
+import { applyOverhaul, expectedCondition } from '../assets/aging'
 import { expectedLineCondition } from '../grid/aging'
 import { designLifeFactor } from '../tech/costs'
 import { World, type ScenarioDef } from '../world'
@@ -233,6 +233,10 @@ export function buildWorld(content: ScenarioContent): World {
       efficiencyUplift: 0,
       capacityUplift: 0,
     }
+    // Overhauls already behind it, before the condition is settled: each one extends the design
+    // life, so it changes how far through its life the machine is and therefore what condition
+    // its age implies.
+    for (let i = 0; i < (spec.refurbishments ?? 0); i++) applyOverhaul(plant, type)
     // Start on the ageing curve rather than pristine — these units have a history.
     plant.conditionPct = expectedCondition(plant, 0)
     // And start them *running*. A scenario opens at midnight on the first of January, and an

@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildWorld } from '@sim/scenario/build'
 import { CZECHIA_1995 } from '@content/scenarios/czechia1995'
+import { CZECHIA_2015 } from '@content/scenarios/czechia2015'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { LifecyclePhase } from '@sim/assets/types'
 import { TICKS_PER_YEAR } from '@sim/core/time'
@@ -235,5 +236,78 @@ describe('walking away from an unfinished project', () => {
     const temelin = loaded.plants.find((p) => p.id === 'p_temelin')!
     expect(temelin.phase).toBe(LifecyclePhase.Remediating)
     expect(loaded.committedSpend()).toBeCloseTo(world.committedSpend(), 3)
+  })
+})
+
+/**
+ * The other half of a handover: work that is already *finished*.
+ *
+ * Age alone cannot describe an inherited thermal fleet, and the second Czech date is where that
+ * became load-bearing rather than cosmetic. A lignite unit from 1974 is forty-one against a
+ * forty-five-year design life, so on age alone it dies in 2019 — when in life it was rebuilt in
+ * between and runs into the 2040s. If the scenario cannot say so, the player inherits a collapse
+ * that never happened.
+ */
+describe('an inherited fleet with overhauls behind it', () => {
+  it('values a declared overhaul exactly as the world values one it finished itself', () => {
+    // The property that matters, because the two paths are written in different files: a scenario
+    // that inherited a differently-priced refurbishment would be quietly playing another game.
+    const scenario = {
+      ...FIRST_REGION,
+      plants: [
+        { id: 'p_declared', nodeId: FIRST_REGION.plants[0]!.nodeId, typeId: 'coal' as const, name: 'A', ageYears: 20, refurbishments: 1 },
+        { id: 'p_earned', nodeId: FIRST_REGION.plants[0]!.nodeId, typeId: 'coal' as const, name: 'B', ageYears: 20 },
+      ],
+    }
+    const world = buildWorld(scenario)
+    const earned = world.getPlant('p_earned')!
+    // Put the second one through the world's own overhaul: begin it, then let it finish.
+    earned.phase = LifecyclePhase.Refurbishing
+    earned.phaseEndsTick = world.tick + 1
+    world.step()
+    world.step()
+
+    const declared = world.getPlant('p_declared')!
+    expect(earned.phase).toBe(LifecyclePhase.Operating)
+    expect(declared.refurbishments).toBe(earned.refurbishments)
+    expect(declared.lifeExtension).toBeCloseTo(earned.lifeExtension, 10)
+    expect(declared.efficiencyUplift).toBeCloseTo(earned.efficiencyUplift, 10)
+    expect(declared.capacityUplift).toBeCloseTo(earned.capacityUplift, 10)
+  })
+
+  it('is what keeps the 2015 lignite fleet alive past the first few years', () => {
+    // Tušimice II is the case. Forty-one years old on day one against a design life shorter than
+    // that; the overhaul is the whole reason it is a going concern rather than scrap.
+    const withOverhaul = buildWorld(CZECHIA_2015)
+    const asBuilt = withOverhaul.getPlant('p_tusimice')!
+    expect(asBuilt.phase).toBe(LifecyclePhase.Operating)
+    // Past its bare design life already, and still years of life left because of the extension.
+    expect(asBuilt.designLifeYears).toBeLessThan(41)
+    expect(asBuilt.designLifeYears * (1 + asBuilt.lifeExtension)).toBeGreaterThan(50)
+
+    // The same unit with the overhaul struck off is a machine forty per cent past its life, which
+    // is the fleet the scenario would hand over if it could only state an age.
+    const bare = buildWorld({
+      ...CZECHIA_2015,
+      plants: CZECHIA_2015.plants.map((p) => (p.id === 'p_tusimice' ? { ...p, refurbishments: 0 } : p)),
+    })
+    const stripped = bare.getPlant('p_tusimice')!
+    expect(stripped.lifeExtension).toBe(0)
+    expect(stripped.conditionPct).toBeLessThan(asBuilt.conditionPct)
+  })
+
+  it('buys less the second time, so a fifty-year-old station is not made new by repetition', () => {
+    const world = buildWorld({
+      ...FIRST_REGION,
+      plants: [
+        { id: 'p_once', nodeId: FIRST_REGION.plants[0]!.nodeId, typeId: 'coal_chp' as const, name: 'A', ageYears: 50, refurbishments: 1 },
+        { id: 'p_twice', nodeId: FIRST_REGION.plants[0]!.nodeId, typeId: 'coal_chp' as const, name: 'B', ageYears: 50, refurbishments: 2 },
+      ],
+    })
+    const once = world.getPlant('p_once')!
+    const twice = world.getPlant('p_twice')!
+    expect(twice.lifeExtension).toBeGreaterThan(once.lifeExtension)
+    // Strictly less than twice as much: the second overhaul is renewing what the first renewed.
+    expect(twice.lifeExtension).toBeLessThan(once.lifeExtension * 2)
   })
 })
