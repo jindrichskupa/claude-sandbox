@@ -148,17 +148,36 @@ export function levelisedCost(
 /**
  * What a megawatt of firm capacity costs for a year, at the duty this plant would actually get.
  *
- * The harness used to rank candidates on cost per megawatt-hour, and that was a category error
- * hiding in plain sight for four scenarios' worth of measurements. The decision being taken is
- * always the same one — the fleet is short of capacity against the peak, buy some — and cost per
- * megawatt-hour answers a different question. A peaking turbine is *by definition* the most
- * expensive energy and the cheapest availability on the board; measured on the Czech grid it came
- * last on euros per megawatt-hour in every year sampled and first on euros per firm kilowatt in
- * every year sampled. No number in `content/` could have made it choosable. It was the ruler.
+ * **Not what the harness ranks on, and the reason why is worth more than the function.**
  *
- * This is the screening curve every capacity plan in the industry is built on: annual fixed cost
- * of a firm megawatt, plus what it burns over the hours it will run. Which hours depends on where
- * it lands in the merit order, so that is measured against the fleet rather than assumed.
+ * The harness ranks candidates on cost per megawatt-hour, which is a category error: the decision
+ * being taken is always the same one — the fleet is short against the peak, buy some — and cost
+ * per megawatt-hour answers a different question. A peaking turbine is *by definition* the most
+ * expensive energy and the cheapest availability; measured on the Czech grid it came last on euros
+ * per megawatt-hour in every year sampled and first on euros per firm kilowatt in every year
+ * sampled. No number in `content/` could have made it choosable, which is why "nobody ever builds
+ * a peaker" was a fact about the ruler rather than about the content. See `whyNotAPeaker.ts`.
+ *
+ * So this was written to replace it: the screening curve every capacity plan in the industry is
+ * built on. Annual fixed cost of a firm megawatt, plus what it burns over the hours it will run,
+ * less the fuel it displaces on the machine it pushes off the merit order.
+ *
+ * It is better economics and it played worse. Twice. The least-cost archetype — the one that
+ * ranks purely on the number, so the cleanest test of the number — went:
+ *
+ *     ranked on €/MWh                    ccgt×3      0.34% unserved   €8,548m left
+ *     ranked on €/kW-firm                ocgt×8      0.30%            €7,634m
+ *     ranked on €/kW-firm, net of fuel   nuclear×2   0.41%            €1,531m
+ *
+ * The reason is not that the economics is wrong; it is that this planner has no cash horizon. A
+ * screening curve tells you what is cheapest over a plant's life, and a reactor whose fuel savings
+ * exceed its capital charge scores best — correctly, and it still empties the bank in the decade
+ * before it earns anything. The old ruler amortises capital into a *rate*, so capital-heavy plant
+ * looks dear, which accidentally stands in for the cash constraint this planner does not model.
+ *
+ * Kept, unused, for two reasons: it is the evidence behind the finding, and it is half of the fix.
+ * The other half is a planner that can say "not this year, I cannot pay for it", which is a bigger
+ * change than a ranking function.
  */
 export function screeningCostPerFirmKwYear(
   world: World,
@@ -363,12 +382,11 @@ export interface Strategy {
   /**
    * Which of the things it will build it prefers. Lower wins.
    *
-   * Given the *screening* cost — annual euros per firm kilowatt at the duty this plant would get —
-   * because that is what the decision is about. The planner only ever builds because the fleet is
-   * short against the peak, and the cost of a megawatt-hour is the answer to a different question.
-   * See `screeningCostPerFirmKwYear`.
+   * Given the levelised cost per megawatt-hour, which is *not* the question the decision is about
+   * and is kept anyway. See the note on `screeningCostPerFirmKwYear` for the whole story: ranking
+   * on cost per firm kilowatt is better economics and measured worse, twice.
    */
-  rank: (world: World, typeId: PlantTypeId, costPerFirmKwYear: number) => number
+  rank: (world: World, typeId: PlantTypeId, costPerMwh: number) => number
   /**
    * Whether it will close an inherited plant on principle, once the lights can spare it, rather
    * than only when the plant is worn out or losing money.
@@ -466,11 +484,7 @@ export const FOSSIL_ZEALOT: Strategy = {
   // Ranks on the cost *without* carbon, which is the belief rather than an error: this utility
   // does not think the carbon price will last, so it does not price it into an investment that
   // will run for forty years. It pays it every hour regardless, which is the point.
-  // Ranked as though carbon were free, which is the whole of this conviction: the machine is
-  // chosen on what it costs to build and burn, and the levy on the exhaust is somebody else's
-  // politics. Same screening question as everyone else, one term removed.
-  rank: (world, typeId, _cost) =>
-    screeningCostPerFirmKwYear(world, typeId, FOSSIL_ZEALOT.capacityCredit(typeId), { ignoreCarbon: true }),
+  rank: (world, typeId, _cost) => levelisedCost(world, typeId, 0.5, { ignoreCarbon: true }),
   closesOnPrinciple: () => false,
   plansOnNameplate: false,
   usesProjectFinance: true,
@@ -757,7 +771,7 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
       const financed =
         !cash.ok && strategy.usesProjectFinance ? quotePlant(world, typeId, site.x, site.y, true) : null
       if (!cash.ok && !financed?.ok) continue
-      const cost = screeningCostPerFirmKwYear(world, typeId, strategy.capacityCredit(typeId))
+      const cost = levelisedCost(world, typeId, LOAD_FACTOR[PLANT_TYPES[typeId].weatherDependence] ?? 0.5)
       const score = strategy.rank(world, typeId, cost)
       if (!choice || score < choice.score) {
         choice = { typeId, site, cost, score, financed: !cash.ok }
@@ -768,7 +782,7 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
     const placed = beginPlantConstruction(world, choice.typeId, choice.site.x, choice.site.y, choice.financed)
     if (!placed.ok) continue
     built.push(
-      `${date.year}: ${choice.typeId} at ${Math.round(choice.cost)}/kW-firm-yr${choice.financed ? ' (financed)' : ''}`,
+      `${date.year}: ${choice.typeId} at ${Math.round(choice.cost)}/MWh${choice.financed ? ' (financed)' : ''}`,
     )
 
     // 4. Wire it in. A station nobody can reach generates nothing, and the cheapest connection
