@@ -58,6 +58,28 @@
  * the books, because an overhaul is genuinely new capital. The effect on the game is the point: a
  * player who lets the fleet age is no longer funded as though they had replaced it.
  *
+ * **The effect is small at first and large later, and only the second number is worth quoting.**
+ * Over the first six years of czechia-2015 the utility's net position improves by 988m a year
+ * against 1061m before — seven per cent, because a fleet that is 45% undepreciated on day one is
+ * near enough the flat half it replaced. Over the whole thirty-five years the same five archetypes
+ * end like this (cash, and debt where there is any):
+ *
+ *                     before            after
+ *     fossil          30.2bn            16.1bn
+ *     least-cost      27.5bn             5.6bn
+ *     green           19.3bn             5.5bn
+ *     nuclear         10.3bn            0, and 4.4bn of debt
+ *     novelty         0, 7.2bn debt     bankrupt in 2048
+ *
+ * The compounding is the fleet ageing out of the base while what replaces it is carried on
+ * borrowed money. Two of the five change character rather than degree: the strategy that builds
+ * eight reactors now ends owing for them, and the one that buys batteries at 166 EUR/MWh no longer
+ * survives to the end of the scenario.
+ *
+ * What did *not* change is the physical outcome — undelivered energy moves by 0.02 of a percentage
+ * point and carbon intensity by 0.001 across the whole set, except for the run that now ends early.
+ * The correction moves money and leaves the engineering alone, which is the right shape for it.
+ *
  * ## What is deliberately excluded
  *
  * The exclusions are where the difficulty lives, and each is a real regulatory principle.
