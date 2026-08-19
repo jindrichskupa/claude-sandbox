@@ -35,10 +35,50 @@
  *
  * **What it costs to keep standing.** Not the historical price of the assets, which nobody has
  * and which inflation makes meaningless, but what it would cost to build the same system today,
- * recovered over its design life, plus a return on the average value of it. That is the *modern
- * equivalent asset* basis real regulators use for exactly this reason. It also means a fleet the
- * player has let wear out costs the same to fund as a new one, which is correct: depreciation is
- * a claim on the future, not a reward for neglect.
+ * recovered over its design life, plus a return on what is left of it. That is the *modern
+ * equivalent asset* basis real regulators use for exactly this reason.
+ *
+ * ## The correction, and the twenty-seven billion euros that found it
+ *
+ * "What is left of it" used to be a constant: half the replacement cost of everything owned,
+ * regardless of age, on the steady-state argument that a fleet renewed evenly sits at about half
+ * its replacement value. The argument is fine and the approximation was not, because none of these
+ * scenarios is a fleet renewed evenly — they are brownfield starts whose whole subject is a fleet
+ * that was built at once and comes due at once.
+ *
+ * What it did, measured on Czechia 2015: the utility opens with €950m of cash against €2.6bn of
+ * debt and reaches €30.8bn of cash against none by 2037, and all five archetypes end debt-free
+ * with between ten and thirty billion. Profit was depreciation plus the allowed return,
+ * guaranteed, every year — and both halves were being paid on machines that were fully written
+ * off. A lignite unit from 1961 was earning a return on half of what a new one would cost, and
+ * collecting a fresh depreciation allowance on it, sixty years after it was paid for.
+ *
+ * Now both are measured per asset from how much of its life is left. A written-off station earns
+ * nothing and depreciates nothing; a new one earns on all of it; an overhauled one goes back onto
+ * the books, because an overhaul is genuinely new capital. The effect on the game is the point: a
+ * player who lets the fleet age is no longer funded as though they had replaced it.
+ *
+ * **The effect is small at first and large later, and only the second number is worth quoting.**
+ * Over the first six years of czechia-2015 the utility's net position improves by 988m a year
+ * against 1061m before — seven per cent, because a fleet that is 45% undepreciated on day one is
+ * near enough the flat half it replaced. Over the whole thirty-five years the same five archetypes
+ * end like this (cash, and debt where there is any):
+ *
+ *                     before            after
+ *     fossil          30.2bn            16.1bn
+ *     least-cost      27.5bn             5.6bn
+ *     green           19.3bn             5.5bn
+ *     nuclear         10.3bn            0, and 4.4bn of debt
+ *     novelty         0, 7.2bn debt     bankrupt in 2048
+ *
+ * The compounding is the fleet ageing out of the base while what replaces it is carried on
+ * borrowed money. Two of the five change character rather than degree: the strategy that builds
+ * eight reactors now ends owing for them, and the one that buys batteries at 166 EUR/MWh no longer
+ * survives to the end of the scenario.
+ *
+ * What did *not* change is the physical outcome — undelivered energy moves by 0.02 of a percentage
+ * point and carbon intensity by 0.001 across the whole set, except for the run that now ends early.
+ * The correction moves money and leaves the engineering alone, which is the right shape for it.
  *
  * ## What is deliberately excluded
  *
@@ -63,6 +103,8 @@ import { HEAT_PIPE_TYPES, type PipeSize } from '@content/heatPipeTypes'
 import { PLANT_TYPES } from '@content/plantTypes'
 import { sourced, type Sourced } from '@content/schema'
 import { LifecyclePhase, type PlantAsset } from '../assets/types'
+import { lifeFraction } from '../assets/aging'
+import { TICKS_PER_YEAR } from '../core/time'
 import { nodeInService, type GridEdge, type GridNode } from '../grid/network'
 import type { PeriodLedger } from './economy'
 
@@ -77,14 +119,6 @@ export const REGULATION = {
    */
   allowedReturnOnCapital: sourced(0.06, 'fraction', 'eu-energy-policy', 2022, 'Allowed real WACC in European network determinations'),
   /**
-   * The share of replacement cost treated as capital currently employed.
-   *
-   * A fleet renewed steadily sits at about half its replacement cost once depreciation is taken
-   * off — the standard steady-state approximation, and far more honest here than pretending to
-   * track the book value of assets the scenario inherited without a purchase price.
-   */
-  averageNetBookShare: sourced(0.5, 'fraction', 'engineering-standard', 2023, 'Mid-life net book value of a fleet in steady state'),
-  /**
    * How far the tariff moves towards the calculated requirement each year.
    *
    * A regulator reviews rather than tracks. Below one, and a step change in costs is absorbed by
@@ -97,16 +131,38 @@ export const REGULATION = {
 export interface RateBase {
   /** Replacement cost of everything owned, EUR. */
   replacementCost: number
+  /**
+   * The part of that which has not yet been depreciated away, EUR.
+   *
+   * This is the number the allowed return is paid on, and it is measured asset by asset from how
+   * much of each one's life is left. A fleet the player has run into the ground is worth little;
+   * one they have just rebuilt is worth nearly all of it. See the note at the top of this file for
+   * what it replaced and why.
+   */
+  capitalEmployed: number
   /** Straight-line recovery of that cost over the assets' design lives, EUR per year. */
   depreciationPerYear: number
 }
 
 /**
- * Value the fleet and the network at what it would cost to build them now.
+ * Value the fleet and the network at what it would cost to build them now, and work out how much
+ * of that value is left.
  *
  * Plant under construction is excluded: it is not yet serving anybody, and a regulator does not
  * put work in progress into the rate base until it does. That matters for the game as well as for
  * the accounting — it means a player cannot raise the tariff by starting projects.
+ *
+ * **Every asset is depreciated by its own age**, and that is the whole of the difference from what
+ * this used to do. Replacement cost is still the valuation basis, because the scenarios inherit
+ * assets with no purchase price and pretending otherwise would be worse; what has changed is that
+ * the undepreciated share is measured per machine instead of assumed to be half the fleet. An
+ * asset past its life contributes nothing to the capital employed and generates no further
+ * depreciation allowance, because there is nothing left of it to recover.
+ *
+ * A refurbishment shows up here on its own, with no special case: it extends the design life, so
+ * the same age is a smaller fraction of it, so the machine goes back into the rate base. Which is
+ * correct — an overhaul is new capital, and it is the one thing that puts a written-off station
+ * back on the books.
  */
 export function rateBase(
   plants: PlantAsset[],
@@ -116,14 +172,28 @@ export function rateBase(
   tick = 0,
 ): RateBase {
   let replacementCost = 0
+  let capitalEmployed = 0
   let depreciationPerYear = 0
+
+  /** Book one asset in: what it would cost new, how long it lasts, how much of that it has used. */
+  const book = (cost: number, life: number, used: number): void => {
+    const years = Math.max(5, life)
+    const remaining = Math.max(0, Math.min(1, 1 - used))
+    replacementCost += cost
+    capitalEmployed += cost * remaining
+    // No allowance on an asset already recovered. Straight-line means the recovery stops when the
+    // book value reaches zero, and paying it for ever was how a fully written-off lignite fleet
+    // went on earning its owner a return every year for a quarter of a century.
+    if (remaining > 0) depreciationPerYear += cost / years
+  }
 
   for (const plant of plants) {
     if (plant.phase !== LifecyclePhase.Operating && plant.phase !== LifecyclePhase.Mothballed) continue
     const type = PLANT_TYPES[plant.typeId]
-    const cost = capexPerKw(plant) * 1000 * type.capacityMw.value
-    replacementCost += cost
-    depreciationPerYear += cost / Math.max(5, plant.designLifeYears)
+    // `lifeFraction` and not raw age: it is the same measure the ageing, the failure odds and the
+    // retirement decision all use, so a machine cannot be worn out for one of them and new for
+    // another. It also carries the refurbishment extension and, for a battery, cycling.
+    book(capexPerKw(plant) * 1000 * type.capacityMw.value, plant.designLifeYears, lifeFraction(plant, tick))
   }
 
   for (const edge of edges) {
@@ -138,8 +208,7 @@ export function rateBase(
       cost = line.capexPerKm.value * edge.lengthKm * Math.max(1, edge.circuits)
       life = line.designLifeYears.value
     }
-    replacementCost += cost
-    depreciationPerYear += cost / Math.max(5, life)
+    book(cost, life, (tick - edge.builtTick) / TICKS_PER_YEAR / Math.max(5, life))
   }
 
   // The switching stations, on the same basis as everything else. Left out until they became
@@ -152,12 +221,15 @@ export function rateBase(
     if (!nodeInService(node, tick)) continue
     for (const kv of node.kvLevels) {
       const line = LINE_TYPES[kv]
-      replacementCost += line.substationCapex.value
-      depreciationPerYear += line.substationCapex.value / Math.max(5, line.designLifeYears.value)
+      const life = line.designLifeYears.value
+      // A station the scenario handed over has no in-service date, so it is treated as new. That is
+      // the generous reading and it is deliberate: the alternative is guessing an age the content
+      // never stated, and the compounds are a small part of the base beside the fleet.
+      book(line.substationCapex.value, life, (tick - (node.inServiceTick ?? 0)) / TICKS_PER_YEAR / Math.max(5, life))
     }
   }
 
-  return { replacementCost, depreciationPerYear }
+  return { replacementCost, capitalEmployed, depreciationPerYear }
 }
 
 /**
@@ -196,9 +268,7 @@ export function revenueRequirementPerMwh(input: {
   if (input.energySoldMwh <= 0) return 0
   const capital =
     input.rateBase.depreciationPerYear +
-    input.rateBase.replacementCost *
-      REGULATION.averageNetBookShare.value *
-      REGULATION.allowedReturnOnCapital.value
+    input.rateBase.capitalEmployed * REGULATION.allowedReturnOnCapital.value
   const operating = recoverableCosts(input.ledger) - input.ledger.heatRevenue
   return Math.max(0, operating + capital) / input.energySoldMwh
 }

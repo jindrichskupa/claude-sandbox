@@ -39,6 +39,8 @@ import { LifecyclePhase } from '@sim/assets/types'
 import { mothballPlant } from '@sim/build/commands'
 import { ledgerProfit } from '@sim/economy/economy'
 import { rateBase } from '@sim/economy/tariff'
+import { applyOverhaul } from '@sim/assets/aging'
+import { PLANT_TYPES } from '@content/plantTypes'
 
 /** Run a world for a year and report what the regulator did with the tariff. */
 function afterOneYear(cripple: boolean): { tariff: number; unservedMwh: number } {
@@ -128,6 +130,48 @@ describe('the regulated tariff', () => {
     moved.phase = LifecyclePhase.Building
     const underway = rateBase(world.plants, edges, () => 1000)
     expect(underway.replacementCost).toBeLessThan(inService.replacementCost)
+  })
+
+  it('pays a return on what is left of an asset, not on a fixed share of what it cost new', () => {
+    // The defect this replaced: the capital employed was half the replacement cost of everything
+    // owned, whatever its age. On a brownfield start — which is every scenario here — that funded a
+    // written-off fleet as though it had been rebuilt, and the utility could not lose money. On
+    // Czechia 2015 it took the player from 950m cash against 2.6bn of debt to 30.8bn against none.
+    const world = buildWorld(FIRST_REGION)
+    const edges = [...world.network.allEdges()]
+    const base = rateBase(world.plants, edges, () => 1000, world.network.allNodes(), world.tick)
+
+    // An inherited fleet is part-used, so the capital employed is strictly inside the replacement
+    // cost — and it is a measurement, not the old constant half.
+    expect(base.capitalEmployed).toBeGreaterThan(0)
+    expect(base.capitalEmployed).toBeLessThan(base.replacementCost)
+    expect(base.capitalEmployed).not.toBeCloseTo(base.replacementCost * 0.5, -6)
+
+    // Age the same fleet past its design life and both halves of the capital allowance go to zero
+    // for it: nothing left to earn a return on, nothing left to recover.
+    for (const plant of world.plants) plant.commissionedTick = -1000 * TICKS_PER_YEAR
+    const wornOut = rateBase(world.plants, edges, () => 1000, world.network.allNodes(), world.tick)
+    expect(wornOut.replacementCost).toBeCloseTo(base.replacementCost, 6)
+    expect(wornOut.capitalEmployed).toBeLessThan(base.capitalEmployed)
+    expect(wornOut.depreciationPerYear).toBeLessThan(base.depreciationPerYear)
+  })
+
+  it('puts an overhauled station back on the books, because an overhaul is new capital', () => {
+    // No special case does this — `lifeFraction` carries the refurbishment extension, so the same
+    // age becomes a smaller fraction of a longer life and the machine re-enters the rate base. It
+    // is the one route by which a written-off asset earns a return again, and it is the right one:
+    // the player paid for it.
+    const world = buildWorld(FIRST_REGION)
+    const edges = [...world.network.allEdges()]
+    const oldest = world.plants.find((p) => p.phase === LifecyclePhase.Operating)!
+    oldest.commissionedTick = -Math.round(oldest.designLifeYears * 0.95 * TICKS_PER_YEAR)
+
+    const before = rateBase(world.plants, edges, () => 1000, world.network.allNodes(), world.tick)
+    applyOverhaul(oldest, PLANT_TYPES[oldest.typeId])
+    const after = rateBase(world.plants, edges, () => 1000, world.network.allNodes(), world.tick)
+
+    expect(oldest.lifeExtension).toBeGreaterThan(0)
+    expect(after.capitalEmployed).toBeGreaterThan(before.capitalEmployed)
   })
 })
 
