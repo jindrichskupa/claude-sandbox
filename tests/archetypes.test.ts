@@ -24,7 +24,9 @@
 import { describe, expect, it } from 'vitest'
 import { buildWorld } from '@sim/scenario/build'
 import { FIRST_REGION } from '@content/scenarios/firstRegion'
-import { PLANT_TYPES, PLANT_TYPE_IDS, type PlantTypeId } from '@content/plantTypes'
+import { heatCapacityOf, PLANT_TYPES, PLANT_TYPE_IDS, type PlantTypeId } from '@content/plantTypes'
+import { CZECHIA_1995 } from '@content/scenarios/czechia1995'
+import { LifecyclePhase } from '@sim/assets/types'
 import {
   ARCHETYPES,
   FOSSIL_ZEALOT,
@@ -165,4 +167,58 @@ describe('a conviction reaches the simulation and changes the answer', () => {
       'the green utility emitted as much as the fossil one',
     ).toBeGreaterThan(0.05)
   }, 900_000)
+})
+
+/**
+ * Heat, which every archetype used to be structurally unable to keep on.
+ *
+ * The gap was not subtle once it was looked for: no strategy would build anything with `heatOnly`
+ * set, none of them ranked cogeneration on its heat side, and nothing anywhere watched a heat
+ * shortfall. So a scripted utility inherited a district heating fleet, ran it until it died of old
+ * age, and failed the objective that says a town must be warm — in every scenario that has a heat
+ * network, for reasons that were about the harness rather than about the scenario.
+ */
+describe('an archetype that has to heat a town', () => {
+  it('builds a heat source when the mains are short, and puts it on the mains', () => {
+    // Czechia has the heat network; the first region does not, which is why this is the scenario
+    // to ask. Everything that makes heat is taken away, so the shortfall is unambiguous.
+    const world = buildWorld(CZECHIA_1995)
+    for (const plant of world.plants) {
+      if (heatCapacityOf(plant.typeId) > 0) plant.phase = LifecyclePhase.Decommissioning
+    }
+    const before = world.plants.length
+
+    // A season is enough: the decision is monthly and the shortfall shows up the first winter.
+    playScenario(world, { strategy: LEAST_COST, untilYear: world.scenario.startYear + 2 })
+
+    const added = world.plants.slice(before)
+    const heatPlant = added.filter((p) => heatCapacityOf(p.typeId) > 0)
+    expect(heatPlant.length).toBeGreaterThan(0)
+
+    // And on the network, because a boiler in a field heats nothing. Every one it built must sit
+    // on a node a heat main already reaches.
+    for (const plant of heatPlant) {
+      const onTheMains = world.network
+        .edgesOf(plant.nodeId)
+        .some((id) => world.network.requireEdge(id).commodity === 'heat')
+      expect(`${plant.typeId} at ${plant.nodeId} on the mains: ${onTheMains}`).toContain('true')
+    }
+  })
+
+  it('does it even for the utility that refuses to own anything with a flue', () => {
+    // The green archetype will not build a boiler by its own creed, and the catalogue offers it no
+    // other way to make heat — there is no electric boiler and no heat pump in it. Refusing on
+    // principle would mean refusing to heat the town, so the heat decision overrides the creed and
+    // says so out loud. If a non-combusting heat source is ever added, this is the test that should
+    // start asking the green utility to prefer it.
+    const world = buildWorld(CZECHIA_1995)
+    for (const plant of world.plants) {
+      if (heatCapacityOf(plant.typeId) > 0) plant.phase = LifecyclePhase.Decommissioning
+    }
+    const before = world.plants.length
+
+    playScenario(world, { strategy: GREEN_ZEALOT, untilYear: world.scenario.startYear + 2 })
+
+    expect(world.plants.slice(before).some((p) => heatCapacityOf(p.typeId) > 0)).toBe(true)
+  })
 })

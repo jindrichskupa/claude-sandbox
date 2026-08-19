@@ -98,6 +98,24 @@ export interface EconomicsDef {
   /** The tariff reset never falls below this, so a collapse in wholesale does not bankrupt anyone. */
   tariffFloorPerMwh: Sourced<number>
   /**
+   * How much of the allowed return on capital the owner takes out each year.
+   *
+   * One means the shareholder takes exactly what the regulator allowed them and no more, which is
+   * the neutral setting: the utility keeps every euro it earns *beyond* the allowed return, and
+   * keeps nothing it did not earn. Below one it would be retaining part of its owner's money to
+   * fund itself, which is a decision a board makes and not a constant.
+   */
+  dividendPayoutRatio: Sourced<number>
+  /**
+   * How much of a technology's civil-works cost an existing site has already paid.
+   *
+   * Applied to the `civil` share in `costTrends`, which is defined as land, groundworks, concrete
+   * and grid connection — so this says what fraction of *that* a station standing on the site
+   * already provides. Half: the land, the switchyard, the access and the consent are there; the
+   * foundations under the new machine are not, and neither is its own connection into the yard.
+   */
+  existingSiteCivilSaving: Sourced<number>
+  /**
    * How long a loan for network or generation capital runs.
    *
    * Long, and deliberately shorter than what it buys. Infrastructure debt is tenored against the
@@ -144,6 +162,8 @@ export const ECONOMICS: EconomicsDef = {
   insurancePremiumRate: sourced(0.006, 'fraction', 'game-design', 2024, 'Of insured capital value, per year'),
   confidenceRatePenalty: sourced(1.0, 'fraction', 'eu-energy-policy', 2022, 'A full loss of confidence roughly doubles the cost of debt'),
   tariffFloorPerMwh: sourced(55, 'EUR/MWh', 'iea-weo', 2023, 'Regulated tariffs are sticky downwards'),
+  dividendPayoutRatio: sourced(1, 'fraction', 'eu-energy-policy', 2022, 'European regulated utilities distribute the allowed return; CEZ paid out 60-100% of earnings through the 2010s'),
+  existingSiteCivilSaving: sourced(0.5, 'fraction', 'engineering-standard', 2023, 'Land, grid connection and consent are in place; new foundations are not'),
   loanTermYears: sourced(15, 'years', 'eu-energy-policy', 2022, 'Typical tenor of European utility infrastructure debt'),
   gearingRatePenalty: sourced(0.5, 'fraction', 'eu-energy-policy', 2022, 'Spread widens by about half again at full gearing'),
   emergencyRatePremium: sourced(0.75, 'fraction', 'game-design', 2024, 'Distressed borrowing is far dearer than arranged'),

@@ -76,7 +76,7 @@ import {
 import { forecastResidualLoad, type ForecastHour } from './dispatch/forecast'
 import { AssetBooks } from './economy/assetLedger'
 import { recordYear, type YearRecord } from './economy/yearbook'
-import { rateBase, revenueRequirementPerMwh, reviewTariff } from './economy/tariff'
+import { rateBase, revenueRequirementPerMwh, reviewTariff, REGULATION, type RateBase } from './economy/tariff'
 import { NewsDesk, NewsImportance, type NewsItem, type UpcomingItem } from './news/news'
 import { growthModifiers, stepCityGrowth, GROWTH_SOURCE } from './city/growth'
 import { rooftopOutputMw, rooftopSplit, stepRooftop } from './city/rooftop'
@@ -102,6 +102,7 @@ import {
   chargeInsurance,
   chargeUnservedHeat,
   chargeCorporateTax,
+  chargeDividend,
   chargeWindfallLevy,
   creditCapacityPayment,
   creditHeatSales,
@@ -632,6 +633,28 @@ export class World {
   }
 
   /** Any node within `radius` tiles, used to stop the player stacking stations on one spot. */
+  /**
+   * The player's own station standing on this exact tile, if there is one.
+   *
+   * Distinct from `nodeNear` on purpose. That answers "is something in the way", which is the
+   * spacing rule; this answers "is this one of my sites", which is a different question with the
+   * opposite consequence — the first refuses a build and the second cheapens it. A city or a
+   * switching station is neither: a power station is not built in the middle of Prague because
+   * there is a load point there.
+   */
+  siteAt(x: number, y: number): NodeId | null {
+    for (const node of this.network.allNodes()) {
+      if (node.kind !== 'plant' || node.ownerId !== PLAYER) continue
+      if (Math.round(node.x) === Math.round(x) && Math.round(node.y) === Math.round(y)) return node.id
+    }
+    return null
+  }
+
+  /** Every plant standing on one site, in any phase — a site being cleared is still occupied. */
+  plantsAt(nodeId: NodeId): PlantAsset[] {
+    return this.plants.filter((p) => p.nodeId === nodeId)
+  }
+
   nodeNear(x: number, y: number, radius: number): NodeId | null {
     for (const node of this.network.allNodes()) {
       if (Math.hypot(node.x - x, node.y - y) <= radius) return node.id
@@ -2423,17 +2446,21 @@ export class World {
     // year's costs by a handful of megawatt-hours. That is the safe direction to fail in: it
     // neither rewards the collapse nor compounds it, and a utility in that state has larger
     // problems than its tariff.
+    // Held so the dividend below is paid on the same capital the tariff was set from, rather than
+    // on a second, separately computed one that could quietly drift from it.
+    let annualRateBase: RateBase | null = null
     if (this.yearLedger.energySoldMwh >= this.minimumTariffSampleMwh()) {
+      annualRateBase = rateBase(
+        this.plants,
+        [...this.network.allEdges()],
+        (plant) =>
+          this.params.getOr(`quote:${plant.typeId}`, Param.CapexPerKw, PLANT_TYPES[plant.typeId].capexPerKw.value),
+        this.network.allNodes(),
+        this.tick,
+      )
       const reset = revenueRequirementPerMwh({
         ledger: this.yearLedger,
-        rateBase: rateBase(
-          this.plants,
-          [...this.network.allEdges()],
-          (plant) =>
-            this.params.getOr(`quote:${plant.typeId}`, Param.CapexPerKw, PLANT_TYPES[plant.typeId].capexPerKw.value),
-          this.network.allNodes(),
-          this.tick,
-        ),
+        rateBase: annualRateBase,
         energySoldMwh: this.yearLedger.energySoldMwh,
       })
       const previous = this.state.regulatedTariffPerMwh
@@ -2471,6 +2498,23 @@ export class World {
       ledgerProfit(this.yearLedger),
       this.params.getOr('world', Param.CorporateTaxRate, 0),
     )
+
+    // And the owner takes their return, which is the last thing to happen to a year's money and
+    // the reason a regulated utility is worth owning. The allowed return in the tariff is the
+    // shareholder's, not the company's; until this existed it stayed in the company for ever and
+    // a utility that failed every objective still finished the scenario with billions.
+    //
+    // Charged into the *open* period rather than the year that just closed, exactly as the tax
+    // above is: the accounts close, and then the payments the accounts imply are made.
+    if (annualRateBase) {
+      chargeDividend(
+        this.openLedger,
+        annualRateBase.capitalEmployed *
+          REGULATION.allowedReturnOnCapital.value *
+          ECONOMICS.dividendPayoutRatio.value,
+        ledgerProfit(this.yearLedger),
+      )
+    }
 
     // Trust rebuilds slowly and automatically. It is cheap to lose and expensive to regain,
     // which is the asymmetry that makes repudiation a lasting decision rather than a one-off cost.

@@ -13,6 +13,8 @@
 
 import { LINE_TYPES, VOLTAGE_LEVELS, type VoltageLevel } from '@content/lineTypes'
 import { PLANT_TYPES, type PlantTypeId } from '@content/plantTypes'
+import { COST_TRENDS } from '@content/costTrends'
+import { ECONOMICS } from '@content/economics'
 import { HEAT_PIPE_TYPES, type PipeSize } from '@content/heatPipeTypes'
 import { MONTHS_PER_YEAR, TICKS_PER_YEAR } from '../core/time'
 import { LifecyclePhase, type PlantAsset } from '../assets/types'
@@ -53,6 +55,27 @@ const SECOND_CIRCUIT_COST_FRACTION = 0.45
 const MAX_CIRCUITS = 2
 
 /** A costed, checked proposal. `reasonKey` explains a refusal in the player's language. */
+/**
+ * How many generating units one site will take.
+ *
+ * Four, which is what the real sites on the Czech map carry — Dukovany has four, Prunéřov had
+ * five, Temelín two. Past that a station runs out of turbine hall, cooling and fuel handling long
+ * before the map runs out of tiles, and without a cap the cheapest strategy in the game would be
+ * to stack twenty reactors on one square and never build a line again.
+ */
+export const MAX_UNITS_PER_SITE = 4
+
+/**
+ * And how much heat-only kit, which is counted separately because it is not the same kind of
+ * thing.
+ *
+ * A peak boiler is a shed with a burner in it, not a unit in a turbine hall: Malešice really does
+ * carry one cogeneration set and half a dozen boilers. Counting them against the same allowance
+ * declared every inherited Czech heating station full on day one, so no boiler could ever be
+ * replaced — which is the opposite of the problem this whole change exists to fix.
+ */
+export const MAX_HEAT_UNITS_PER_SITE = 8
+
 export interface Quote {
   ok: boolean
   totalCost: number
@@ -67,6 +90,14 @@ export interface Quote {
   route?: Array<{ x: number; y: number }>
   /** Terms a lender would offer against this project. Only present when one was asked for. */
   facility?: ReturnType<typeof quoteProjectFinance>
+  /**
+   * What was knocked off for building on a site that already exists, as a fraction of the capital
+   * cost. Absent on empty ground.
+   *
+   * Reported rather than silently applied, because a discount the player cannot see is a discount
+   * they cannot plan around — and this one is large enough to decide where a station goes.
+   */
+  siteReuseSaving?: number
 }
 
 /** Synthetic parameter target used to price a plant that does not exist yet. */
@@ -122,8 +153,27 @@ export function quotePlant(
   })
   if (!verdict.ok) return refuse(verdict.reasonKey ?? 'build.unsuitableGround', verdict.reasonParams)
 
-  if (world.nodeNear(x, y, 1.5)) {
-    return refuse('build.tooClose')
+  // Building on a site the player already owns, which is the most ordinary brownfield move there
+  // is and was flatly forbidden until now. `nodeNear` refuses anything within a tile and a half,
+  // and made no distinction between "there is a station in the way" and "there is a station here,
+  // with the land, the switchyard, the roads and the planning consent already in place".
+  //
+  // It was not only a missing convenience. On the Czech map every node the heat mains reach
+  // already has a station on it, so there was no square anywhere on the network where a boiler or
+  // a cogeneration set could legally be built — a heat system could be inherited and never
+  // extended or replaced. That is what this refusal actually meant, and it took a scripted utility
+  // failing to keep a town warm to find it.
+  const site = world.siteAt(x, y)
+  if (!site) {
+    if (world.nodeNear(x, y, 1.5)) return refuse('build.tooClose')
+  } else {
+    // A site is a place, not a filing cabinet. Prunéřov carried five units and Dukovany four; past
+    // that the turbine hall, the cooling and the fuel handling run out before the map does.
+    const here = world.plantsAt(site)
+    const heatOnly = PLANT_TYPES[typeId].heatOnly !== null
+    const cap = heatOnly ? MAX_HEAT_UNITS_PER_SITE : MAX_UNITS_PER_SITE
+    const taken = here.filter((p) => (PLANT_TYPES[p.typeId].heatOnly !== null) === heatOnly).length
+    if (taken >= cap) return refuse('build.siteFull', { units: cap })
   }
 
   const target = quoteTargetFor(typeId)
@@ -131,14 +181,22 @@ export function quotePlant(
   const capexPerKw = world.params.get(target, Param.CapexPerKw)
   const buildMonths = world.params.get(target, Param.BuildTimeMonths)
 
-  const totalCost = capexPerKw * capacityMw * 1000
+  // What an existing site saves, and it is derived rather than asserted. The catalogue already
+  // splits every technology's capital cost into equipment, site labour and civil works, and civil
+  // works is defined as "land, groundworks, concrete, grid connection" — which is precisely the
+  // half of a project an existing station has already paid for. So the discount is a share of the
+  // civil share, and it comes out different per technology for a reason: a reactor is 30% civil
+  // and saves most, a solar farm is 18% and saves least. The foundations under the new machine
+  // still have to be poured, which is why it is a share and not the whole of it.
+  const reuse = site ? COST_TRENDS[typeId].structure.civil.value * ECONOMICS.existingSiteCivilSaving.value : 0
+  const totalCost = capexPerKw * capacityMw * 1000 * (1 - reuse)
   const buildTicks = Math.max(1, Math.round(buildMonths * TICKS_PER_MONTH))
 
   if (financed) {
     const facility = quoteProjectFinance(totalCost, buildTicks, world.state.investorConfidence)
     if (!facility.ok) return refuse(facility.reasonKey ?? 'build.projectTooSmall')
     if (!canAfford(world.finances, facility.equity)) return refuse('build.cannotAffordEquity')
-    return { ok: true, totalCost, buildTicks, siteQuality: verdict.quality, facility }
+    return { ok: true, totalCost, buildTicks, siteQuality: verdict.quality, facility, ...(reuse > 0 ? { siteReuseSaving: reuse } : {}) }
   }
 
   if (!canAfford(world.finances, totalCost)) {
@@ -163,19 +221,26 @@ export function beginPlantConstruction(
 
   const type = PLANT_TYPES[typeId]
   const serial = world.nextSerial()
-  const nodeId = `n_built_${serial}`
   const plantId = `p_built_${serial}`
 
-  const node: GridNode = {
-    id: nodeId,
-    kind: 'plant',
-    ownerId: PLAYER,
-    x,
-    y,
-    nameKey: type.nameKey,
-    nameIndex: serial,
+  // On an existing site the new unit joins the node that is already there rather than dropping a
+  // second one on the same tile. That is what makes it a second unit at Prunéřov instead of a
+  // separate station occupying the same square — it shares the switchyard, so every line already
+  // running to the site serves it, which is most of what reusing a site means.
+  const existing = world.siteAt(x, y)
+  const nodeId = existing ?? `n_built_${serial}`
+  if (!existing) {
+    const node: GridNode = {
+      id: nodeId,
+      kind: 'plant',
+      ownerId: PLAYER,
+      x,
+      y,
+      nameKey: type.nameKey,
+      nameIndex: serial,
+    }
+    world.network.addNode(node)
   }
-  world.network.addNode(node)
 
   const plant: PlantAsset = {
     id: plantId,

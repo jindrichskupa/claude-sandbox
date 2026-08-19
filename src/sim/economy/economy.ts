@@ -47,6 +47,17 @@ export interface PeriodLedger {
   tax: number
   /** A levy on revenue earned above a political price threshold. */
   windfallLevy: number
+  /**
+   * What the owner took out of the business this year.
+   *
+   * On its own line rather than folded into tax, because it is the opposite kind of thing: tax is
+   * a cost imposed on the utility, a dividend is the utility's *purpose* from its owner's side.
+   * The regulated tariff already contains an allowed return on the capital employed — that return
+   * is the shareholder's money and a real utility distributes it. Without this line it stayed in
+   * the company for ever, and a utility that failed every objective it was given still ended the
+   * scenario with thirty billion euros in the bank.
+   */
+  dividend: number
   /** Payment for keeping firm capacity available, where a capacity market exists. */
   capacityIncome: number
   /**
@@ -88,6 +99,7 @@ export function emptyLedger(): PeriodLedger {
     insurancePremium: 0,
     tax: 0,
     windfallLevy: 0,
+    dividend: 0,
     capacityIncome: 0,
     energySoldMwh: 0,
     energyUnservedMwh: 0,
@@ -116,6 +128,7 @@ export function ledgerProfit(l: PeriodLedger): number {
     l.insurancePremium -
     l.tax -
     l.windfallLevy -
+    l.dividend -
     l.rooftopPurchases
   )
 }
@@ -137,6 +150,7 @@ export function addLedger(into: PeriodLedger, from: PeriodLedger): void {
   into.insurancePremium += from.insurancePremium
   into.tax += from.tax
   into.windfallLevy += from.windfallLevy
+  into.dividend += from.dividend
   into.capacityIncome += from.capacityIncome
   into.rooftopPurchases += from.rooftopPurchases
   into.energySoldMwh += from.energySoldMwh
@@ -691,6 +705,39 @@ export function repayLoan(finances: Finances, loanId: string): number {
 export function chargeCorporateTax(ledger: PeriodLedger, profitBeforeTax: number, rate: number): void {
   if (profitBeforeTax <= 0 || rate <= 0) return
   ledger.tax += profitBeforeTax * rate
+}
+
+/**
+ * The owner's return, taken out of the business.
+ *
+ * ## Why this exists at all
+ *
+ * The regulated tariff is a revenue requirement: what the service cost to provide, plus recovery
+ * of the capital standing behind it, plus a return on that capital. The first two are the
+ * utility's; the third is not. It is the price of having somebody else's money tied up in the
+ * system, and in a real regulated business it leaves every year as a dividend — that is what the
+ * shareholder is there for.
+ *
+ * Nothing took it out, so it accumulated. Measured on Czechia 2015, the utility ran a 33% margin
+ * on revenue — which is right, and close to what the real company earned — and then kept every
+ * euro of it. All five scripted strategies failed the scenario's brief and four of them ended
+ * holding between ten and thirty billion euros. Money could not be lost, so no amount of it meant
+ * anything.
+ *
+ * ## What it does not do
+ *
+ * It is **not** a cost of service and must never appear in `recoverableCosts`. The tariff already
+ * funds the allowed return; charging the dividend back through the tariff as well would let the
+ * player raise everybody's bill by paying themselves, which is a money pump rather than a
+ * regulator.
+ *
+ * It is **not** paid out of a loss, and never borrowed for. A company with no profit pays no
+ * dividend — which is the mechanism by which a bad decade actually hurts, because the owner's
+ * return is the first thing that stops.
+ */
+export function chargeDividend(ledger: PeriodLedger, allowedReturn: number, profitBeforeDividend: number): void {
+  if (allowedReturn <= 0 || profitBeforeDividend <= 0) return
+  ledger.dividend += Math.min(allowedReturn, profitBeforeDividend)
 }
 
 /**

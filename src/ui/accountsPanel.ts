@@ -361,6 +361,10 @@ export class AccountsPanel {
     line('ui.acctInterest', l.interest, 'neg')
     line('ui.acctCapex', l.capex, 'neg')
     line('ui.acctTax', l.tax + l.windfallLevy, 'neg')
+    // Its own line, below the tax and above the total, because it is the last thing to happen to
+    // a year's money and the one the player is most likely to be surprised by: the allowed return
+    // in their tariff belongs to the owner and leaves the company every year.
+    line('ui.acctDividend', l.dividend, 'neg')
 
     const profit = ledgerProfit(l)
     const total = el('div', 'why-step total')

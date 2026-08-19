@@ -40,7 +40,7 @@
  * players — and that is a finding this file can produce and no amount of good intention can.
  */
 
-import { PLANT_TYPES, PLANT_TYPE_IDS, type PlantTypeId } from '@content/plantTypes'
+import { heatCapacityOf, PLANT_TYPES, PLANT_TYPE_IDS, type PlantTypeId } from '@content/plantTypes'
 import { FUELS } from '@content/fuels'
 import { VOLTAGE_LEVELS, type VoltageLevel } from '@content/lineTypes'
 import { isDispatchable, LifecyclePhase } from '@sim/assets/types'
@@ -638,6 +638,47 @@ function plannedCapacityMw(world: World, strategy: Strategy, includeBuilding = t
 }
 
 /**
+ * Heat the fleet can actually put into the mains, in MW thermal.
+ *
+ * Counts cogeneration at its heat rating rather than its electrical one, which is the whole
+ * distinction: a backpressure set worth 110 MW of electricity is worth rather more than that in
+ * heat, and it is the heat side that decides whether a town is warm in February.
+ */
+function heatCapacityMwth(world: World, includeBuilding = true): number {
+  let mwth = 0
+  for (const plant of world.plants) {
+    const rated = heatCapacityOf(plant.typeId)
+    if (rated <= 0) continue
+    if (plant.phase === LifecyclePhase.Building) {
+      if (includeBuilding) mwth += rated
+      continue
+    }
+    if (plant.phase !== LifecyclePhase.Operating) continue
+    mwth += rated
+  }
+  return mwth
+}
+
+/**
+ * Where a heat source would be worth building: a node the mains already reach.
+ *
+ * The one rule that makes heat different from electricity, and it is not a balance decision. A
+ * boiler in a field heats nothing — heat travels down a pipe with losses that make thirty
+ * kilometres a long main, so a heat source is only a heat source if it stands on the network. The
+ * electrical planner may put a station anywhere the ground allows; this one may not.
+ */
+function heatSites(world: World): Array<{ x: number; y: number }> {
+  const out: Array<{ x: number; y: number }> = []
+  for (const node of world.network.allNodes()) {
+    const onTheMains = world.network
+      .edgesOf(node.id)
+      .some((id) => world.network.requireEdge(id).commodity === 'heat')
+    if (onTheMains) out.push({ x: node.x, y: node.y })
+  }
+  return out
+}
+
+/**
  * Play the scenario to its end year.
  *
  * Decisions are taken once a month, which is roughly how often a utility's board meets and is
@@ -651,6 +692,11 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
   const retired: string[] = []
 
   let peakDemandMw = 0
+  // The heat peak is tracked separately and for a different reason. Electrical demand peaks on a
+  // cold, dark evening; heat peaks in a February morning and is not negotiable — a town that is
+  // not warm is not a brownout, it is a lost scenario. So the two are never traded against each
+  // other and never summed.
+  let peakHeatMwth = 0
   let lastDecisionMonth = -1
 
   while (world.date.year < untilYear && !world.finances.bankrupt) {
@@ -658,6 +704,8 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
     options.onTick?.()
     const demand = world.lastDispatch?.totalDemandMw ?? 0
     if (demand > peakDemandMw) peakDemandMw = demand
+    const heatDemand = world.lastHeat?.totalHeatDemandMw ?? 0
+    if (heatDemand > peakHeatMwth) peakHeatMwth = heatDemand
 
     const date = world.date
     if (date.month === lastDecisionMonth) continue
@@ -669,6 +717,54 @@ export function playScenario(world: World, options: PlayOptions = {}): PlayResul
           `tariff ${Math.round(world.state.regulatedTariffPerMwh)} carbon ${Math.round(world.state.carbonPricePerTonne)} ` +
           `gov ${world.state.policyRegimeId}`,
       )
+    }
+
+    // 0. Keep the heat on, before anything else.
+    //
+    //    Heat came first in the dispatch and last in this planner, which is why every archetype
+    //    failed the heat objective on every scenario that has a heat network: they could not build
+    //    a boiler, could not see a heat shortfall, and watched an inherited backpressure fleet from
+    //    the 1950s die of old age without replacing any of it. A harness that cannot keep a town
+    //    warm is measuring an impossible strategy rather than a hard scenario.
+    //
+    //    Three things make this decision different from the electrical one below, and all three
+    //    are physical rather than tuned:
+    //
+    //    - **It is not optional.** Electricity not delivered is a penalty and a bad year; heat not
+    //      delivered in February is a failed scenario outright. So there is no "if the lights can
+    //      spare it" clause and no ranking on principle — the cheapest thing that makes heat wins.
+    //    - **It has to stand on the mains.** See `heatSites`.
+    //    - **Every archetype does it, including the one that will not own a flue.** That is a
+    //      limitation of the catalogue and not a thumb on the scale: the only heat sources this
+    //      game has are a gas boiler and two kinds of cogeneration, all of which burn something.
+    //      Give it an electric boiler or a heat pump and a green utility could heat a town without
+    //      one; until then, refusing to build any heat source is refusing to heat the town.
+    const heatTarget = peakHeatMwth * reserve
+    if (heatTarget > 0 && heatCapacityMwth(world) < heatTarget) {
+      const sites = heatSites(world)
+      let heatChoice: { typeId: PlantTypeId; site: { x: number; y: number }; cost: number } | null = null
+      for (const typeId of PLANT_TYPE_IDS) {
+        if (heatCapacityOf(typeId) <= 0) continue
+        if (PLANT_TYPES[typeId].availableFromYear.value > date.year) continue
+        // Cost per thermal megawatt, which is the question being asked. Ranking heat plant on
+        // cost per *electrical* megawatt-hour is what kept cogeneration off every shortlist: a
+        // backpressure set is expensive electricity and cheap heat, and the shortage is of heat.
+        const capex = world.params.getOr(`quote:${typeId}`, Param.CapexPerKw, PLANT_TYPES[typeId].capexPerKw.value)
+        const perMwth = (capex * 1000 * PLANT_TYPES[typeId].capacityMw.value) / heatCapacityOf(typeId)
+        if (heatChoice && perMwth >= heatChoice.cost) continue
+        for (const site of sites) {
+          if (!quotePlant(world, typeId, site.x, site.y).ok) continue
+          heatChoice = { typeId, site, cost: perMwth }
+          break
+        }
+      }
+      if (heatChoice) {
+        const result = beginPlantConstruction(world, heatChoice.typeId, heatChoice.site.x, heatChoice.site.y)
+        if (result.ok) {
+          built.push(`${date.year}: ${heatChoice.typeId} for heat`)
+          continue
+        }
+      }
     }
 
     // 1. Retire what has run past its design life — but only if the lights can spare it.

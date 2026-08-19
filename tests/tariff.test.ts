@@ -37,8 +37,8 @@ import { FIRST_REGION } from '@content/scenarios/firstRegion'
 import { TICKS_PER_YEAR } from '@sim/core/time'
 import { LifecyclePhase } from '@sim/assets/types'
 import { mothballPlant } from '@sim/build/commands'
-import { ledgerProfit } from '@sim/economy/economy'
-import { rateBase } from '@sim/economy/tariff'
+import { chargeDividend, emptyLedger, ledgerProfit } from '@sim/economy/economy'
+import { rateBase, recoverableCosts, REGULATION } from '@sim/economy/tariff'
 import { applyOverhaul } from '@sim/assets/aging'
 import { PLANT_TYPES } from '@content/plantTypes'
 
@@ -192,5 +192,66 @@ describe('the cash the player is shown', () => {
     expect(world.liveCash).not.toBe(liveStart)
     // And it is the settled balance plus whatever the open month has accrued, exactly.
     expect(world.liveCash).toBeCloseTo(world.finances.cash + ledgerProfit(world.openLedger), 6)
+  })
+})
+
+/**
+ * The owner's return, and why it has to leave.
+ *
+ * The tariff is a revenue requirement: costs, plus recovery of the capital standing behind the
+ * system, plus a return on that capital. The first two belong to the utility and the third does
+ * not — it is the price of somebody else's money being tied up, and in a real regulated business
+ * it is distributed every year. Nothing took it out, so it accumulated: all five scripted
+ * strategies failed the Czech 2015 brief and four of them finished holding between ten and thirty
+ * billion euros. Money that cannot be lost makes every decision about it meaningless.
+ */
+describe('the dividend', () => {
+  it('takes the allowed return out of the business, and no more', () => {
+    const ledger = emptyLedger()
+    chargeDividend(ledger, 500e6, 800e6)
+    expect(ledger.dividend).toBe(500e6)
+
+    // Never more than the year actually made: a dividend is paid out of profit, not borrowed for.
+    const thin = emptyLedger()
+    chargeDividend(thin, 500e6, 120e6)
+    expect(thin.dividend).toBe(120e6)
+  })
+
+  it('is not paid out of a loss, which is how a bad decade is allowed to hurt', () => {
+    const ledger = emptyLedger()
+    chargeDividend(ledger, 500e6, -200e6)
+    expect(ledger.dividend).toBe(0)
+  })
+
+  it('is never recovered through the tariff, or the player could pay themselves', () => {
+    // The trap this guards. The allowed return is already inside the revenue requirement; if the
+    // dividend were also a recoverable cost, paying it would raise the tariff, which would fund a
+    // larger dividend. A money pump rather than a regulator — and one line in `recoverableCosts`
+    // away at any time.
+    const ledger = emptyLedger()
+    ledger.fuelCost = 100e6
+    const withoutDividend = recoverableCosts(ledger)
+    ledger.dividend = 400e6
+    expect(recoverableCosts(ledger)).toBe(withoutDividend)
+  })
+
+  it('stops a utility that fails its brief from ending the scenario rich', () => {
+    // The property in one run: a player who does nothing at all still collects the tariff, and the
+    // allowed return inside it has to leave rather than pile up. What is left over is what the
+    // utility earned beyond what the regulator allowed — which for an idle one is not much.
+    const world = buildWorld(FIRST_REGION)
+    for (let i = 0; i < TICKS_PER_YEAR * 3; i++) world.step()
+
+    expect(world.lifetimeLedger.dividend).toBeGreaterThan(0)
+    // And it is bounded by the return the tariff actually allowed, not by whatever was in the till.
+    const base = rateBase(
+      world.plants,
+      [...world.network.allEdges()],
+      () => PLANT_TYPES.coal.capexPerKw.value,
+      world.network.allNodes(),
+      world.tick,
+    )
+    const perYear = world.lifetimeLedger.dividend / 3
+    expect(perYear).toBeLessThanOrEqual(base.capitalEmployed * REGULATION.allowedReturnOnCapital.value * 1.5)
   })
 })
