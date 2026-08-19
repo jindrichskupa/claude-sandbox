@@ -70,25 +70,25 @@
  *
  * All five archetypes to 2050, on the same seed (`scripts/cashLine.ts czechia-2015 <strategy> 2050`):
  *
- *     nuclear     0.76% unserved  0.273 t/MWh  10.3bn cash  3/5 objectives
- *     fossil      1.35%           0.448        30.2bn       2/5
- *     least-cost  3.93%           0.445        27.5bn       2/5
- *     green       5.70%           0.281        19.3bn       2/5
- *     novelty    11.52%           0.478        0, 7.2bn debt 2/5
+ *     nuclear     0.76% unserved  0.273 t/MWh  0 cash, 13.1bn debt  3/5 objectives
+ *     fossil      1.35%           0.448        6.3bn                2/5
+ *     least-cost  3.92%           0.445        0, 4.1bn debt        2/5
+ *     green       5.72%           0.282        0, 3.0bn debt        2/5
+ *     novelty     8.61%           0.477        bankrupt in 2047     0/5
  *
- * Two things to read off that, one good and one a defect elsewhere.
+ * Nobody wins, and every one of them loses on the lights rather than on the money — the fleet dies
+ * faster than a crude planner replaces it, and no amount of cash buys a reactor in under nine
+ * years. That is the scenario working, and it is the reason this date exists: 1995's utilities
+ * mostly died insolvent, and starting in the year the bill comes due moves the failure from the
+ * balance sheet to the system.
  *
- * The good one: **the pressure here is physical, not financial.** Every one of them loses, and every
- * one loses on the lights rather than on the money — the fleet dies faster than a crude planner
- * replaces it, and no amount of cash in the bank buys a reactor in under nine years. That is the
- * scenario working: 1995's bots mostly died insolvent, and starting in the year the bill comes due
- * moves the failure from the balance sheet to the system.
- *
- * The defect: four of the five end debt-free with between 10 and 30 billion, which no utility that
- * failed its brief should. That is not this scenario — it is the regulated tariff paying depreciation
- * on a modern-equivalent rate base out as free cash flow, in every scenario, and it is why the money
- * cannot be lost. Recorded here because a reader comparing these five numbers deserves to know which
- * of them is a finding about Czechia and which is a finding about `sim/economy/tariff.ts`.
+ * An earlier version of this table showed four of the five finishing debt-free with between ten
+ * and thirty billion euros, which no utility that failed its brief should, and said so — the
+ * defect was in `sim/economy/tariff.ts` rather than in this scenario. It has since been fixed
+ * twice over: the rate base is now depreciated by each asset's own age, and the allowed return
+ * leaves the business as a dividend the way a real regulated utility's does. Four of these five
+ * now end owing money and the fifth is bankrupt, while undelivered energy and carbon intensity
+ * moved by hundredths. Which is the shape a correction to the money should have.
  */
 
 import { TEMPERATE_CLIMATE } from '../../sim/weather/weather'
